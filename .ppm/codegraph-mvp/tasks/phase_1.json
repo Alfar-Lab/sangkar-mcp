@@ -92,17 +92,17 @@
         "app/tests/extract.test.ts"
       ],
       "details": {
-        "goal": "One cursor walk driven by the node-type tables that produces nodes, calls, imports, inheritance and unresolved sites.",
-        "contract": "extract.ts exports extractFile(tree, spec, relPath): {nodes: ExtractedNode[], rawEdges: ExtractedEdge[], unresolved: UnresolvedSite[]}. ExtractedNode carries kind (file|module|class|function|method|test|endpoint), name, qn built as relPath::Scope.name, startLine, endLine, signature, isTest, props (decorators, modifiers as JSON). Walk rules: a node matching classTypes emits a class node and pushes it onto the scope stack; functionTypes inside a class emit method nodes, outside emit function nodes; a node matching callTypes emits a rawEdge kind calls with the callee text; importTypes emit kind imports; a node matching inheritanceTypes emits kind inherits when the clause names a class and kind implements when it names an interface, both with tier extracted_candidate and the superclass text as target. Anything inside a call or import that cannot be named goes to unresolved with evidence_kind dynamic. Containment edges are kind contains from the enclosing file or class to every declared node. The file node is always emitted first. references edges are NOT produced here; TASK-016 produces them as inferred. No language-specific if branches other than a documented exception table with at most 3 entries.",
+        "goal": "One cursor walk driven by the node-type tables that produces nodes, calls, imports, inheritance and reference sites.",
+        "contract": "extract.ts exports extractFile(tree, spec, relPath): {nodes, rawEdges, unresolved}. Node kinds: file, module, class, function, method, test, endpoint; each node carries name, qn as relPath::Scope.name, startLine, endLine, signature, isTest, props. Walk rules: classTypes emit a class node and push onto the scope stack; functionTypes inside a class emit method, outside emit function; callTypes emit kind calls; importTypes emit kind imports; inheritanceTypes emit kind inherits when the clause names a class and implements when it names an interface, tier extracted_candidate. VALUE-POSITION REFERENCE SITES ARE PRODUCED HERE: an identifier appearing as a call argument, an assignment right-hand side, an object/array literal element, a decorator argument or a return expression emits a rawEdge kind references with the identifier text as target and tier extracted_candidate; this is what the bind pass resolves so the references group in trace is not permanently empty. Unnameable sites inside calls or imports go to unresolved with evidence_kind dynamic. contains edges run from the enclosing file or class to every declared node. The file node is always first. No language-specific branches beyond a documented exception table of at most 3 entries.",
         "steps": [
           "Write the scope stack and the file and module node emission",
           "Implement classTypes and functionTypes with the method versus function distinction",
-          "Implement callTypes and importTypes producing rawEdges, collecting unresolved sites in the same pass",
-          "Implement inheritanceTypes producing inherits and implements rawEdges",
-          "Emit contains edges for every declared node",
-          "Write tests/extract.test.ts over a Python fixture asserting all six kinds, the qn form and one containment edge per declaration"
+          "Implement callTypes and importTypes collecting unresolved sites in the same pass",
+          "Implement inheritanceTypes producing inherits and implements",
+          "Implement value-position references rawEdges for the six site kinds listed in the contract",
+          "Write tests/extract.test.ts over a Python fixture asserting every kind, the qn form, one inherits edge and at least one references site"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/extract.test.ts. Done when the fixture yields file, class, method and function nodes with the path::Class.method qn form, at least one inherits rawEdge, one contains edge per declaration, and no unresolved entry."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/extract.test.ts. Done when the fixture yields file, class, method and function nodes with the path::Class.method qn form, at least one inherits rawEdge, at least one references rawEdge, one contains edge per declaration, and no unresolved entry."
       },
       "status": "todo",
       "progress": [],
@@ -120,17 +120,17 @@
         "app/tests/resolve.test.ts"
       ],
       "details": {
-        "goal": "Bind calls and imports, and produce the inheritance and reference edges the trace payload groups by.",
-        "contract": "resolve.ts exports bind(units: FileUnit[], index: SymbolIndex): {edges: ResolvedEdge[], unresolved: UnresolvedSite[]}. Binding order for a raw call or import target: exact qn within the same file, then a name visible through that file's imports, then a unique name in the whole index when exactly one node matches, then a superclass method when the receiver's class inherits it, otherwise unresolved with evidence_kind receiver_type_unknown, ambiguous or dynamic. Tiers: extracted for same-file and import evidence, inferred for unique-name and inheritance evidence. In addition to binding calls and imports, this pass EMITS the inheritance and reference edges the payloads depend on: every resolved inherits and implements rawEdge becomes a real edge at tier extracted; each identifier used in value position (passed as an argument, assigned, stored in a table) becomes a references edge at tier inferred when exactly one node matches, and is dropped otherwise. Never emit an edge whose target id does not exist.",
+        "goal": "Bind calls, imports, inheritance and reference sites into real edges, dropping ambiguous references.",
+        "contract": "resolve.ts exports bind(units: FileUnit[], index: SymbolIndex): {edges, unresolved}. Binding order for a call or import target: exact qn in the same file, then a name visible through that file's imports, then a unique name in the whole index, then a superclass method when the receiver's class inherits it, otherwise unresolved with evidence_kind receiver_type_unknown, ambiguous or dynamic. Tiers: extracted for same-file and import evidence, inferred for unique-name and inheritance evidence. THIS PASS ALSO FINALISES THE NON-CALL EDGES: resolved inherits and implements rawEdges become real edges at tier extracted; references rawEdges from the extractor become real edges at tier inferred when exactly one node matches and are DROPPED silently when zero or several match, because a spurious reference is worse than a missing one. tested_by is not produced here; the persist task derives it. Never emit an edge whose target id does not exist.",
         "steps": [
           "Define SymbolIndex construction from units including per-file import tables",
           "Implement the four-step binding order with tiers",
-          "Emit resolved inherits and implements edges at tier extracted",
-          "Emit references edges at tier inferred for value-position identifiers, dropping ambiguous ones",
-          "Route every failure to unresolved with the matching evidence_kind",
-          "Write tests/resolve.test.ts covering same-file, imported, ambiguous, unknown receiver, one inherits edge and one references edge"
+          "Emit resolved inherits and implements at tier extracted",
+          "Resolve references at tier inferred and drop ambiguous or unmatched ones",
+          "Route every call and import failure to unresolved with the matching evidence_kind",
+          "Write tests/resolve.test.ts covering the five binding cases plus inherits and references"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/resolve.test.ts. Done when the five binding cases behave as specified AND the fixture produces at least one resolved inherits edge and one references edge, with no edge emitted for a missing target."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/resolve.test.ts. Done when the five call-binding cases behave as specified, one resolved inherits edge and one resolved references edge exist, an ambiguous reference is dropped rather than emitted, and no edge targets a missing node."
       },
       "status": "todo",
       "progress": [],
@@ -148,17 +148,17 @@
         "app/tests/persist.test.ts"
       ],
       "details": {
-        "goal": "Write one indexed unit set into the stage and make the derived data consistent: metrics, tested_by, FTS, tombstones.",
-        "contract": "persist.ts exports persistUnit(tx, unit, resolved): void writing nodes, edges, unresolved and not_indexed for one file after deleting that file's previous rows by file_id; and finalizeGeneration(tx, {generationId, baseCommit, mode}): {nodes, edges, tombstones} which recomputes node_metrics for touched nodes plus their two-hop neighbourhood (in_degree, out_degree, is_entry, tested_depth, reachable_count only on full publish), updates node_fts_state and the node_fts index by rowid delta, appends a tombstone row for every qn that disappeared, and inserts the generation row plus meta.generation. TESTED_BY DERIVATION IS PART OF THIS TASK: for every node with is_test = 1, follow its outgoing calls edges into non-test nodes and emit a tested_by edge (test to tested symbol) at tier inferred; then set tested_depth = 1 for those targets, 2 for nodes reachable in one further call hop from a tested node, and NULL otherwise, so summary test_gaps is a column read rather than a graph walk. FTS delta falls back to a full rebuild when the delta exceeds 35 percent of node rows. All writes go through the open transaction; no function in this file opens a connection.",
+        "goal": "Write one unit set into the stage and derive metrics, tested_by with an explicit direction decision, FTS and tombstones.",
+        "contract": "persist.ts exports persistUnit(tx, unit, resolved) writing nodes, edges, unresolved and not_indexed for one file after deleting that file's previous rows by file_id; and finalizeGeneration(tx, {generationId, baseCommit, mode}) returning {nodes, edges, tombstones} which recomputes node_metrics for touched nodes plus their two-hop neighbourhood, updates node_fts_state and node_fts by rowid delta, appends a tombstone per disappeared qn, and inserts the generation row plus meta.generation.\nTESTED_BY IS DERIVED HERE, and its direction is a decision that must be recorded in the code: for every node with is_test = 1, follow its outgoing calls edges into non-test nodes and emit tested_by with SOURCE = the test node and TARGET = the tested symbol, tier inferred. That inverts the CRG direction documented in GRAPH-MODEL.md section 4 (there, function to test) and is deliberate: it makes tested_by appear in the queried symbol's inbound group, which is what TOOLS-SPEC.md section 3 renders. Set tested_depth = 1 for those targets, 2 for nodes one further call hop away, NULL otherwise, so summary test_gaps is a column read. FTS delta falls back to a full rebuild above 35 percent of node rows. No function here opens a connection.",
         "steps": [
           "Implement persistUnit with file-scoped delete then insert",
           "Implement degree and tested_depth recomputation for the touched neighbourhood",
-          "Derive tested_by edges from test nodes' outgoing calls at tier inferred",
+          "Derive tested_by as test to symbol at tier inferred, with the direction comment",
           "Implement the FTS delta with the 35 percent rebuild threshold",
-          "Append tombstones for disappeared qns and insert the generation row",
-          "Write tests/persist.test.ts asserting a re-persist replaces rows, leaves one tombstone, and produces tested_by plus tested_depth 1 for a tested function"
+          "Append tombstones and insert the generation row",
+          "Write tests/persist.test.ts asserting a re-persist leaves one tombstone and a tested function has tested_depth 1"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/persist.test.ts. Done when re-persisting an edited fixture deletes the removed symbol, records exactly one tombstone, and a function called by a test node has a tested_by edge and tested_depth 1."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/persist.test.ts. Done when a re-persist deletes the removed symbol, records exactly one tombstone, and a function called by a test node has a tested_by edge whose source is the test node and tested_depth 1."
       },
       "status": "todo",
       "progress": [],
@@ -205,15 +205,15 @@
         "app/tests/index-integration.test.ts"
       ],
       "details": {
-        "goal": "Prove the indexer meets every parser acceptance criterion against oracles that exist in the repo.",
-        "contract": "parser-parity.test.ts indexes code-review-graph/ read-only into a temp data dir and asserts against oracles that actually exist: (a) totals within 5 percent of 13 955 nodes and 130 044 edges as recorded in TOOL-OUTPUTS.md; (b) the by-kind breakdown within 5 percent for the four kinds that file records — File 530, Class 877, Function 5 197, Test 6 351; (c) per-language FILE counts within 5 percent of the CBM architecture capture in TOOL-OUTPUTS.md (python 408, typescript 28, yaml 24, java 4, c 4, cpp 3, rust 3, bash 3, go 2, r 2); per-language NODE counts are not asserted because no oracle records them; (d) at most 1 percent of files may contain any ERROR node; (e) p50 parse time at most 4 ms per file and p95 at most 25 ms per file over at least 200 files; (f) peak RSS during the run at most 1 GB. index-integration.test.ts runs runWorker on the same corpus and asserts one generation row, non-zero unresolved rows, no not_indexed entry with reason unsupported_ext for a supported language, a second run returning 2, and that the reference corpus is unmodified measured with git -C code-review-graph status --porcelain being empty (the repository root ignores that directory, so a plain git status here proves nothing).",
+        "goal": "Prove the indexer meets every acceptance criterion against oracles that exist and are consistent with the MVP language set.",
+        "contract": "parser-parity.test.ts indexes code-review-graph/ read-only into a temp data dir and asserts only oracles that exist and that the 12-language set can actually produce: (a) totals within 5 percent of 13 955 nodes and 130 044 edges recorded in TOOL-OUTPUTS.md; (b) by-kind within 5 percent for four CRG kinds, with one stated mapping rule — CRG Function is compared against our function UNION method, because CRG has no separate Method kind; the other three are File 530, Class 877, Test 6 351; (c) per-language FILE counts within 5 percent restricted to the 12 supported languages (python 408, typescript 28, java 4, c 4, cpp 3, rust 3, go 2), and an explicit assertion that yaml, bash and r files appear in not_indexed with reason unsupported_ext — they are outside the MVP language set, so asserting counts for them would be asserting zero; (d) at most 1 percent of files may contain any ERROR node; (e) p50 parse at most 4 ms per file and p95 at most 25 ms over at least 200 files; (f) peak RSS at most 1 GB. index-integration.test.ts runs runWorker on the same corpus and asserts one generation row, non-zero unresolved rows, no not_indexed entry with reason unsupported_ext for a supported language, a second run returning 2, and the corpus unmodified measured by git -C code-review-graph status --porcelain being empty (the root repository ignores that directory, so a root git status proves nothing).",
         "steps": [
-          "Write tests/parser-parity.test.ts with the totals, by-kind, per-language file, ERROR, timing and RSS assertions",
+          "Write tests/parser-parity.test.ts with the totals, mapped by-kind, restricted per-language file, unsupported_ext, ERROR, timing and RSS assertions",
           "Write tests/index-integration.test.ts with the generation, unresolved, idempotence and corpus-clean assertions",
           "Run both against code-review-graph/ and record the measured numbers",
           "Confirm the corpus is unmodified using git -C code-review-graph status --porcelain"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/parser-parity.test.ts tests/index-integration.test.ts. Done when all assertions pass, RSS stayed under 1 GB, and the measured timing plus by-kind counts are written to the progress log as evidence."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/parser-parity.test.ts tests/index-integration.test.ts. Done when all assertions pass, RSS stayed under 1 GB, and the measured timing plus the mapped by-kind counts are recorded in the progress log."
       },
       "status": "todo",
       "progress": [],

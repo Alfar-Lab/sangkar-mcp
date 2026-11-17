@@ -17,10 +17,10 @@
         "contract": "manifest.ts exports manifest {name:'status', description: the verbatim text from TOOLS-SPEC.md section 2, profile:'agent'} and input {paths: array of string optional, budget: integer default 800}. handler.ts exports handle(ctx, args) returning handle(env) built only via constructors from #shared/envelope and sized only via #shared/budget emit. Reads: meta for project_name, project_root, generation, indexed_at, indexer_state, consecutive_failures; latest generation row; file rows plus not_indexed rows for each requested path using prefix ranges; census by language derived from file.parse_status and not_indexed.language. Payload keys exactly: project{name,root,commit,db_path}, graph{nodes,edges,size_bytes,db_path}, languages[{language,files,parsed,failed,note?}], paths[{path,indexed,symbols?,sha256?,reason?}], health{indexer,last_publish_ms,consecutive_failures}. A requested path with no file row and no not_indexed row must appear with indexed:false and reason not_indexed_unknown. This tool owns no other module and imports only #shared/*.",
         "steps": [
           "Write manifest.ts with the description and input schema",
-          "Write handler.ts reading meta, generation, file and not_indexed",
+          "Write handler.ts reading meta, generation, file and not_indexed through ctx.reader",
           "Build the languages census merging file rows and not_indexed rows",
           "Build the per-path result including the unknown-path case",
-          "Write handler.test.ts against a fake reader covering complete coverage, a skipped path and an unknown path"
+          "Write tests/tools-status.test.ts against a fake reader covering complete coverage, a skipped path and an unknown path"
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-status.test.ts && $HOME/.bun/bin/bun x tsc --noEmit. Done when the three cases return status ok, the envelope has all nine fields, and a grammar-unavailable language appears with parsed 0 and a note."
       },
@@ -64,16 +64,17 @@
         "app/tests/tools-summary.test.ts"
       ],
       "details": {
-        "goal": "The hottest path: a few hundred tokens that say what changed, how risky it is and what to call next.",
-        "contract": "manifest.ts exports manifest {name:'summary', description verbatim from TOOLS-SPEC.md section 4, profile:'agent'} and input {scope: enum change|repo|area default change, target: string optional, base: string optional defaulting to the generation base_commit, budget: integer default 1200, cursor: string optional}. handler.ts dispatches on scope and must not compute repo or area aggregates on the change path. change payload keys: base, changed_files[], changed_symbols[{id,qn,kind,change,lines,risk}], risk{score,band,drivers[]}, test_gaps[{qn,reason}], removed_symbols[], suggested_next[{tool,query?,why}]. repo payload keys: size{files,nodes,edges}, languages[], entry_points[{qn,kind,reachable}], coupling_hotspots[{qn,in,out}], flows[{name,steps,files}], not_indexed[]. area payload keys: target, surface[{qn,kind}], dependents_total, risk. risk.drivers are sentences such as 41 dependents or 2 changed symbols without tests, never a bare float.",
+        "goal": "The hottest path: a few hundred tokens that say what changed, how risky it is and what to call next, resumable by cursor.",
+        "contract": "manifest.ts exports manifest {name:'summary', description verbatim from TOOLS-SPEC.md section 4, profile:'agent'} and input {scope: enum change|repo|area default change, target: string optional, base: string optional defaulting to the generation base_commit, budget: integer default 1200, cursor: string optional}. handler.ts FIRST verifies args.cursor when present via ctx.cursor.verify(cursor, {tool:'summary', argsHash, generation}) and returns envelope fail with cursor_invalid, cursor_expired or cursor_mismatch and the hint re-run the original call, never a partial page; on ok it resumes from the decoded position. It then dispatches on scope and must not compute repo or area aggregates on the change path. Payload keys — change: base, changed_files[], changed_symbols[{id,qn,kind,change,lines,risk}], risk{score,band,drivers[]}, test_gaps[{qn,reason}], removed_symbols[], suggested_next[{tool,query?,why}]; repo: size{files,nodes,edges}, languages[], entry_points[{qn,kind,reachable}], coupling_hotspots[{qn,in,out}], flows[{name,steps,files}], not_indexed[]; area: target, surface[{qn,kind}], dependents_total, risk. risk.drivers are sentences, never a bare float. Emit through emit(env, args.budget, {mint: position => ctx.cursor.sign({generation, tool:'summary', argsHash, position})}). Reads come from ctx.reader only: metaFor, latestGeneration, changedSince via the diff module, entryPoints, hotspots, testGaps, removedSymbolsFor.",
         "steps": [
           "Write manifest.ts with the scope enum and the five-argument schema",
-          "Implement the change path using diff changedSince plus metrics for risk",
-          "Implement the repo path using census, entry points by is_entry and hotspots by degree",
-          "Implement the area path using prefix range files and their dependents",
-          "Write handler.test.ts asserting all three scopes return their documented keys and that suggested_next names only real tools"
+          "Implement cursor verify-before-work and resume-from-position",
+          "Implement the change path using the diff module plus risk",
+          "Implement the repo and area paths using census, entryPoints and hotspots",
+          "Implement the test_gaps and removed_symbols reads and wire emit with the mint callback",
+          "Write tests/tools-summary.test.ts asserting the three scopes, a stale generation and a resumed page"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-summary.test.ts. Done when the three scopes return exactly their documented payload keys, the change scope reports driver sentences, and a stale generation sets read_status.stale true without failing the call."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-summary.test.ts. Done when the three scopes return exactly their documented keys, drivers are sentences, a stale generation sets read_status.stale true without failing, and a truncated response's next cursor returns the following page with no duplicates."
       },
       "status": "todo",
       "progress": []
@@ -89,16 +90,16 @@
         "app/tests/tools-search.test.ts"
       ],
       "details": {
-        "goal": "Find a declaration when the caller knows roughly what it is called but not where it lives.",
-        "contract": "manifest.ts exports manifest {name:'search', description verbatim from TOOLS-SPEC.md section 5, profile:'agent'} and input {query: string required, kind: enum function|method|class|file|decorator optional, path: string optional prefix filter, budget: integer default 2000, cursor: string optional}. handler.ts runs an FTS5 MATCH against node_fts through raw sqlite on the injected reader connection (FTS5 is not modeled by Drizzle), joins node and node_metrics for degree, applies the optional kind and path filters, and breaks score ties by in_degree then id so pagination is stable. Payload keys: mode ('bm25' always in MVP), results[{id,qn,kind,file,lines,signature?,degree{in,out},score}]. Payload must report mode bm25 so a caller knows no semantic rerank happened. No source text in results.",
+        "goal": "Find a declaration when the caller knows roughly what it is called, with stable and resumable ordering.",
+        "contract": "manifest.ts exports manifest {name:'search', description verbatim from TOOLS-SPEC.md section 5, profile:'agent'} and input {query: string required, kind: enum function|method|class|file|decorator optional, path: string optional prefix filter, budget: integer default 2000, cursor: string optional}. handler.ts FIRST verifies args.cursor when present via ctx.cursor.verify(cursor, {tool:'search', argsHash, generation}) and returns envelope fail with the cursor code and hint on mismatch, resuming from the decoded position. It then calls ctx.reader.readNodeFts(query, limit) — the reader exposes the FTS5 MATCH because Drizzle cannot model the virtual table — which already orders by bm25 ascending, then in_degree descending, then id ascending, so pagination is stable; apply the optional kind and path filters after the read and keep the documented order. Payload keys: mode ('bm25' in the MVP), results[{id,qn,kind,file,lines,signature?,degree{in,out},score}]. Emit through emit(env, args.budget, {mint: position => ctx.cursor.sign({generation, tool:'search', argsHash, position})}). Never returns source text.",
         "steps": [
           "Write manifest.ts with the description and five-argument schema",
-          "Implement the FTS5 MATCH query through the raw connection with kind and path filters",
-          "Join node_metrics for degree and order by score then in_degree then id",
-          "Set mode to bm25 in the payload",
-          "Write handler.test.ts asserting ranking, the path filter and stable ordering across two identical calls"
+          "Implement cursor verify-before-work and resume-from-position",
+          "Read through ctx.reader.readNodeFts and apply kind and path filters",
+          "Apply degree tie-breaking consistent with the reader ordering and set mode bm25",
+          "Write tests/tools-search.test.ts asserting ranking, the path filter, stable ordering and a resumed page"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-search.test.ts. Done when an exact name ranks first, a path prefix filter excludes everything outside it, and two identical calls return byte-identical result order."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-search.test.ts. Done when an exact name ranks first, a path prefix excludes everything outside it, two identical calls return identical order, and a truncated response's next cursor returns the following page with no duplicates."
       },
       "status": "todo",
       "progress": []
@@ -114,16 +115,17 @@
         "app/tests/tools-impact.test.ts"
       ],
       "details": {
-        "goal": "Say what a change can reach, how far away it is, through which edge, and whether it is tested.",
-        "contract": "manifest.ts exports manifest {name:'impact', description verbatim from TOOLS-SPEC.md section 6, profile:'agent'} and input {paths: array of string optional defaulting to the working-tree diff, base: string optional, depth: integer default 2 min 1 max 4, budget: integer default 2500, cursor: string optional}. handler.ts: change set from args.paths or #shared/domain/diff changedSince; expand inbound from those nodes to depth; attach per node tested_depth and is_entry from node_metrics. Payload keys: changed[{path,symbols,entry_point}], impacted[{id,qn,kind,hop,via,tier,tested,entry_point?}], unmatched_files[{path,reason}], risk{score,band,drivers[]}. A changed file with no nodes must appear in unmatched_files with reason, never be dropped silently. Total relation is gte whenever the impacted list is truncated or unresolved rows exist in scope.",
+        "goal": "Say what a change can reach, how far, through what, and whether it is tested.",
+        "contract": "manifest.ts exports manifest {name:'impact', description verbatim from TOOLS-SPEC.md section 6, profile:'agent'} and input {paths: array optional defaulting to the working-tree diff, base: string optional, depth: integer default 2 min 1 max 4, budget: integer default 2500, cursor: string optional}. handler.ts FIRST verifies args.cursor when present via ctx.cursor.verify(cursor, {tool:'impact', argsHash, generation}) and returns envelope fail with the cursor code and hint on mismatch, resuming from the decoded position. Change set comes from args.paths or the diff module; expand inbound from those nodes to depth; attach tested_depth and is_entry from node_metrics through the reader. Payload keys: changed[{path,symbols,entry_point}], impacted[{id,qn,kind,hop,via,tier,tested,entry_point?}], unmatched_files[{path,reason}], risk{score,band,drivers[]}. A changed file with no nodes must appear in unmatched_files, never vanish. Emit through emit(env, args.budget, {mint: position => ctx.cursor.sign({generation, tool:'impact', argsHash, position})}); total_relation becomes gte whenever the result is truncated or unresolved rows exist in scope.",
         "steps": [
           "Write manifest.ts with the description and five-argument schema",
+          "Implement cursor verify-before-work and resume-from-position",
           "Resolve the change set from paths or the diff and map files to nodes",
-          "Expand inbound to the requested depth attaching hop, via and tier",
-          "Attach tested and entry_point from node_metrics and collect unmatched_files",
-          "Write handler.test.ts covering a clean tree, an explicit path set and a file with no nodes"
+          "Expand inbound attaching hop, via and tier, then tested and entry_point",
+          "Collect unmatched_files and emit through the mint callback",
+          "Write tests/tools-impact.test.ts covering a clean tree, explicit paths, an unmatched file and a resumed page"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-impact.test.ts. Done when a changed markdown file appears in unmatched_files, impacted rows carry hop and via, and a truncated result sets total_relation gte with a next cursor."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-impact.test.ts. Done when a changed markdown file appears in unmatched_files, impacted rows carry hop and via, a truncated result sets total_relation gte with a next cursor, and that cursor returns the following page with no duplicates."
       },
       "status": "todo",
       "progress": []
@@ -147,7 +149,7 @@
           "Implement the kind-to-what inference table and echo what plus why",
           "Implement members, edges and coverage payloads",
           "Implement the source window with sha256 verification and the source_drift flag",
-          "Write handler.test.ts covering inference for three kinds and the drift case"
+          "Write tests/tools-expand.test.ts covering inference for three kinds and the drift case"
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-expand.test.ts. Done when a class target infers members, a method target infers edges, a folder target infers coverage, and a source request on a modified file returns source_drift true with no content."
       },
@@ -209,7 +211,9 @@
         "TASK-023",
         "TASK-024",
         "TASK-025",
-        "TASK-026"
+        "TASK-026",
+        "TASK-029",
+        "TASK-031"
       ]
     },
     {
@@ -222,15 +226,15 @@
       ],
       "details": {
         "goal": "Prove the registered surface behaves as specified against a published database, not a fake reader.",
-        "contract": "tools-smoke.test.ts indexes a small fixture repo through the worker into a temp data dir, then drives the real MCP server over stdio: initialize, tools/list (expect 6 names for the agent profile), then one tools/call per tool with arguments from TOOLS-SPEC.md. Assertions: every response parses as JSON-RPC and carries the nine envelope fields; status reports the generation; summary scope change returns base and risk; trace on a known function returns a resolution block; search ranks the exact name first; impact returns impacted rows or an explicit empty with total_relation eq; expand on a class id returns members; the index tool is absent from the agent profile list. Stdout must contain only JSON-RPC lines. This task owns no source files.",
+        "contract": "tools-smoke.test.ts indexes a small fixture repo through the worker into a temp data dir, then drives the real MCP server over stdio: initialize, notifications/initialized, tools/list (expect 6 names for the agent profile), then one tools/call per AGENT tool with arguments from TOOLS-SPEC.md, then one tools/call index against a second server started with CODEGRAPH_PROFILE=admin. Assertions: every response parses as JSON-RPC and carries the nine required envelope fields; status reports the generation; summary scope change returns base and risk; trace on a known function returns a resolution block; search ranks the exact name first; impact returns impacted rows or an explicit empty with total_relation eq; expand on a class id returns members; the index tool is absent from the agent profile list and present in the admin list. Stdout must contain only JSON-RPC lines. This task owns no source files.",
         "steps": [
           "Write tests/tools-smoke.test.ts driving the stdio server",
           "Index the fixture through the worker before the calls",
-          "Assert tools/list is 6 and every envelope has nine fields",
+          "Assert tools/list is 6 for agent and 7 for admin",
           "Assert per-tool payload keys from TOOLS-SPEC.md",
           "Assert strictly non-JSON stdout lines are zero"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-smoke.test.ts. Done when all seven tools respond within their budgets, the agent profile lists exactly 6, and the non-JSONRPC stdout line count is 0."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-smoke.test.ts. Done when all seven tools respond within their budgets across the two profiles, the agent profile lists exactly 6, the admin profile lists 7, and the non-JSONRPC stdout line count is 0."
       },
       "status": "todo",
       "progress": [],
@@ -242,8 +246,58 @@
         "TASK-024",
         "TASK-025",
         "TASK-026",
-        "TASK-027"
+        "TASK-027",
+        "TASK-029",
+        "TASK-031"
       ]
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "watch.ts exports startWatch(opts: {repoRoot, dataDir, intervalMs default 2000, debounceMs default 500, onSpawn?}): {stop()}. Poll every intervalMs: read git HEAD via git rev-parse HEAD and the working-tree signature via git status --porcelain, plus mtime of tracked files newer than the last generation; when the signature differs from the last observed one, wait debounceMs, re-check, then Bun.spawn bin/codegraph.ts worker and record the exit code. On exit 75 (lock held) log and retry on the next tick without counting a failure. On exit 1 increment an in-memory failure counter and back off to min(intervalMs << failures, 300000). A repository that is not a git checkout degrades to mtime-only detection. Never writes the database itself and never imports the worker module. On stop(), kill a running child and resolve.",
+        "goal": "Keep the graph current without putting the writer in the server process.",
+        "steps": [
+          "Implement the poll loop reading git HEAD and porcelain status with an mtime-only fallback",
+          "Implement the debounce with a re-check before spawning",
+          "Implement Bun.spawn of the worker and exit-code handling including 75",
+          "Implement exponential backoff on failure and cleanup on stop",
+          "Write tests/watch.test.ts with a stubbed spawn covering change detection, debounce and lock retry"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/watch.test.ts. Done when a file change triggers exactly one spawn after the debounce window, an exit 75 does not increment the failure counter, and stop() resolves after killing a running child."
+      },
+      "files": [
+        "app/src/indexer/watch.ts",
+        "app/tests/watch.test.ts"
+      ],
+      "id": "TASK-029",
+      "size": "M",
+      "title": "Watcher: debounced change detection that spawns the worker",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "docs/INSTRUCTIONS.md is one screen and contains, in this order: a start-of-task rule (call summary with scope change), an area rule (summary scope area with target), a lookup rule (trace with one query), a blast-radius rule (impact before edits and before merge), a detail rule (expand next, never large budgets), and an anti-pattern list stating do not call index, do not treat total_relation gte as none, do not use trace to read source, and do not pass a project argument because the repo is bound at startup. It must also state the agent profile has exactly 6 tools and name them. src/shared/instructions.ts exports INSTRUCTIONS_TEXT (the same content as a string), printInstructions(): void writing to stdout only in an explicit CLI mode, and nextToolsFor(tool: string): string[] used by the composition root to populate next_tools. The module lives in shared, not in a new cli layer, so the three-layer layout in plan.constraint_invariant.md stays true. tests/instructions.test.ts asserts the text mentions all six tool names and the four anti-patterns, and that nextToolsFor returns a subset of the six names for all seven tools.",
+        "goal": "Turn the measured adoption lever into a deliverable the composition root can import before registration.",
+        "steps": [
+          "Write app/docs/INSTRUCTIONS.md as the one-screen guide",
+          "Mirror it in src/shared/instructions.ts as INSTRUCTIONS_TEXT",
+          "Implement nextToolsFor with the routing table",
+          "Write tests/instructions.test.ts for names, anti-patterns and the subset rule"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/instructions.test.ts. Done when the text names all six tools and the four anti-patterns, and nextToolsFor returns only real tool names for all seven tools."
+      },
+      "files": [
+        "app/src/shared/instructions.ts",
+        "app/docs/INSTRUCTIONS.md",
+        "app/tests/instructions.test.ts"
+      ],
+      "id": "TASK-031",
+      "size": "M",
+      "title": "Ship the instructions text and nextToolsFor",
+      "status": "todo",
+      "progress": []
     }
   ]
 }

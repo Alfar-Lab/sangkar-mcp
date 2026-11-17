@@ -32,7 +32,7 @@
     },
     {
       "id": "TASK-002",
-      "title": "Kernel: config, structured logging, error codes, root stub",
+      "title": "Kernel: config, structured logging, error codes, path helpers, root stub",
       "agent": "implement",
       "size": "M",
       "files": [
@@ -43,24 +43,24 @@
         "app/src/index.ts"
       ],
       "details": {
-        "goal": "Provide the three kernel modules every other module imports, and a composition-root stub so `bin/codegraph.ts` resolves.",
-        "contract": "config.ts exports type AppConfig and loadConfig(): AppConfig reading env CODEGRAPH_DATA_DIR, CODEGRAPH_REPO_ROOT, CODEGRAPH_PROFILE (default agent) and defaulting dataDir to <repoRoot>/.codegraph; no other module may read process.env. log.ts exports log with debug/info/warn/error writing JSON lines {ts,level,msg,...fields} to stderr only. errors.ts exports class AppError extends Error with code from the closed union: wrong_project_db | unsupported_filesystem | schema_too_new | cursor_invalid | cursor_expired | cursor_mismatch | budget_too_large | bootstrapping | not_found | ambiguous | index_locked | internal, plus toErrorPayload(e). paths.ts exports normalizeRel(p) returning repo-relative forwards-slash with no leading dot-slash, qn(relPath, scope, name) returning relPath::Scope.name, and prefixBounds(p) returning the ONLY correct half-open range for a path prefix: match when path equals p OR (path > p + '/' AND path < p + '0'). The naive form path >= p AND path < p + '0' is forbidden because it also matches siblings such as src-old for prefix src. src/index.ts exports async function main(mode: string, argv: string[]): Promise<number>; for now every mode logs 'not implemented' to stderr and returns 2. No tool registration yet — TASK-027 owns that. Subpath imports only (#shared/config), there is no barrel index.ts in shared.",
+        "goal": "Provide the kernel modules every other module imports, including the config surface that owns every environment read.",
+        "contract": "config.ts exports type AppConfig and loadConfig(): AppConfig with fields dataDir, repoRoot, profile (from CODEGRAPH_PROFILE, default agent), cursorKey (from CODEGRAPH_CURSOR_KEY) and budgets; no other module may read process.env — the cursor module receives cursorKey through config, it must not read the env itself. log.ts exports log with debug/info/warn/error writing JSON lines {ts,level,msg,...fields} to stderr only. errors.ts exports class AppError extends Error with code from the closed union: wrong_project_db | unsupported_filesystem | schema_too_new | cursor_invalid | cursor_expired | cursor_mismatch | budget_too_large | bootstrapping | not_found | ambiguous | index_locked | internal, plus toErrorPayload(e). paths.ts exports normalizeRel(p) returning repo-relative forwards-slash with no leading dot-slash, qn(relPath, scope, name) returning relPath::Scope.name, and prefixBounds(p) returning the ONLY correct half-open range for a path prefix: match when path equals p OR (path > p + '/' AND path < p + '0'). The naive form path >= p AND path < p + '0' is forbidden because it also matches siblings such as src-old for prefix src. src/index.ts exports async function main(mode: string, argv: string[]): Promise<number>; for now every mode logs 'not implemented' to stderr and returns 2. No tool registration yet. Subpath imports only (#shared/config), there is no barrel index.ts in shared. The src-old prefix assertion lives in TASK-011's contract test, not here.",
         "steps": [
-          "Write config.ts with the AppConfig type and env-driven loadConfig including CODEGRAPH_PROFILE",
+          "Write config.ts with AppConfig including profile and cursorKey, and env-driven loadConfig",
           "Write log.ts emitting JSON lines to stderr",
           "Write errors.ts with the AppError class and the closed code union",
           "Write paths.ts with normalizeRel, qn and the corrected prefixBounds",
           "Write src/index.ts main() stub returning 2 for every mode",
-          "Add a test asserting a log call produces no stdout output and that prefixBounds rejects the src-old sibling"
+          "Confirm no module outside config.ts reads process.env by grepping src for process.env"
         ],
-        "verify": "`cd app && $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun -e 'import {log} from \"#shared/log\"; log.info(\"x\"); process.stdout.write(\"\");' 1>/tmp/out.txt; wc -c </tmp/out.txt` — Done when typecheck exits 0 and /tmp/out.txt is 0 bytes."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun -e 'import {log} from \"#shared/log\"; log.info(\"x\");' 1>/tmp/out.txt; echo exit=$?; wc -c </tmp/out.txt. Done when typecheck exits 0, /tmp/out.txt is 0 bytes, and grep -rn process.env src prints exactly one hit, inside config.ts."
       },
       "status": "todo",
       "progress": []
     },
     {
       "id": "TASK-003",
-      "title": "Envelope, emit() budget chokepoint, signed cursors",
+      "title": "Envelope and the emit() budget chokepoint",
       "agent": "implement",
       "size": "M",
       "files": [
@@ -70,15 +70,15 @@
         "app/tests/budget.test.ts"
       ],
       "details": {
-        "goal": "Implement the single response contract, the single size chokepoint and stateless cursors, so no tool can invent its own shape or size policy.",
-        "contract": "envelope.ts exports type Envelope<T> with NINE REQUIRED fields that are always present — status, summary, read_status, coverage, totals, truncated, truncation_reason, next, next_tools — plus payload:T, plus ONE OPTIONAL field error that is present if and only if status is error or bootstrapping. read_status is {generation, indexed_at, stale, stale_reason?, stale_checked_at?}. coverage is {complete, indexed, skipped, failed, unresolved_edges, not_indexed[]}. totals is {*_total, total_relation: eq|gte}. error is {code, message, hint?, retryable?, retry_after_ms?} — retry_after_ms is what status bootstrapping carries. Constructors ok/ambiguous/notFound/fail/bootstrapping return the full shape and never a partial object.\nbudget.ts exports emit(env, budgetTokens, opts: {mint: (position: number) => string}) which is the ONLY place a payload is truncated: it serialises, measures at 4 bytes per token, drops lowest-ranked items from the largest list until within budget, preserves every *_total, sets truncated, truncation_reason and next via opts.mint (it cannot sign a cursor itself), and DOWNGRADES totals.total_relation from eq to gte whenever it truncates, because only emit knows truncation happened. It refuses budgetTokens above 32000 with AppError code budget_too_large rather than truncating silently.\nCursor signing is TASK-036; this task only calls the injected mint callback. No source file in shared may construct an Envelope literal outside envelope.ts.",
+        "goal": "Freeze the response contract and the single size chokepoint.",
+        "contract": "envelope.ts exports type Envelope<T> with NINE REQUIRED fields always present — status, summary, read_status, coverage, totals, truncated, truncation_reason, next, next_tools — plus payload:T, plus ONE OPTIONAL error present if and only if status is error or bootstrapping. read_status is {generation, indexed_at, stale, stale_reason?, stale_checked_at?}. coverage is {complete, indexed, skipped, failed, unresolved_edges, not_indexed[]}. totals is {*_total, total_relation: eq|gte}. error is {code, message, hint?, retryable?, retry_after_ms?}. Constructors ok/ambiguous/notFound/fail/bootstrapping return the full shape, never a partial object.\nbudget.ts exports emit(env, budgetTokens, opts: {mint: (position: number) => string}) — the ONLY place a payload is truncated: serialise, measure at 4 bytes per token, drop lowest-ranked items from the largest list until within budget, preserve every *_total, set truncated, truncation_reason and next via opts.mint, and DOWNGRADE totals.total_relation from eq to gte when it truncates. Refuse budgetTokens above 32000 with AppError budget_too_large.\nSigning is not in this task: callers pass the mint callback. No source file in shared may construct an Envelope literal outside envelope.ts.",
         "steps": [
-          "Write envelope.ts with the nine required fields, the conditional error field and stale_checked_at in read_status",
+          "Write envelope.ts with the nine required fields, the conditional error and stale_checked_at",
           "Write budget.ts with ranking-aware truncation, the mint callback, the gte downgrade and the 32000 ceiling",
-          "Write tests/envelope.test.ts asserting the nine required fields on all constructors and error presence only for error and bootstrapping",
-          "Write tests/budget.test.ts as the property test plus the gte downgrade, the mint-called-once case and the ceiling"
+          "Write tests/envelope.test.ts asserting nine required fields on all constructors and error presence only for error and bootstrapping",
+          "Write tests/budget.test.ts as the property test plus the gte downgrade, mint-called-once and ceiling cases"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/envelope.test.ts tests/budget.test.ts. Done when both files pass, the property test reports 0 violations, a truncated payload shows total_relation gte with next set from the mint callback, and budget 40000 returns budget_too_large."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/envelope.test.ts tests/budget.test.ts. Done when both files pass, the property test reports 0 violations, a truncated payload shows total_relation gte with next from the mint callback, and budget 40000 returns budget_too_large."
       },
       "status": "todo",
       "progress": []
@@ -92,16 +92,16 @@
         "app/tests/boundary.test.ts"
       ],
       "details": {
-        "goal": "Make module isolation a test failure instead of a review comment.",
-        "contract": "Test walks every .ts under app/src and app/tests with `new Bun.Transpiler({loader:\"ts\"}).scan(source)`, then asserts: files under src/tools/<a>/** may import only \"#shared/*\" and \"./\" siblings inside the same tool; files under src/indexer/** likewise \"#shared/*\" plus local siblings; files under src/shared/** must not import \"#tools\" or \"#indexer\" or \"../tools\"/\"../indexer\"; the specifier \"drizzle-orm\" may appear only in files under src/shared/store/**; no file outside src/ may be scanned. Failure message must name the offending file, the import path and the rule broken. The test must pass on the empty tree of this phase (it will only find src/index.ts, config.ts, log.ts, errors.ts).",
+        "goal": "Make module isolation, including the composition root's privileges, a test failure instead of a review comment.",
+        "contract": "Test walks every .ts under app/src and app/tests with new Bun.Transpiler({loader:\"ts\"}).scan(source) and asserts five rules: (1) files under src/tools/<a>/** import only #shared/* plus ./ siblings inside the same tool; (2) files under src/indexer/** import only #shared/* plus local siblings; (3) files under src/shared/** never import #tools, #indexer, ../tools or ../indexer; (4) the specifier drizzle-orm appears only in files under src/shared/store/**; (5) THE ROOT RULE — src/index.ts may import #shared/*, ./indexer/* and ./tools/*/manifest, and no other file may import src/tools/**/*/handler or src/indexer/**. Failure messages name the offending file, import path and rule. The test must pass on the current tree (src/index.ts, config.ts, log.ts, errors.ts, paths.ts).",
         "steps": [
-          "Enumerate .ts files with a recursive read of app/src and app/tests",
-          "Scan each with Bun.Transpiler().scan() to get import paths",
-          "Implement the rule table for tools/indexer/shared",
+          "Enumerate .ts files under app/src and app/tests",
+          "Scan each with Bun.Transpiler().scan() for import paths",
+          "Implement the five rules including the root rule",
           "Add the drizzle-orm location assertion",
-          "Add a self-check that a synthetic violating source string fails the checker"
+          "Add a self-check proving a synthetic violating import is rejected"
         ],
-        "verify": "`cd app && $HOME/.bun/bin/bun test tests/boundary.test.ts` — Done when the test passes, and the included self-check proves a string importing \"../trace/handler\" from a tool directory is rejected."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/boundary.test.ts. Done when the suite passes on the current tree and the self-check rejects a synthetic tool-to-tool import and a synthetic non-root indexer import."
       },
       "status": "todo",
       "progress": []
@@ -231,15 +231,15 @@
       ],
       "details": {
         "goal": "Typed read primitives for nodes, edges, metrics and coverage, built on the prepared-statement cache.",
-        "contract": "Each file exports domain row types (never Drizzle inferSelect types across the boundary) and functions: nodes.ts findByQn(conn, qn), findByName(conn, name, kinds), members(conn, parentId), nodesByFile(conn, fileId); edges.ts inbound(conn, ids, kinds), outbound(conn, ids, kinds); metrics.ts metricsFor(conn, ids) returning in_degree, out_degree, is_entry, tested_depth, reachable_count; coverage.ts rowsForPaths(conn, paths) and unresolvedForFiles(conn, fileIds). rowsForPaths uses the corrected prefix rule from #shared/paths prefixBounds: a path matches when it equals the request OR is strictly between request + '/' and request + '0' — never the naive path >= p AND path < p + '0' form, which also matches src-old for prefix src. Read files.ts and the GraphReader aggregate are TASK-034; diff is TASK-035. All queries go through prepared(key, build) from #shared/store/db and are prepared once per shape. No ranking, no limits, no formatting, no envelope construction here. Every function takes a connection handle first so tests can pass a temp DB.",
+        "contract": "Each file exports domain row types (never Drizzle inferSelect types across the boundary) and functions: nodes.ts findByQn, findByName, members, nodesByFile; edges.ts inbound, outbound; metrics.ts metricsFor returning degree, entry and tested_depth; coverage.ts rowsForPaths and unresolvedForFiles. rowsForPaths MUST return both halves the status and expand tools need: the indexed file rows for the prefix AND the not_indexed rows with their reasons, using the corrected prefix rule from #shared/paths prefixBounds (equal, or strictly between p + '/' and p + '0'; never the naive p >= 'x' AND p < p + '0' form that matches src-old for prefix src). The file census, GraphReader and ToolContext are owned by the census task; the change-set diff is owned by the diff task. All queries go through prepared(key, build) from #shared/store/db, prepared once per shape. No ranking, limits, formatting or envelope construction. Every function takes a connection handle first.",
         "steps": [
           "Write nodes.ts with qn, name, member and file lookups",
           "Write edges.ts with directional lookups by kind using the composite indexes",
           "Write metrics.ts for degree, entry and tested_depth",
-          "Write coverage.ts including the corrected prefix-range query and unresolved lookup",
-          "Write tests/read.test.ts over a migrated temp DB asserting the prefix rule excludes the src-old sibling"
+          "Write coverage.ts returning both indexed rows and not_indexed rows for a prefix",
+          "Write tests/read.test.ts asserting the prefix rule excludes src-old and the not_indexed half is populated"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read.test.ts. Done when every primitive returns the expected rows for a three-node fixture, and a prefix query for src excludes src-old while including src/a.ts."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read.test.ts. Done when every primitive returns expected rows for a three-node fixture, a prefix query for src includes src/a.ts and excludes src-old, and the same query returns a not_indexed entry for a skipped file."
       },
       "status": "todo",
       "progress": [],
@@ -250,7 +250,7 @@
     },
     {
       "id": "TASK-010",
-      "title": "Domain functions: resolve, neighbors, coverage assembly, risk, diff",
+      "title": "Domain functions: resolve, neighbors, coverage assembly, risk",
       "agent": "implement",
       "size": "M",
       "files": [
@@ -261,8 +261,8 @@
         "app/tests/domain.test.ts"
       ],
       "details": {
-        "goal": "Encode the three contracts that must exist once and never be reinvented per tool: resolution with ambiguity, grouped neighbour expansion, absence assembly, and the risk formula.",
-        "contract": "resolve.ts: resolve(conn, query, kinds) returns {status: ok, node} | {status: ambiguous, candidates up to 5 with qn, kind, file, lines, score, why} | {status: not_found, near_misses}. It must never pick when 2 or more candidates tie; detection order is exact qn, exact name plus kind, dotted tail, path, then @decorator treated as a property filter. neighbors.ts: expand(conn, seedIds, {direction, depth<=4, kinds}) returns groups keyed by edge kind and tier, each item carrying id, qn, kind, file, line, hop, external flag; intentionally unbounded, no truncation. coverage.ts: assemble(conn, scope) returns coverage, unresolved rows, and relation which is eq only when complete, unresolved is empty for the scope and the generation is fresh; otherwise gte. risk.ts: score(changed, impacted) returns score, band and drivers as sentences.\nThe change-set diff function lives in TASK-035 (domain/diff.ts); this task must not duplicate it. tests/domain.test.ts covers the ambiguity refusal and the eq-versus-gte matrix using a fake GraphReader, not a database.",
+        "goal": "Encode the four contracts that must exist once and never be reinvented per tool.",
+        "contract": "resolve.ts: resolve(conn, query, kinds) returns ok with node, or ambiguous with up to 5 candidates carrying qn, kind, file, lines, score and why, or not_found with near_misses. Never pick when two or more candidates tie; detection order is exact qn, exact name plus kind, dotted tail, path, then @decorator treated as a property filter. neighbors.ts: expand(conn, seedIds, {direction, depth<=4, kinds}) returns groups keyed by edge kind and tier, items carrying id, qn, kind, file, line, hop and external; unbounded by design. coverage.ts: assemble(conn, scope) returns coverage, unresolved rows and relation, which is eq only when complete, unresolved is empty for the scope and the generation is fresh. risk.ts: score(changed, impacted) returns score, band and drivers as sentences. The change-set diff function is owned by the diff task; this task must not duplicate it. tests/domain.test.ts uses a fake GraphReader, not a database.",
         "steps": [
           "Write resolve.ts with the ambiguity contract and the kind inference order",
           "Write neighbors.ts producing grouped-by-kind-and-tier output with hop and external flags",
@@ -270,7 +270,7 @@
           "Write risk.ts producing driver sentences, not a bare number",
           "Write tests/domain.test.ts against a fake GraphReader for ambiguity and the eq/gte matrix"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/domain.test.ts. Done when a two-candidate tie returns ambiguous with 2 candidates, coverage returns gte whenever an unresolved row exists in scope, and risk returns at least one driver sentence."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/domain.test.ts. Done when a two-candidate tie returns ambiguous with two candidates, coverage returns gte whenever an unresolved row exists in scope, and risk returns at least one driver sentence."
       },
       "status": "todo",
       "progress": [],
@@ -345,18 +345,20 @@
     {
       "agent": "implement",
       "details": {
-        "contract": "read/files.ts exports fileByPath(conn, path), allFiles(conn), censusByLanguage(conn) returning language, files, parsed, failed — the fields the status payload needs, merging not_indexed rows for files that were skipped. read/reader.ts exports the GraphReader interface that every tool receives through ToolContext, aggregating the primitives from TASK-009 plus these: {findByQn, findByName, members, nodesByFile, inbound, outbound, metricsFor, rowsForPaths, unresolvedForFiles, fileByPath, allFiles, censusByLanguage} and readNodeFts(conn, matchQuery) for the FTS5 MATCH that Drizzle cannot model. It also exports makeReader(conn): GraphReader so handlers are unit-testable against a fake implementing the interface alone. No tool may import the concrete reader; tests implement the interface directly.",
-        "goal": "Own the two things phase 2 depends on: the file census primitives and the GraphReader interface every tool is written against.",
+        "contract": "read/files.ts exports fileByPath(conn, path), allFiles(conn), censusByLanguage(conn) returning language, files, parsed, failed — merging not_indexed rows for skipped files. read/context.ts exports the ToolContext interface {reader: GraphReader, cursor: CursorFacade, log, now: () => Date, config: AppConfig} and the CursorFacade interface {verify(token, {tool, argsHash, generation}), sign(payload)}; every handler signature is handle(ctx: ToolContext, args) and no handler may import it from the root. read/reader.ts exports the GraphReader interface aggregating: findByQn, findByName, members, nodesByFile, inbound, outbound, metricsFor, rowsForPaths, unresolvedForFiles, fileByPath, allFiles, censusByLanguage, metaFor(conn) returning project_name, project_root, generation, indexed_at, indexer_state, consecutive_failures, latestGeneration(conn), removedSymbolsFor(conn, sinceGeneration), entryPoints(conn, limit), hotspots(conn, limit), testGaps(conn, ids) reading node_metrics.tested_depth, and readNodeFts(conn, matchQuery, limit) which returns rows {id, qn, kind, file, lines, score} ordered by bm25 score ascending then in_degree descending then id ascending, so callers can paginate stably. Also exports makeReader(conn): GraphReader.",
+        "goal": "Own the GraphReader surface, the ToolContext type and the file census every tool depends on.",
         "steps": [
           "Write read/files.ts with fileByPath, allFiles and censusByLanguage merging not_indexed",
-          "Write read/reader.ts with the GraphReader interface and makeReader(conn)",
-          "Include readNodeFts in the interface using raw sqlite MATCH",
-          "Write tests/read-files.test.ts asserting the census merges skipped files and that a fake GraphReader satisfies the interface"
+          "Write read/context.ts with ToolContext and CursorFacade",
+          "Write read/reader.ts with the full interface, including meta, generation, tombstones, entry points, hotspots, testGaps and the readNodeFts ordering contract",
+          "Implement makeReader(conn) wiring the primitives",
+          "Write tests/read-files.test.ts asserting the census merges skipped files, that a fake satisfies GraphReader, and that readNodeFts ordering matches the contract"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read-files.test.ts. Done when the census reports parsed and failed counts for a two-language fixture and a hand-written fake object typechecks as GraphReader."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read-files.test.ts. Done when the census reports parsed and failed counts for a two-language fixture, a hand-written fake typechecks as GraphReader, and a fake ToolContext typechecks without importing the root."
       },
       "files": [
         "app/src/shared/store/read/files.ts",
+        "app/src/shared/store/read/context.ts",
         "app/src/shared/store/read/reader.ts",
         "app/tests/read-files.test.ts"
       ],

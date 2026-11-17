@@ -3,30 +3,6 @@
   "title": "Productization: watcher, freshness, instructions, acceptance",
   "tasks": [
     {
-      "id": "TASK-029",
-      "title": "Watcher: debounced change detection that spawns the worker",
-      "agent": "implement",
-      "size": "M",
-      "files": [
-        "app/src/indexer/watch.ts",
-        "app/tests/watch.test.ts"
-      ],
-      "details": {
-        "goal": "Keep the graph current without putting the writer in the server process.",
-        "contract": "watch.ts exports startWatch(opts: {repoRoot, dataDir, intervalMs default 2000, debounceMs default 500, onSpawn?}): {stop()}. Poll every intervalMs: read git HEAD via git rev-parse HEAD and the working-tree signature via git status --porcelain, plus mtime of tracked files newer than the last generation; when the signature differs from the last observed one, wait debounceMs, re-check, then Bun.spawn bin/codegraph.ts worker and record the exit code. On exit 75 (lock held) log and retry on the next tick without counting a failure. On exit 1 increment an in-memory failure counter and back off to min(intervalMs << failures, 300000). Never writes the database itself and never imports the worker module. On stop(), kill a running child and resolve.",
-        "steps": [
-          "Implement the poll loop reading git HEAD and porcelain status",
-          "Implement the debounce with a re-check before spawning",
-          "Implement Bun.spawn of the worker and exit-code handling including 75",
-          "Implement exponential backoff on failure and cleanup on stop",
-          "Write tests/watch.test.ts with a stubbed spawn covering change detection, debounce and lock retry"
-        ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/watch.test.ts. Done when a file change triggers exactly one spawn after the debounce window, an exit 75 does not increment the failure counter, and stop() resolves after killing a running child."
-      },
-      "status": "todo",
-      "progress": []
-    },
-    {
       "id": "TASK-030",
       "title": "Freshness checks and health reporting on status",
       "agent": "implement",
@@ -37,39 +13,15 @@
         "app/tests/freshness.test.ts"
       ],
       "details": {
-        "goal": "Make staleness a computed, explained value rather than a boolean guess, and surface it on every status answer.",
-        "contract": "freshness.ts exports checkFreshness(conn, repoRoot): {stale, stale_reason?, files_changed_since, checked_at} comparing each indexed file's sha256 against the current bytes and comparing meta project_root against the canonical repo root. stale_reason is one of files_changed, root_mismatch, base_commit_moved, watcher_stalled (indexer_state busy for more than 10 minutes) or none. Also export health(conn): {indexer, last_publish_ms, consecutive_failures, statement_cache_entries}. Update tools/status/handler.ts to include health.statement_cache_entries and to use the freshness module for read_status rather than reading meta directly. Keep the payload keys from TASK-020 unchanged except for the added health field.",
+        "goal": "Make staleness a computed, explained value, reachable through the injected reader.",
+        "contract": "freshness.ts exports checkFreshness(reader, repoRoot) — it takes the injected GraphReader, never a raw connection, because a handler has no connection and a tool must not open one — returning {stale, stale_reason?, files_changed_since, checked_at} by comparing each indexed file's sha256 against current bytes via reader.allFiles and comparing project_root against the canonical repo root via reader.metaFor. stale_reason is one of files_changed, root_mismatch, base_commit_moved, watcher_stalled (indexer_state busy for more than 10 minutes) or none. Also export health(reader) returning {indexer, last_publish_ms, consecutive_failures, statement_cache_entries}. Update tools/status/handler.ts to include health.statement_cache_entries and to take read_status from freshness rather than reading meta directly; keep the payload keys from its first version plus that health field.",
         "steps": [
-          "Write freshness.ts with the sha256 comparison and the four stale reasons",
-          "Add health() exposing statement cache size and failure counters",
-          "Wire status handler to freshness and health",
-          "Write tests/freshness.test.ts covering unchanged, changed, root mismatch and stalled watcher"
+          "Write freshness.ts taking a GraphReader and comparing hashes plus project_root",
+          "Add health(reader) exposing the statement cache size and failure counters",
+          "Wire the status handler to freshness and health and pass staleness into the envelope read_status",
+          "Write tests/freshness.test.ts with a fake reader covering unchanged, changed, root mismatch and stalled watcher"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/freshness.test.ts && $HOME/.bun/bin/bun test tests/tools-status.test.ts. Done when the four stale reasons are each produced by their fixture and the status payload still has its documented keys plus health.statement_cache_entries."
-      },
-      "status": "todo",
-      "progress": []
-    },
-    {
-      "id": "TASK-031",
-      "title": "Ship the instructions text that tells an agent how to use six tools",
-      "agent": "implement",
-      "size": "M",
-      "files": [
-        "app/src/shared/instructions.ts",
-        "app/docs/INSTRUCTIONS.md",
-        "app/tests/instructions.test.ts"
-      ],
-      "details": {
-        "goal": "Turn the measured adoption lever into a deliverable without inventing a fourth module layer.",
-        "contract": "docs/INSTRUCTIONS.md is one screen and contains, in this order: a start-of-task rule (call summary with scope change), an area rule (summary scope area with target), a lookup rule (trace with one query), a blast-radius rule (impact before edits and before merge), a detail rule (expand next, never large budgets), and an anti-pattern list stating do not call index, do not treat total_relation gte as none, do not use trace to read source, and do not pass a project argument because the repo is bound at startup. It must also state the agent profile has exactly 6 tools and name them. src/shared/instructions.ts exports INSTRUCTIONS_TEXT (the same content as a string), printInstructions(): void writing to stdout only in an explicit CLI mode, and nextToolsFor(tool: string): string[] used by the composition root to populate next_tools. The module lives in shared, not in a new cli layer, so the three-layer layout in plan.constraint_invariant.md stays true. tests/instructions.test.ts asserts the text mentions all six tool names and the four anti-patterns, and that nextToolsFor returns a subset of the six names for all seven tools.",
-        "steps": [
-          "Write app/docs/INSTRUCTIONS.md as the one-screen guide",
-          "Mirror it in src/shared/instructions.ts as INSTRUCTIONS_TEXT",
-          "Implement nextToolsFor with the routing table",
-          "Write tests/instructions.test.ts for names, anti-patterns and the subset rule"
-        ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/instructions.test.ts. Done when the text names all six tools and the four anti-patterns, and nextToolsFor returns only real tool names for all seven tools."
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/freshness.test.ts && $HOME/.bun/bin/bun test tests/tools-status.test.ts. Done when all four stale reasons are produced by their fixture and the status payload still has its documented keys plus health.statement_cache_entries."
       },
       "status": "todo",
       "progress": []
@@ -107,14 +59,14 @@
         "app/tests/acceptance.test.ts"
       ],
       "details": {
-        "goal": "Encode the product acceptance criteria plus the two unowned spikes as tests so regressions are caught by CI.",
-        "contract": "acceptance.test.ts indexes the reference corpus code-review-graph/ into a temp data dir and asserts, in one file: (1) every tool response is within its declared default budget plus 10 percent, on real payloads; (2) total_relation eq appears only when coverage.complete is true and no unresolved rows exist in the queried scope, zero exceptions across at least 20 calls; (3) a request touching a not_indexed path returns coverage.complete false and lists the reason; (4) trace p95 under 40 ms, search p95 under 60 ms, summary change p95 under 120 ms over 30 repetitions each; (5) every response carries all nine required envelope fields, and error only when status is error or bootstrapping; (6) the seven tools are the only registered names and the agent profile exposes six; (7) spike S4 — a reader holding an open handle completes a query with unchanged results while a publish renames over the live file; (8) spike S6 — re-measuring the same 1 000 point reads built per call vs prepared must show the prepared path at least 5x faster, proving the no-builder-in-a-loop rule is load-bearing; (9) the statement cache stays at or below its 200-entry cap under 5 000 distinct query shapes. Failing threshold numbers must be printed so the report is actionable.",
+        "goal": "Encode the product acceptance criteria plus the two previously unowned spikes as tests.",
+        "contract": "acceptance.test.ts indexes the reference corpus code-review-graph/ into a temp data dir and asserts: (1) every tool response is within its declared default budget plus 10 percent on real payloads; (2) total_relation eq appears only when coverage.complete is true and no unresolved rows exist in the queried scope, zero exceptions across at least 20 calls; (3) a request touching a not_indexed path returns coverage.complete false and lists the reason; (4) trace p95 under 40 ms, search p95 under 60 ms, summary change p95 under 120 ms over 30 repetitions each; (5) every response carries all nine required envelope fields, and error only when status is error or bootstrapping; (6) the seven tools are the only registered names and the agent profile exposes six; (7) reader-during-publish: a reader holding an open handle completes a query with unchanged results while a publish renames over the live file; (8) prepared-versus-builder: 1 000 identical point reads built per call versus prepared must show the prepared path at least 5x faster; (9) the statement cache stays at or below its 200-entry cap under 5 000 distinct query shapes. Print every failing threshold so the report is actionable.",
         "steps": [
           "Write the fixture indexing step reusing the worker",
           "Implement the budget, coverage, envelope and profile sweeps",
           "Implement the three latency measurements over 30 repetitions",
-          "Add the S4 concurrent-reader-during-publish assertion",
-          "Add the S6 builder-vs-prepared ratio and the statement-cache boundedness assertions",
+          "Add the reader-during-publish assertion",
+          "Add the prepared-versus-builder ratio and the statement-cache boundedness assertions",
           "Record every measured number in the progress log"
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/acceptance.test.ts. Done when all nine assertions pass, p95 values are under 40, 60 and 120 ms, the prepared path is at least 5x faster than the per-call builder, and the cache never exceeds 200 entries."
@@ -122,9 +74,7 @@
       "status": "todo",
       "progress": [],
       "pre_request": [
-        "TASK-029",
         "TASK-030",
-        "TASK-031",
         "TASK-032"
       ]
     }

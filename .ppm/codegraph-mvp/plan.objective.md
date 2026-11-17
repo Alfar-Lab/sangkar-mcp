@@ -39,8 +39,11 @@ CRG breached its own pinned payload budget 3 times on a 530-file repo.
    indexed paths and lists nothing spurious.
 3. All seven tools are callable over MCP stdio (`initialize` → `tools/list` returns 7 → each `tools/call`
    returns the 9-field envelope). `tools/list` on the `agent` profile returns exactly 6.
-4. On the reference corpus: node count per language is within 5 % of CRG's measured counts, `trace` p95
-   < 40 ms, `search` p95 < 60 ms, `summary(change)` p95 < 120 ms.
+4. On the reference corpus: node **totals** and **by-kind** counts are within 5 % of the recorded oracles
+   (CRG `Function` compared against our `function` ∪ `method`, since CRG has no separate Method kind), and
+   **per-language file** counts for the 12 supported languages are within 5 %. Per-language *node* counts
+   are not asserted because no capture records them. `trace` p95 < 40 ms, `search` p95 < 60 ms,
+   `summary(change)` p95 < 120 ms.
 5. Absence invariants hold as tests: `total_relation: "eq"` appears only with complete coverage, no
    unresolved call sites in scope, and a fresh generation.
 6. `tests/boundary.test.ts` fails when a tool imports another tool, and passes otherwise.

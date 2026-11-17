@@ -27,8 +27,9 @@
    publish protocol and typed read primitives — each with tests — before any tool or extractor is written.
    Rationale: the two contracts that failed in the reference servers (payload size, absence honesty) are
    cheapest to get right once, centrally.
-2. **The language layer is data.** An extension map plus four node-type lists per language (class,
-   function, import, call) drive one generic extractor. Adding a language is a table row, not a code path.
+2. **The language layer is data.** An extension map plus five node-type lists per language (class,
+   function, import, call, inheritance) drive one generic extractor. Adding a language is a table row, not a
+   code path.
 3. **The indexer is a separate process** that owns the writer. Tools only ever read a published generation.
    Rationale: a WASM parser panic must not kill the MCP session, and it keeps `tools/` unable to depend on
    the writer.
@@ -66,16 +67,17 @@ cannot be verified without real `unresolved` rows.
 ### phase_2: tools
 
 Deliverable: the seven tool modules, each a private module with manifest, handler and handler test against
-a fake `GraphReader`, plus composition-root registration with the `agent`/`admin` profiles.
+a fake `GraphReader`; the two modules the composition root imports before registration (the watcher and the
+instructions/`nextToolsFor` module); and registration with the `agent`/`admin` profiles, watcher startup,
+signal handlers and `next_tools` wiring.
 
-Barrier because: the tool set must exist and be registered before packaging and acceptance can run; the
-modules are independent of each other, so this phase is a single wide wave.
+Barrier because: the tool set must exist and be registered before packaging and acceptance can run. The
+watcher and instructions live in this phase rather than productization because `src/index.ts` imports them
+statically — a task cannot register a root that imports files created a phase later.
 
 ### phase_3: productization
 
-Deliverable: the watcher and staleness/health reporting, the instructions text that makes an agent call the
-six tools correctly, packaging (compiled binary + npm scripts), and the acceptance gate that encodes
-`DESIGN.md` §14 as tests.
+Deliverable: freshness and health reporting on `status`, packaging (README + a binary smoke that performs a
+real `tools/call`), and the acceptance gate that encodes `DESIGN.md` §14 plus spikes S4 and S6 as tests.
 
-Barrier because: these all observe the finished surface (a tool can only be documented and packaged once it
-exists) and the acceptance gate must run last.
+Barrier because: these observe the finished surface and the acceptance gate must run last.

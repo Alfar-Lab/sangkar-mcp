@@ -9,7 +9,7 @@
 | **Absence envelope turns out to be unimplementable as designed** (e.g. `unresolved` cannot be scoped to a query cheaply). | TASK-010 implements `coverage.assemble` against fixtures first; phase 1 produces real `unresolved` rows; phase 3 TASK-033 turns the invariant into an acceptance test. If scoping proves expensive, add an index on `unresolved(file_id)` before adding a cache. |
 | **Payload budgets drift** as tools add fields — the failure CRG had 3 times. | One chokepoint (`emit`), a property test (TASK-011), and the acceptance test asserting every payload ≤ budget + 10 %. No per-tool ceilings anywhere. |
 | **Drizzle overhead creeps back in** through a query built inside a handler. | Boundary test bans `drizzle-orm` outside `src/shared/store/**`; the prepared-statement cache is the only access path; TASK-033's acceptance run re-measures builder-vs-prepared (spike S6) and fails the gate if the prepared path is not at least 5× faster, so the rule stays load-bearing. |
-| **Indexer memory blow-up** on a large repo (WASM trees retained per file). | Bounded LRU of parsers keyed by language, one file in flight per worker, per-file result released before the next; measure peak RSS in TASK-020. |
+| **Indexer memory blow-up** on a large repo (WASM trees retained per file). | Bounded LRU of parsers keyed by language, one file in flight per worker, per-file result released before the next; peak RSS ≤ 1 GB is asserted in **TASK-019** (criterion f). |
 | **Scope creep into the excluded feature set** (Cypher, communities, wiki, refactor). | `plan.objective.md` §Scope "Out" is explicit; a task proposing one of them is out of plan and must be raised as an open question first. |
 | **Windows/macOS differences** in the publish `rename()` and lock semantics. | MVP targets Linux only (the machine in use). Documented as out of scope; no task should add platform branches. |
 
@@ -37,3 +37,9 @@
   `initialize` ping, which would pass even if the runtime could not resolve grammar WASM files.
 - Distribution order follows `TECH-SPEC.md` §15: npm package first, compiled binary once the grammar set is
   fixed.
+- Packet cross-references ("cursor signing is the cursor task") were added by the audit fixes and violate the
+  self-containment criterion in spirit. They are pointers to owners, not required context, so packets remain
+  executable; if tasks are ever renumbered, re-check them.
+- TASK-001 runs `bun install` in its verify, which is the single explicit exemption from the
+  "no network in verify" rule: it populates `node_modules` once, including the offline grammar set every
+  later task needs.

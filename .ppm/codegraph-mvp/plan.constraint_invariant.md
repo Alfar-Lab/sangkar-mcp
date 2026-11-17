@@ -6,7 +6,13 @@ Rules every task must respect. Violating one is a defect, not a preference.
 
 - Three layers only: `app/src/shared/**` (kernel + engine), `app/src/tools/<name>/**` (private, one per
   tool), `app/src/indexer/**` (writer). `app/src/index.ts` is the composition root and the only module that
-  imports tools.
+  imports tools; it may import `#shared/*`, `./indexer/*` and `./tools/*/manifest`, and no other file may
+  import a tool handler or the indexer. Both halves of that rule are enforced by `app/tests/boundary.test.ts`.
+- Tools never see a connection. Every handler receives `ToolContext {reader, cursor, log, now, config}`
+  from `#shared/store/read/context.ts`, where `reader: GraphReader` is the aggregate interface from
+  `#shared/store/read/reader.ts`. A handler that needs meta, generation, census or FTS results asks the
+  reader; it never opens a database or reads `process.env` (the only `process.env` access is in
+  `#shared/config.ts`, which also supplies `cursorKey` to the cursor module).
 - **A tool module may import `#shared/*` only** (subpaths such as `#shared/envelope`, `#shared/store/read/edges`).
   There is no `src/shared/index.ts` barrel, so the import surface is explicit and every file can be added by
   one task without editing a shared file. No cross-tool imports, ever. Enforced by the `#/imports` resolver
