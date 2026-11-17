@@ -17,6 +17,7 @@ Six decisions, each traceable to a measurement or a design contract.
 | **Whole-file generation, published by rename** | per-row `generation` column | the DB file *is* the generation, atomically swapped. Stamping 14 k nodes and 130 k edges with an epoch doubles write volume to express a fact the file boundary already states |
 | **`unresolved` in its own table** | CRG's dangling edge + `UNRESOLVED` tier; CBM's candidate sidecar | absence semantics (`DESIGN.md` §6) needs four distinct outcomes. A dangling edge cannot answer "I did not look there" |
 | **No `folder` table** | materialised directory tree | a BINARY index on `file.path` serves prefix ranges (`path >= 'a/b/' AND path < 'a/b0'`). A folder table would need maintenance on every publish for one query shape |
+| **Database inside the project (`.codegraph/`)**, not a shared cache | one cache dir keyed by project name + a registry | the file beside the code *is* the project identity, so no registry and no `project` argument exist. CBM spent **12.4 % of its calls on `list_projects`** re-discovering a path slug, and a deleted repo leaves an orphan in a cache. Costs and mitigations in §3.0 |
 | **Denormalised `node_metrics`** | degree computed from `edges` per query | `search` returns `degree{in,out}` for every hit; `summary(repo)` needs hotspots; risk needs `is_entry` and `tested_depth`. N+1 scans of a 130 k-edge table per hit is the alternative |
 | **No source text in the DB** | CRG/CBM both keep source-adjacent text | `expand(what="source")` reads the file from disk, and `file.sha256` already tells us whether the copy is current. Measured demand for source-in-payload was ~0 |
 
@@ -30,8 +31,7 @@ small `props`).
 
 ```mermaid
 erDiagram
-    meta ||--|| project : "single row"
-    project ||--o{ generation : "publishes"
+    meta ||--o{ generation : "points at current"
     generation ||--o{ file : "indexed at"
     file ||--o{ node : "contains"
     file ||--o{ edge : "witnessed at"
@@ -47,12 +47,7 @@ erDiagram
 
     meta {
         text key PK
-        text value
-    }
-    project {
-        int id PK "always 1"
-        text name
-        text root
+        text value "schema_version, generation, project_name, project_root"
     }
     generation {
         text id PK "g-7f3a91"
@@ -136,25 +131,64 @@ erDiagram
 
 ## 3. Proposed DDL
 
+### 3.0 Where the database lives
+
+One database file per project, **inside the project directory**:
+
+```
+<repo-root>/.codegraph/graph.db        <- default
+<repo-root>/.codegraph/graph.db-wal    <- WAL sidecars, never committed
+<repo-root>/.codegraph/graph.db-shm
+<repo-root>/.codegraph/write.lock      <- single-writer flock, outside the DB
+<repo-root>/.codegraph/.gitignore      <- a single `*`, written on first index
+```
+
+Resolution order: `<root>/.codegraph/` → `--data-dir <path>` → `CODEGRAPH_DATA_DIR`.
+
+Rules:
+
+1. **Never modify a tracked file to make the directory ignored.** `.codegraph/.gitignore` containing one
+   `*` makes git ignore everything inside without touching the repo's own `.gitignore`. (CRG converges on
+   exactly this — `incremental.py:631-651`.)
+2. **`.codegraph/` is excluded from discovery**, alongside `.git`. Forgetting this means indexing your own
+   database, which grows every run.
+3. **Refuse to run on a filesystem where WAL cannot work** (NFS, SMB, most FUSE, synced folders). Detect
+   at startup and fail with a message that names `--data-dir`, rather than corrupting a `-wal` file.
+4. **One database per working tree.** A linked `git worktree` gets its own `.codegraph/`, because its
+   files really are different; the answering database is always reported in
+   `status.payload.project.db_path`.
+
+Why in the tree rather than a shared cache dir: the database beside the code *is* the project identity, so
+no registry and no `project` argument is needed (CBM spent 12.4 % of its calls on `list_projects`
+re-discovering a path slug), the graph travels with the repo, and a deleted repo takes its database with
+it instead of leaving an orphan in a cache.
+
 ### 3.1 Identity, generation, health
 
-```sql
--- one row per repository instance; the server binds the repo at startup (DESIGN.md §10.1)
-CREATE TABLE project (
-    id           INTEGER PRIMARY KEY CHECK (id = 1),
-    name         TEXT    NOT NULL,          -- short: basename + 4-char path hash
-    root         TEXT    NOT NULL,          -- absolute, canonicalised
-    created_at   TEXT    NOT NULL
-);
+There is no `project` table. A one-row table with `CHECK (id = 1)` is a smell, and the database's own
+location already supplies most of what it would hold. What must persist is **three keys in `meta`**:
 
--- schema + runtime state. `key` is the only place a schema version lives.
+| key | value | why it cannot be derived |
+|---|---|---|
+| `project_name` | repo basename at first index | display identity; a later rename should not rewrite it |
+| `project_root` | absolute path at first index | the only guard against answering about the wrong tree after a `--data-dir` override, a copied database, or a moved checkout |
+| `created_at` | ISO timestamp | diagnostics |
+
+`project_root` is a *check*, not a lookup: on open it is compared against the database's location and the
+current working directory, and a disagreement becomes `root_mismatch` in `read_status.stale_reason`
+(moved tree) or a hard refusal (unrelated tree) — see §5. CRG carries the same guard as
+`_assert_graph_matches_root`, because people copy databases between checkouts.
+
+```sql
+-- schema, identity and runtime state. `meta` is the only place a schema version lives.
 CREATE TABLE meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 -- keys: schema_version, generation, generation_seq, indexer_state,
 --       last_publish_ms, consecutive_failures, last_stale_check_at,
---       fts_synced (mirror-shape version), embed_dim (NULL when no vectors)
+--       fts_synced (mirror-shape version), embed_dim (NULL when no vectors),
+--       project_name, project_root, created_at
 
 -- publish history; the current generation is meta.generation (eq: MAX(seq))
 CREATE TABLE generation (
@@ -411,6 +445,22 @@ Rules carried over from CBM because they are the ones that survived concurrency:
 - `meta.indexer_state` + `consecutive_failures` are written even on failure, which is what
   `status.health` reports.
 
+On open, before anything else:
+
+```
+resolve data dir  -> read meta.project_root
+compare against   -> canonical(db).parent.parent   and   canonical(cwd)
+  same tree            -> serve
+  moved/copied tree    -> serve, but read_status.stale_reason = "root_mismatch" (the caller is told)
+  unrelated tree       -> refuse: error.code = "wrong_project_db", name both roots, suggest --data-dir
+  unsupported fs       -> refuse: error.code = "unsupported_filesystem"
+  newer schema_version -> refuse: error.code = "schema_too_new"
+```
+
+Serving a graph that belongs to a different tree is the worst failure this design can produce — worse than
+a stale graph, because staleness is disclosed and a mismatched graph is not. Hence a hard refusal rather
+than a warning in the unrelated case.
+
 Delete-on-re-parse is file-scoped, never wholesale: `ON DELETE CASCADE` from `file` would be tempting,
 but a file row survives re-parsing (it is the staleness manifest), so rows are deleted explicitly by
 `file_id`. The cascade is the safety net for rows that outlive their file (deleted files, `index` repair).
@@ -421,7 +471,7 @@ but a file row survives re-parsing (it is the staleness manifest), so rows are d
 
 | Tool call | Query shape | Indexes used |
 |---|---|---|
-| `status()` | `SELECT` from `meta`, `project`, latest `generation`, `GROUP BY language` over `file` + `not_indexed` | `idx_file_language`, `file(path)` |
+| `status()` | `SELECT` from `meta` (identity, generation, health), latest `generation`, `GROUP BY language` over `file` + `not_indexed` | `idx_file_language`, `file(path)` |
 | `status(paths=[p…])` | per path: `file` rows with `path = p` or prefix range; plus `not_indexed` for the same range | `file(path)`, `idx_not_indexed_path` |
 | `trace(q)` — resolve | `node WHERE qn = ?` → else `node WHERE name = ? AND kind IN (…)` | `node(qn)`, `idx_node_name_kind` |
 | `trace(q)` — neighbours | two queries: `edge WHERE dst_id IN (…) AND kind IN (…)` and `edge WHERE src_id IN (…)…`, depth expanded per hop | `idx_edge_dst_kind`, `idx_edge_src_kind` |
@@ -488,6 +538,10 @@ figures for contrast:
 | metrics / tombstones / coverage | ~1 MB | n/a | — |
 | **total** | **~24 MB** | **198 MB** | **115 MB** |
 
+That ~24 MB sits **inside the repository** (§3.0), so it is part of the working tree's disk footprint: it
+shows up in `du`, in backups, and in any tarball of the checkout. 24 MB is tolerable; CRG's 198 MB in the
+same place is not. If a real index ever exceeds ~2 % of repository size, `status.health` should say so.
+
 Targets:
 
 | Metric | Target | Why |
@@ -528,6 +582,8 @@ neighbourhood**; recompute `reachable_count` only on full publish (it is a cold-
 | `folder` tree | prefix range over `file(path)` |
 | `similar_to` / `semantically_related` edges | never queried; CBM caps them at 10/node anyway |
 | a `cursor` table | cursors are signed and stateless (§8) |
+| a `project` table | one DB per project, and the database's location is the identity (§3.0); the three facts that cannot be derived live in `meta` (§3.1) |
+| a repo registry | there is exactly one repository per database file, and the file is inside it |
 
 ## 12. Open schema questions
 
@@ -540,8 +596,17 @@ neighbourhood**; recompute `reachable_count` only on full publish (it is a cold-
    `generation.seq`).
 3. **`import_alias` nodes.** FTS/`trace` benefit from alias nodes, but they inflate node counts. Decide
    after the first real index on a TypeScript monorepo.
-4. **One DB per repo vs one DB with a `repo_id` column.** Current answer: one DB, because the server binds
-   one repo (`DESIGN.md` §10.1) and multi-repo is separate instances. A `repo_id` column would be
-   dead weight on every row and would return us to CBM's `project` parameter.
+4. **One DB per repo vs one DB with a `repo_id` column.** Settled: one database per project, and the file
+   lives inside the project (§3.0). A `repo_id` column would be dead weight on every row, and a shared
+   cache dir would bring back CBM's `project` parameter and its 18 `list_projects` calls.
 5. **`node_metrics.reachable_count` scope.** Only entry points get it. If `summary(area)` wants per-area
    reachability later, this becomes an area-keyed table — not a per-node column.
+6. **Linked worktrees.** Each worktree now gets its own `.codegraph/` (§3.0 rule 4), so N worktrees cost
+   N × ~24 MB and `reachable_count` is computed N times. Acceptable for 1–3 worktrees; if it bites, the
+   alternatives are a shared DB in `$(git rev-parse --git-common-dir)` with a branch-scoped generation
+   table, or a cache-dir override for worktrees only. Do not optimise before it is measured.
+7. **`.codegraph/` directory name.** Fixed for now. Renaming later means a one-time migration that finds
+   the old directory — cheap now, awkward after release.
+8. **Database size inside the tree.** ~24 MB estimated, versus CRG's measured 198 MB in the same place.
+   If a real index exceeds ~2 % of repository size, `status.health` should say so rather than leaving it to
+   `du`.
