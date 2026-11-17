@@ -1,0 +1,317 @@
+{
+  "phase": "phase_0",
+  "title": "Foundation: contracts, schema, publish protocol",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Scaffold the Bun + TypeScript app with the module boundary map",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/package.json",
+        "app/tsconfig.json",
+        "app/.gitignore",
+        "app/biome.json",
+        "app/bin/codegraph.ts"
+      ],
+      "details": {
+        "goal": "Create an installable Bun/TS project whose `package.json#imports` map is the module boundary, plus a CLI entry that dispatches modes without writing to stdout.",
+        "contract": "package.json must contain exactly: {\"name\":\"codegraph-mvp\",\"type\":\"module\",\"private\":true,\"imports\":{\"#shared/*\":\"./src/shared/*\"},\"scripts\":{\"mcp\":\"bun run bin/codegraph.ts\",\"index\":\"bun run bin/codegraph.ts index\",\"status\":\"bun run bin/codegraph.ts status\",\"dev\":\"bun --watch run bin/codegraph.ts\",\"test\":\"bun test\",\"typecheck\":\"tsc --noEmit\",\"lint\":\"biome check src tests bin\",\"build\":\"bun build --compile bin/codegraph.ts --outfile dist/codegraph\",\"db:generate\":\"drizzle-kit generate\"}}.\ndependencies: @modelcontextprotocol/sdk 1.32.2, drizzle-orm 0.45.4, web-tree-sitter 0.27.2, tree-sitter-wasms 0.1.13. devDependencies: typescript ^5.9, @types/bun latest, @biomejs/biome ^2, drizzle-kit 0.31.11.\ntsconfig: strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, verbatimModuleSyntax, moduleResolution bundler, types [\"bun\"], include [\"src\",\"tests\",\"bin\"], paths {\"#shared/*\":[\"./src/shared/*\"]}.\n.gitignore: node_modules, dist, .codegraph, *.db, *.db-wal, *.db-shm, .DS_Store.\nbin/codegraph.ts: `#!/usr/bin/env bun`, parse argv[2] mode: mcp (default) | index | status | worker; delegate to `../src/index.ts` main(mode, argv); on unknown mode print usage to **stderr** and exit 2. Must never write to stdout in worker mode.\nDo not create anything under src/shared/ — TASK-002 owns the kernel.",
+        "steps": [
+          "Create app/package.json with the imports map, scripts and pinned dependencies above",
+          "Create app/tsconfig.json with the strict flags and the #shared/* path mapping",
+          "Create app/.gitignore and app/biome.json (biome: recommended rules, formatter off)",
+          "Create app/bin/codegraph.ts with the mode dispatch and stderr-only usage text",
+          "Run bun install to produce bun.lock",
+          "Run tsc --noEmit to confirm the toolchain works"
+        ],
+        "verify": "`cd app && $HOME/.bun/bin/bun install && $HOME/.bun/bin/bun x tsc --noEmit; echo exit=$?` — Done when `exit=0`, `bun.lock` exists, and `grep -c '\"#shared/\\*\"' app/package.json` prints 1."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-002",
+      "title": "Kernel: config, structured logging, error codes, root stub",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/config.ts",
+        "app/src/shared/log.ts",
+        "app/src/shared/errors.ts",
+        "app/src/index.ts"
+      ],
+      "details": {
+        "goal": "Provide the three kernel modules every other module imports, and a composition-root stub so `bin/codegraph.ts` resolves.",
+        "contract": "config.ts exports `type AppConfig` and `loadConfig(): AppConfig` reading env CODEGRAPH_DATA_DIR, CODEGRAPH_REPO_ROOT and defaulting dataDir to `<repoRoot>/.codegraph`; no other module may read process.env. log.ts exports `log` with debug/info/warn/error writing JSON lines {ts,level,msg,...fields} to **stderr only**. errors.ts exports `class AppError extends Error` with `code` from the closed union: wrong_project_db | unsupported_filesystem | schema_too_new | cursor_invalid | cursor_expired | cursor_mismatch | budget_too_large | bootstrapping | not_found | ambiguous | index_locked | internal, plus `toErrorPayload(e)`. src/index.ts exports `async function main(mode: string, argv: string[]): Promise<number>`; for now every mode logs 'not implemented' to stderr and returns 2. No tool registration yet — TASK-020 owns that. Subpath imports only (`#shared/config`), there is no barrel index.ts in shared.",
+        "steps": [
+          "Write config.ts with the AppConfig type and env-driven loadConfig",
+          "Write log.ts emitting JSON lines to stderr",
+          "Write errors.ts with the AppError class and the closed code union",
+          "Write src/index.ts main() stub returning 2 for every mode",
+          "Add a test asserting a log call produces no stdout output"
+        ],
+        "verify": "`cd app && $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun -e 'import {log} from \"#shared/log\"; log.info(\"x\"); process.stdout.write(\"\");' 1>/tmp/out.txt; wc -c </tmp/out.txt` — Done when typecheck exits 0 and /tmp/out.txt is 0 bytes."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-003",
+      "title": "Envelope, emit() budget chokepoint, signed cursors",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/envelope.ts",
+        "app/src/shared/budget.ts",
+        "app/src/shared/cursor.ts",
+        "app/tests/envelope.test.ts",
+        "app/tests/budget.test.ts"
+      ],
+      "details": {
+        "goal": "Implement the single response contract, the single size chokepoint and stateless cursors, so no tool can invent its own shape or size policy.",
+        "contract": "envelope.ts exports `type Envelope<T>` with exactly the 9 fields status, summary, read_status{generation,indexed_at,stale,stale_reason?}, coverage{complete,indexed,skipped,failed,unresolved_edges,not_indexed[]}, totals{*_total,total_relation:\"eq\"|\"gte\"}, truncated, truncation_reason, next, next_tools, plus payload:T; constructors ok/ambiguous/notFound/fail/bootstrapping — each returns the full shape with defaults, never a partial object.\nbudget.ts exports `emit(env, budgetTokens)` that serialises, measures bytes (4 bytes/token), drops lowest-ranked items from the largest list until within budget, preserves *_total, sets truncated+truncation_reason+next. It must be the only place that truncates.\ncursor.ts exports `sign(payload:{generation,tool,argsHash,position})` and `verify(token,{tool,argsHash,generation})` using HMAC-SHA256 over a key from env CODEGRAPH_CURSOR_KEY (test key allowed); verify returns a discriminated result cursor_invalid | cursor_expired | cursor_mismatch | ok.\n`total_relation` may be \"eq\" only when coverage.complete is true; emit must not change it.\nTests: envelope always has 9 fields; emit never exceeds budget+10% for 500 random payloads; tampered/expired/mismatched cursors are refused.",
+        "steps": [
+          "Write envelope.ts with the nine-field type and five constructors",
+          "Write budget.ts with ranking-aware truncation and the 4-bytes-per-token measure",
+          "Write cursor.ts with sign/verify and the three failure codes",
+          "Write tests/envelope.test.ts asserting the nine fields on all constructors",
+          "Write tests/budget.test.ts as the property test over 500 random payloads"
+        ],
+        "verify": "`cd app && $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/envelope.test.ts tests/budget.test.ts` — Done when both test files pass and the property test reports 0 violations."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-004",
+      "title": "Boundary test: no cross-module imports, Drizzle confined to store",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "app/tests/boundary.test.ts"
+      ],
+      "details": {
+        "goal": "Make module isolation a test failure instead of a review comment.",
+        "contract": "Test walks every .ts under app/src and app/tests with `new Bun.Transpiler({loader:\"ts\"}).scan(source)`, then asserts: files under src/tools/<a>/** may import only \"#shared/*\" and \"./\" siblings inside the same tool; files under src/indexer/** likewise \"#shared/*\" plus local siblings; files under src/shared/** must not import \"#tools\" or \"#indexer\" or \"../tools\"/\"../indexer\"; the specifier \"drizzle-orm\" may appear only in files under src/shared/store/**; no file outside src/ may be scanned. Failure message must name the offending file, the import path and the rule broken. The test must pass on the empty tree of this phase (it will only find src/index.ts, config.ts, log.ts, errors.ts).",
+        "steps": [
+          "Enumerate .ts files with a recursive read of app/src and app/tests",
+          "Scan each with Bun.Transpiler().scan() to get import paths",
+          "Implement the rule table for tools/indexer/shared",
+          "Add the drizzle-orm location assertion",
+          "Add a self-check that a synthetic violating source string fails the checker"
+        ],
+        "verify": "`cd app && $HOME/.bun/bin/bun test tests/boundary.test.ts` — Done when the test passes, and the included self-check proves a string importing \"../trace/handler\" from a tool directory is rejected."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-005",
+      "title": "Drizzle schema and initial migration for the ten modeled tables",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/store/schema.ts",
+        "app/drizzle.config.ts",
+        "app/src/shared/store/migrations/0000_init.sql"
+      ],
+      "details": {
+        "goal": "Declare the graph schema in Drizzle and commit the generated initial migration.",
+        "contract": "schema.ts declares every modeled table from DATABASE.md section 3 with explicit snake_case column names: file, node, edge, node_metrics, not_indexed, unresolved, tombstone, generation, meta, node_fts_state. Indexes per DATABASE.md section 4: node(qn) unique, node(name,kind), node(file_id,start_line), node(parent_id), node(kind), edge(dst_id,kind,tier), edge(src_id,kind,tier), edge(file_id,line), edge(kind), file(path) unique, file(language), not_indexed(path), unresolved(file_id), node_metrics(is_entry), node_metrics(tested_depth). Foreign keys with ON DELETE CASCADE from node.file_id and edge.src_id/dst_id/file_id and unresolved.file_id. edge carries local_name TEXT NOT NULL DEFAULT empty string inside its unique key (src_id,dst_id,kind,file_id,line,local_name). drizzle.config.ts: defineConfig with dialect sqlite, schema ./src/shared/store/schema.ts, out ./src/shared/store/migrations. Commit the generated 0000_init.sql. Do NOT model node_fts (FTS5) here, TASK-006 owns it.",
+        "steps": [
+          "Write app/src/shared/store/schema.ts with the ten tables and the index list above",
+          "Write app/drizzle.config.ts pointing at schema.ts and migrations/",
+          "Run drizzle-kit generate --name init to produce migrations/0000_init.sql",
+          "Read the generated SQL and confirm every index and FK from DATABASE.md section 4 is present",
+          "Confirm no table is missing by diffing the generated DDL against DATABASE.md section 3"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x drizzle-kit generate --name init && $HOME/.bun/bin/bun x tsc --noEmit. Done when migrations/0000_init.sql exists, contains 10 CREATE TABLE statements and the 15 named indexes, and typecheck exits 0."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-006",
+      "title": "Migration runner, FTS5 raw migration, schema parity test",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/store/migrate.ts",
+        "app/src/shared/store/migrations/raw/0001_fts.sql",
+        "app/tests/schema-parity.test.ts"
+      ],
+      "details": {
+        "goal": "One migration runner, one ledger, two SQL streams, plus the parity test that keeps schema.ts honest.",
+        "contract": "migrate.ts applies in order every sql file in store/migrations/ (drizzle-kit stream) then every sql file in store/migrations/raw/ (hand-written stream), one transaction per file, recording (name, applied_at) in table schema_migration and setting meta.schema_version to the applied count. Rules: forward-only, no down migrations; duplicate-column and already-exists errors are swallowed so a partially applied migration is re-runnable; a database whose recorded version is higher than the code is refused with AppError code schema_too_new; when meta.rebuild_required is 1 the runner returns a flag so the indexer forces a full index. Do not import drizzle-orm/bun-sqlite/migrator in this file. raw/0001_fts.sql creates node_fts as FTS5 external content over node_fts_state, tokenize unicode61 remove_diacritics 2, columns name, qn, signature, docstring, props_text. tests/schema-parity.test.ts migrates an empty temp DB then compares every table against getTableConfig from drizzle-orm/sqlite-core: column names, index names, FK targets, failing on any difference.",
+        "steps": [
+          "Write migrate.ts with the two-stream applier, the schema_migration ledger and the schema_too_new guard",
+          "Write migrations/raw/0001_fts.sql creating node_fts over node_fts_state",
+          "Write tests/schema-parity.test.ts comparing a migrated DB against getTableConfig",
+          "Run the parity test and fix any drift between schema.ts and the generated SQL",
+          "Confirm re-running migrate on an already-migrated DB is a no-op"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/schema-parity.test.ts. Done when parity passes and a second migrate call on the same file applies 0 files and sets no new schema_version."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-005"
+      ]
+    },
+    {
+      "id": "TASK-007",
+      "title": "Connection lifecycle, prepared-statement cache, portable write lock",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/store/db.ts",
+        "app/src/shared/store/lock.ts",
+        "app/tests/lock.test.ts"
+      ],
+      "details": {
+        "goal": "Connection lifecycle with the right PRAGMAs, a bounded prepared-statement cache, and a portable single-writer lock since Bun has no flock.",
+        "contract": "db.ts exports openReader(path) using readonly true with PRAGMAs foreign_keys=ON, busy_timeout=10000, cache_size=-16384, mmap_size=268435456; openWriter(path) with journal_mode=WAL, synchronous=NORMAL, cache_size=-65536, mmap_size=268435456, busy_timeout=10000, journal_size_limit=67108864, foreign_keys=ON; db(conn) returning a Drizzle instance; prepared(sqlKey, build) implementing a bounded LRU of max 200 prepared queries plus statementCacheStats(). URI filenames must not be used anywhere (bun:sqlite cannot open them). lock.ts exports acquireLock(dataDir) creating dataDir/write.lock with flag wx containing JSON pid and startedAt, release(handle), and inspect(dataDir) returning held, pid, stale. Stale means the pid is not alive or the lock mtime is older than 60s; acquire reclaims a stale lock and logs a warning. Use node:fs/promises, no shelling out.",
+        "steps": [
+          "Write db.ts with openReader, openWriter and the exact PRAGMA sets",
+          "Add the prepared-statement LRU with statementCacheStats()",
+          "Write lock.ts using exclusive-create with PID and startedAt",
+          "Implement stale detection with reclaim and a warning log",
+          "Write tests/lock.test.ts for index_locked on a second acquire and successful stale reclaim"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/lock.test.ts. Done when typecheck passes and the test proves index_locked on the second acquire and reclaim of a stale lock."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-002"
+      ]
+    },
+    {
+      "id": "TASK-008",
+      "title": "Staged publish protocol: stage, seal, rename, guaranteed discard",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/store/publish.ts",
+        "app/tests/publish.test.ts"
+      ],
+      "details": {
+        "goal": "Make a partial graph unpublishable by construction.",
+        "contract": "publish.ts implements DATABASE.md section 5: stage(livePath) returns a stage path live.stage.<rand>, seeded empty on force full or by VACUUM INTO from the live file; beginWrite(stage) opens a writer and returns a transaction scope using drizzle db.transaction(cb, {behavior: immediate}) noting the callback runs immediately and returns its value; seal(stage) runs wal_checkpoint(TRUNCATE), journal_mode=DELETE, synchronous=FULL, quick_check(1) and throws AppError internal on failure; publish(stage, live) renames over the live file and deletes stale -wal/-shm sidecars; discard(stage) removes the stage and its sidecars. Expose withStage(livePath, fn) that calls discard in a finally so an error can never reach publish.",
+        "steps": [
+          "Write publish.ts with stage, beginWrite, seal, publish, discard",
+          "Implement withStage(livePath, fn) that always discards on throw",
+          "Use VACUUM INTO for the stage seed",
+          "Write tests/publish.test.ts covering the success path and the throw path",
+          "Assert the live file sha256 is unchanged after an aborted publish"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/publish.test.ts. Done when both cases pass and the aborted case reports an unchanged live-file sha256."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-005",
+        "TASK-006",
+        "TASK-007"
+      ]
+    },
+    {
+      "id": "TASK-009",
+      "title": "Typed read primitives over the graph tables",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/store/read/nodes.ts",
+        "app/src/shared/store/read/edges.ts",
+        "app/src/shared/store/read/metrics.ts",
+        "app/src/shared/store/read/coverage.ts",
+        "app/src/shared/store/read/files.ts"
+      ],
+      "details": {
+        "goal": "Give the domain layer five typed primitives so no tool ever writes SQL, all built on the prepared-statement cache.",
+        "contract": "Each file exports domain row types (never Drizzle inferSelect types across the boundary) and functions: nodes.ts findByQn(conn, qn), findByName(conn, name, kinds), members(conn, parentId), nodesByFile(conn, fileId); edges.ts inbound(conn, ids, kinds), outbound(conn, ids, kinds), edgesByFile(conn, fileId); metrics.ts metricsFor(conn, ids) returning in_degree,out_degree,is_entry,tested_depth,reachable_count; coverage.ts rowsForPaths(conn, paths) using the prefix range path >= p and path < p||chr(0x30) form, returning indexed file rows and not_indexed rows, plus unresolvedForFiles(conn, fileIds); files.ts fileByPath(conn, path), allFiles(conn), censusByLanguage(conn). All queries go through prepared(key, build) from #shared/store/db and are prepared once per shape. No ranking, no limits, no formatting, no envelope construction in these files. All accept a connection handle as first argument so tests can pass a temp DB.",
+        "steps": [
+          "Write files.ts with the file and census primitives",
+          "Write nodes.ts with qn, name and member lookups",
+          "Write edges.ts with directional lookups by kind using the composite indexes",
+          "Write metrics.ts and coverage.ts including the prefix-range path query",
+          "Add tests/read.test.ts that migrates a temp DB, inserts a fixture graph and asserts each primitive"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read.test.ts. Done when every primitive returns the expected rows for a three-node fixture and the prefix-range query finds both indexed and not_indexed entries."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-006",
+        "TASK-007"
+      ]
+    },
+    {
+      "id": "TASK-010",
+      "title": "Domain functions: resolve, neighbors, coverage assembly, risk, diff",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/domain/resolve.ts",
+        "app/src/shared/domain/neighbors.ts",
+        "app/src/shared/domain/coverage.ts",
+        "app/src/shared/domain/risk.ts",
+        "app/src/shared/domain/diff.ts"
+      ],
+      "details": {
+        "goal": "Encode the three contracts that must exist once and never be reinvented per tool: resolution with ambiguity, grouped neighbour expansion, and absence assembly.",
+        "contract": "resolve.ts: resolve(conn, query, kinds) returns {status: ok, node} | {status: ambiguous, candidates up to 5 with qn, kind, file, lines, score, why} | {status: not_found, near_misses}. It must never pick when 2 or more candidates tie; detection order is exact qn, exact name plus kind, dotted tail, path, then @decorator treated as a property filter. neighbors.ts: expand(conn, seedIds, {direction, depth<=4, kinds}) returns groups keyed by edge kind and tier, each item carrying id, qn, kind, file, line, hop, external flag; intentionally unbounded, no truncation. coverage.ts: assemble(conn, scope) returns coverage, unresolved rows, and relation which is eq only when complete, unresolved is empty for the scope and the generation is fresh; otherwise gte. risk.ts: score(changed, impacted) returns score, band and drivers as sentences. diff.ts: changedSince(repoRoot, base) returns changed files, removed files and unmatched files, using git diff plus sha256 comparison against the file table, with a 30s timeout and no writes.",
+        "steps": [
+          "Write resolve.ts with the ambiguity contract and the kind inference order",
+          "Write neighbors.ts producing grouped-by-kind-and-tier output with hop and external flags",
+          "Write coverage.ts deriving eq versus gte from unresolved and not_indexed",
+          "Write risk.ts producing driver sentences, not a bare number",
+          "Write diff.ts using git diff plus hash comparison",
+          "Add tests/domain.test.ts for ambiguity refusal and the eq-versus-gte matrix"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/domain.test.ts. Done when a two-candidate tie returns ambiguous with 2 candidates, and coverage returns gte whenever an unresolved row exists in scope."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-009"
+      ]
+    },
+    {
+      "id": "TASK-011",
+      "title": "Phase 0 closing gate: smoke, contract and boundary verification",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "app/tests/smoke.test.ts",
+        "app/tests/contract.test.ts"
+      ],
+      "details": {
+        "goal": "Prove phase 0 delivers its contracts before any parser or tool code is written.",
+        "contract": "smoke.test.ts: create a temp repo dir, run migrate, open a writer, insert one file and two nodes, publish through withStage, then open a reader and read them back. contract.test.ts: assert every envelope constructor returns exactly the nine fields with no undefined omissions; assert emit never exceeds budget plus 10 percent on 200 generated payloads; assert cursor verify refuses a token minted for a different tool and for a different generation. This task owns no source files and must not modify any.",
+        "steps": [
+          "Write tests/contract.test.ts covering the nine fields, the budget property and cursor refusal",
+          "Write tests/smoke.test.ts covering migrate, write, publish, read on a temp repo",
+          "Run the whole suite including boundary and schema parity",
+          "Record the full suite output as progress evidence"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun test. Done when every test file in app/tests passes (boundary, envelope, budget, lock, publish, read, schema-parity, domain, contract, smoke) and the summary reports 0 failures."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003",
+        "TASK-004",
+        "TASK-005",
+        "TASK-006",
+        "TASK-007",
+        "TASK-008",
+        "TASK-009",
+        "TASK-010"
+      ]
+    }
+  ]
+}

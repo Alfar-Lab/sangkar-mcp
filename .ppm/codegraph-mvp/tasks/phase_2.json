@@ -1,0 +1,247 @@
+{
+  "phase": "phase_2",
+  "title": "Agent tools: seven private modules plus registration",
+  "tasks": [
+    {
+      "id": "TASK-020",
+      "title": "Tool module: status (trust objective)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/status/manifest.ts",
+        "app/src/tools/status/handler.ts",
+        "app/src/tools/status/handler.test.ts"
+      ],
+      "details": {
+        "goal": "Answer is the graph current and what does it cover, including for paths that were never indexed.",
+        "contract": "manifest.ts exports manifest {name:'status', description: the verbatim text from TOOLS-SPEC.md section 2, profile:'agent'} and input {paths: array of string optional, budget: integer default 800}. handler.ts exports handle(ctx, args) returning handle(env) built only via constructors from #shared/envelope and sized only via #shared/budget emit. Reads: meta for project_name, project_root, generation, indexed_at, indexer_state, consecutive_failures; latest generation row; file rows plus not_indexed rows for each requested path using prefix ranges; census by language derived from file.parse_status and not_indexed.language. Payload keys exactly: project{name,root,commit,db_path}, graph{nodes,edges,size_bytes,db_path}, languages[{language,files,parsed,failed,note?}], paths[{path,indexed,symbols?,sha256?,reason?}], health{indexer,last_publish_ms,consecutive_failures}. A requested path with no file row and no not_indexed row must appear with indexed:false and reason not_indexed_unknown. This tool owns no other module and imports only #shared/*.",
+        "steps": [
+          "Write manifest.ts with the description and input schema",
+          "Write handler.ts reading meta, generation, file and not_indexed",
+          "Build the languages census merging file rows and not_indexed rows",
+          "Build the per-path result including the unknown-path case",
+          "Write handler.test.ts against a fake reader covering complete coverage, a skipped path and an unknown path"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-status.test.ts && $HOME/.bun/bin/bun x tsc --noEmit. Done when the three cases return status ok, the envelope has all nine fields, and a grammar-unavailable language appears with parsed 0 and a note."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-021",
+      "title": "Tool module: trace (main tracing feature)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/trace/manifest.ts",
+        "app/src/tools/trace/handler.ts",
+        "app/src/tools/trace/handler.test.ts"
+      ],
+      "details": {
+        "goal": "One free-text input returns the resolved symbol and its neighbours grouped by relation and direction, never guessing on ties.",
+        "contract": "manifest.ts exports manifest {name:'trace', description verbatim from TOOLS-SPEC.md section 3, profile:'agent'} and input {query: string required, direction: enum all|in|out default all, kinds: array optional, depth: integer default 2 min 1 max 4, budget: integer default 3200, cursor: string optional}. handler.ts: resolve via #shared/domain/resolve; on ambiguous return envelope ambiguous with up to 5 candidates and no payload body; on not_found return not_found with near_misses; on ok call #shared/domain/neighbors expand then shape the payload. Payload keys exactly: resolution{query,matched,kind,how,confidence}, node{id,qn,kind,file,lines,signature,is_test}, in[] and out[] as arrays of {edge,tier,items[{id,qn,kind,file,line,hop,external?,is_test?}]}, unresolved[{file,line,name,evidence,tier}], not_indexed[]. Groups ordered calls, tested_by, inherits, imports. Resolution block carries how and confidence. Never include source text.",
+        "steps": [
+          "Write manifest.ts with the description and the six-argument input schema",
+          "Write handler.ts wiring resolve then expand",
+          "Shape grouped neighbours with tier hoisted to the group",
+          "Attach unresolved and not_indexed from coverage assemble",
+          "Write handler.test.ts covering ok, ambiguous and not_found plus the never-guess rule"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-trace.test.ts. Done when a unique name returns grouped neighbours with hop and tier, a two-candidate query returns ambiguous without a payload, and an unknown with an unresolved call site returns totals total_relation gte."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-022",
+      "title": "Tool module: summary (change, repo, area scopes)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/summary/manifest.ts",
+        "app/src/tools/summary/handler.ts",
+        "app/src/tools/summary/handler.test.ts"
+      ],
+      "details": {
+        "goal": "The hottest path: a few hundred tokens that say what changed, how risky it is and what to call next.",
+        "contract": "manifest.ts exports manifest {name:'summary', description verbatim from TOOLS-SPEC.md section 4, profile:'agent'} and input {scope: enum change|repo|area default change, target: string optional, base: string optional defaulting to the generation base_commit, budget: integer default 1200, cursor: string optional}. handler.ts dispatches on scope and must not compute repo or area aggregates on the change path. change payload keys: base, changed_files[], changed_symbols[{id,qn,kind,change,lines,risk}], risk{score,band,drivers[]}, test_gaps[{qn,reason}], removed_symbols[], suggested_next[{tool,query?,why}]. repo payload keys: size{files,nodes,edges}, languages[], entry_points[{qn,kind,reachable}], coupling_hotspots[{qn,in,out}], flows[{name,steps,files}], not_indexed[]. area payload keys: target, surface[{qn,kind}], dependents_total, risk. risk.drivers are sentences such as 41 dependents or 2 changed symbols without tests, never a bare float.",
+        "steps": [
+          "Write manifest.ts with the scope enum and the five-argument schema",
+          "Implement the change path using diff changedSince plus metrics for risk",
+          "Implement the repo path using census, entry points by is_entry and hotspots by degree",
+          "Implement the area path using prefix range files and their dependents",
+          "Write handler.test.ts asserting all three scopes return their documented keys and that suggested_next names only real tools"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-summary.test.ts. Done when the three scopes return exactly their documented payload keys, the change scope reports driver sentences, and a stale generation sets read_status.stale true without failing the call."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-023",
+      "title": "Tool module: search (BM25 over symbols)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/search/manifest.ts",
+        "app/src/tools/search/handler.ts",
+        "app/src/tools/search/handler.test.ts"
+      ],
+      "details": {
+        "goal": "Find a declaration when the caller knows roughly what it is called but not where it lives.",
+        "contract": "manifest.ts exports manifest {name:'search', description verbatim from TOOLS-SPEC.md section 5, profile:'agent'} and input {query: string required, kind: enum function|method|class|file|decorator optional, path: string optional prefix filter, budget: integer default 2000, cursor: string optional}. handler.ts runs an FTS5 MATCH against node_fts through raw sqlite on the injected reader connection (FTS5 is not modeled by Drizzle), joins node and node_metrics for degree, applies the optional kind and path filters, and breaks score ties by in_degree then id so pagination is stable. Payload keys: mode ('bm25' always in MVP), results[{id,qn,kind,file,lines,signature?,degree{in,out},score}]. Payload must report mode bm25 so a caller knows no semantic rerank happened. No source text in results.",
+        "steps": [
+          "Write manifest.ts with the description and five-argument schema",
+          "Implement the FTS5 MATCH query through the raw connection with kind and path filters",
+          "Join node_metrics for degree and order by score then in_degree then id",
+          "Set mode to bm25 in the payload",
+          "Write handler.test.ts asserting ranking, the path filter and stable ordering across two identical calls"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-search.test.ts. Done when an exact name ranks first, a path prefix filter excludes everything outside it, and two identical calls return byte-identical result order."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-024",
+      "title": "Tool module: impact (blast radius for a change set)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/impact/manifest.ts",
+        "app/src/tools/impact/handler.ts",
+        "app/src/tools/impact/handler.test.ts"
+      ],
+      "details": {
+        "goal": "Say what a change can reach, how far away it is, through which edge, and whether it is tested.",
+        "contract": "manifest.ts exports manifest {name:'impact', description verbatim from TOOLS-SPEC.md section 6, profile:'agent'} and input {paths: array of string optional defaulting to the working-tree diff, base: string optional, depth: integer default 2 min 1 max 4, budget: integer default 2500, cursor: string optional}. handler.ts: change set from args.paths or #shared/domain/diff changedSince; expand inbound from those nodes to depth; attach per node tested_depth and is_entry from node_metrics. Payload keys: changed[{path,symbols,entry_point}], impacted[{id,qn,kind,hop,via,tier,tested,entry_point?}], unmatched_files[{path,reason}], risk{score,band,drivers[]}. A changed file with no nodes must appear in unmatched_files with reason, never be dropped silently. Total relation is gte whenever the impacted list is truncated or unresolved rows exist in scope.",
+        "steps": [
+          "Write manifest.ts with the description and five-argument schema",
+          "Resolve the change set from paths or the diff and map files to nodes",
+          "Expand inbound to the requested depth attaching hop, via and tier",
+          "Attach tested and entry_point from node_metrics and collect unmatched_files",
+          "Write handler.test.ts covering a clean tree, an explicit path set and a file with no nodes"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-impact.test.ts. Done when a changed markdown file appears in unmatched_files, impacted rows carry hop and via, and a truncated result sets total_relation gte with a next cursor."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-025",
+      "title": "Tool module: expand (detail on demand)",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/tools/expand/manifest.ts",
+        "app/src/tools/expand/handler.ts",
+        "app/src/tools/expand/handler.test.ts"
+      ],
+      "details": {
+        "goal": "One address for detail, so the other five tools never need detail_level or per-item flags.",
+        "contract": "manifest.ts exports manifest {name:'expand', description verbatim from TOOLS-SPEC.md section 7, profile:'agent'} and input {target: string required, what: enum members|edges|source|coverage optional, budget: integer default 2500}. handler.ts resolves target as an id, qn or path; infers what by kind when absent (file or class to members, function or method to edges, folder to coverage) and echoes the choice in payload.what plus payload.why as a sentence such as inferred: class -> members. Payload always includes target{id,qn,kind,lines}. members returns members[{id,name,kind,lines,degree}]; edges returns the grouped neighbour shape of trace for one node; coverage returns file and not_indexed rows for the path prefix; source returns a line window read from disk after verifying sha256 against file.sha256, setting source_drift true on mismatch instead of returning stale text.",
+        "steps": [
+          "Write manifest.ts with the description and three-argument schema",
+          "Implement target resolution across id, qn and path",
+          "Implement the kind-to-what inference table and echo what plus why",
+          "Implement members, edges and coverage payloads",
+          "Implement the source window with sha256 verification and the source_drift flag",
+          "Write handler.test.ts covering inference for three kinds and the drift case"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-expand.test.ts. Done when a class target infers members, a method target infers edges, a folder target infers coverage, and a source request on a modified file returns source_drift true with no content."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-026",
+      "title": "Tool module: index (admin profile only)",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "app/src/tools/index/manifest.ts",
+        "app/src/tools/index/handler.ts",
+        "app/tests/tools-index.test.ts"
+      ],
+      "details": {
+        "goal": "Expose a repair path without letting the agent profile see it, and without ever indexing inside the server process.",
+        "contract": "manifest.ts exports manifest {name:'index', description verbatim from TOOLS-SPEC.md section 8, profile:'admin'} and input {force: boolean default false, mode: enum full|fast default full}. handler.ts spawns the worker process with Bun.spawn running bin/codegraph.ts worker, passes repoRoot and dataDir, streams the child stderr into the logger, and returns published counts from the child's final JSON line on stderr. It must never import #indexer or open a writer in-process. Exit codes map to envelope: 0 ok with payload{mode,duration_ms,previous_generation,files{scanned,parsed,failed,skipped}}, 2 ok with summary nothing to do, 75 fail with code index_locked and a hint naming the lock file, 1 fail internal with the child's last error line.",
+        "steps": [
+          "Write manifest.ts with profile admin and the two-argument schema",
+          "Implement Bun.spawn of the worker with repoRoot and dataDir",
+          "Parse the child's final JSON line and map the four exit codes to envelopes",
+          "Write tests/tools-index.test.ts with a stubbed worker command covering exit 0, 2 and 75"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-index.test.ts. Done when the three exit codes map to ok, ok with nothing-to-do and fail with index_locked respectively, and the handler never writes to the database directly."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-027",
+      "title": "Register the seven tools in the composition root with profiles",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/index.ts"
+      ],
+      "details": {
+        "goal": "Make the server surface exactly seven tools, six of them visible to the agent profile, registered from an explicit import list.",
+        "contract": "src/index.ts imports the seven manifests explicitly (no directory scanning), builds ToolContext {reader, cursor, log, now, config}, registers with @modelcontextprotocol/sdk McpServer using registerTool with the manifest description and a JSON Schema produced from the manifest input, filters by profile where agent hides the index tool and admin shows all seven, wires the open-time guard from DATABASE.md section 5 (root_mismatch as a stale_reason, wrong_project_db, unsupported_filesystem, schema_too_new as refusals), catches every handler throw into envelope fail with an AppError code, and must never write to stdout. mcp mode starts the stdio transport; index and status modes run the CLI equivalents and exit.",
+        "steps": [
+          "Import the seven manifests and build the shared ToolContext once at startup",
+          "Register each tool with registerTool plus its JSON Schema",
+          "Implement profile filtering agent versus admin",
+          "Implement the open-time guard and refusal envelopes",
+          "Wrap handlers so a throw becomes envelope fail with the AppError code",
+          "Confirm mcp mode wires the stdio transport and writes nothing to stdout"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun -e 'const p = Bun.spawn([\"$HOME/.bun/bin/bun\",\"bin/codegraph.ts\",\"mcp\"],{stdin:\"pipe\",stdout:\"pipe\",stderr:\"pipe\"}); p.stdin.write(JSON.stringify({jsonrpc:\"2.0\",id:1,method:\"initialize\",params:{protocolVersion:\"2024-11-05\",capabilities:{},clientInfo:{name:\"t\",version:\"1\"}}})+\"\\n\"); p.stdin.write(JSON.stringify({jsonrpc:\"2.0\",id:2,method:\"tools/list\"})+\"\\n\"); p.stdin.flush(); await Bun.sleep(1500); p.kill();' with the captured stdout containing two JSON-RPC responses and tools/list returning 6 tools for the agent profile. Done when tools/list length is 6 and every line on stdout parses as JSON-RPC."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-020",
+        "TASK-021",
+        "TASK-022",
+        "TASK-023",
+        "TASK-024",
+        "TASK-025",
+        "TASK-026"
+      ]
+    },
+    {
+      "id": "TASK-028",
+      "title": "Phase 2 closing gate: seven tools over MCP against a real generation",
+      "agent": "verify",
+      "size": "M",
+      "files": [
+        "app/tests/tools-smoke.test.ts"
+      ],
+      "details": {
+        "goal": "Prove the registered surface behaves as specified against a published database, not a fake reader.",
+        "contract": "tools-smoke.test.ts indexes a small fixture repo through the worker into a temp data dir, then drives the real MCP server over stdio: initialize, tools/list (expect 6 names for the agent profile), then one tools/call per tool with arguments from TOOLS-SPEC.md. Assertions: every response parses as JSON-RPC and carries the nine envelope fields; status reports the generation; summary scope change returns base and risk; trace on a known function returns a resolution block; search ranks the exact name first; impact returns impacted rows or an explicit empty with total_relation eq; expand on a class id returns members; the index tool is absent from the agent profile list. Stdout must contain only JSON-RPC lines. This task owns no source files.",
+        "steps": [
+          "Write tests/tools-smoke.test.ts driving the stdio server",
+          "Index the fixture through the worker before the calls",
+          "Assert tools/list is 6 and every envelope has nine fields",
+          "Assert per-tool payload keys from TOOLS-SPEC.md",
+          "Assert strictly non-JSON stdout lines are zero"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-smoke.test.ts. Done when all seven tools respond within their budgets, the agent profile lists exactly 6, and the non-JSONRPC stdout line count is 0."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-020",
+        "TASK-021",
+        "TASK-022",
+        "TASK-023",
+        "TASK-024",
+        "TASK-025",
+        "TASK-026",
+        "TASK-027"
+      ]
+    }
+  ]
+}

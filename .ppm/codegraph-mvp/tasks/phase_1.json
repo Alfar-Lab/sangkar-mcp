@@ -1,0 +1,228 @@
+{
+  "phase": "phase_1",
+  "title": "Indexer: discovery, 12-language extraction, publish",
+  "tasks": [
+    {
+      "id": "TASK-012",
+      "title": "Language layer as data: extension map and four node-type tables",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/lang/types.ts",
+        "app/src/indexer/lang/registry.ts"
+      ],
+      "details": {
+        "goal": "Make language support a table lookup so adding a language is a data edit, never a code path.",
+        "contract": "types.ts exports type LangId (the 12 MVP ids: python, typescript, tsx, javascript, go, java, rust, c, cpp, csharp, php, ruby), interface LangSpec { id, extensions: string[], grammarWasm: string, classTypes: string[], functionTypes: string[], importTypes: string[], callTypes: string[], testFileRegex?: RegExp }, and the resolved row type. registry.ts exports EXTENSION_MAP (ext to LangId, deterministic order, includes .py .ts .tsx .js .jsx .mjs .cjs .go .java .rs .c .h .cpp .cc .hpp .cs .php .rb), LANGS (LangId to LangSpec), detectLanguage(path): LangId | null, and specFor(id). The four node-type lists are the node-versus-edge decision expressed as data: classTypes produce class nodes, functionTypes produce function nodes, importTypes and callTypes produce edges. Include a header comment stating that name/grammar values were validated against the vendored grammar node-types, and one test that every LangId in LANGS has at least one function and one call type.",
+        "steps": [
+          "Write types.ts with LangId, LangSpec and the row type",
+          "Write registry.ts with EXTENSION_MAP for the 12 languages",
+          "Fill the four node-type lists per language from the grammar node-types, copying the patterns CRG uses (for example python class_definition, function_definition, import_statement, call)",
+          "Implement detectLanguage and specFor",
+          "Add tests/lang.test.ts asserting every language has function and call types and that .h maps to c while .cpp maps to cpp"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/lang.test.ts. Done when all 12 languages satisfy the type-list assertions and detectLanguage resolves every extension in EXTENSION_MAP to its declared language."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-013",
+      "title": "WASM parser pool with a bounded per-language LRU",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/parse.ts",
+        "app/tests/parse.test.ts"
+      ],
+      "details": {
+        "goal": "One parser entry point that loads a grammar on demand, bounds memory, and returns a tree plus any parse-error ranges.",
+        "contract": "parse.ts exports initParsers(): Promise<void> (initialises the web-tree-sitter runtime once per process), parseFile(path, source, lang): Promise<{tree, errorRanges: string[]}> and disposeLang(lang). Grammars load from tree-sitter-wasms in node_modules by the grammarWasm name in the LangSpec; a missing grammar resolves to an error with reason grammar_unavailable, never a throw out of parseFile. Parser instances are cached in an LRU of max 6 languages keyed by LangId, each with a reset() before reuse. errorRanges is computed by walking the tree for ERROR and MISSING nodes and formatting as comma-separated 1-based line ranges with a cap of 20 ranges plus a count suffix. No file may be parsed twice concurrently in this module. Package versions are @modelcontextprotocol/sdk independent: web-tree-sitter 0.27.2, tree-sitter-wasms 0.1.13 as installed by TASK-001.",
+        "steps": [
+          "Write initParsers using web-tree-sitter Parser.init()",
+          "Implement the language LRU with reset-before-reuse",
+          "Implement parseFile mapping LangSpec.grammarWasm to the wasm file and returning errorRanges",
+          "Handle an unavailable grammar as a structured result rather than an exception",
+          "Write tests/parse.test.ts parsing one Python and one TypeScript snippet and asserting errorRanges is empty"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/parse.test.ts. Done when both snippets parse with zero error ranges, and a request for a fabricated grammar returns reason grammar_unavailable without throwing."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-012"
+      ]
+    },
+    {
+      "id": "TASK-014",
+      "title": "Repository discovery with exclusions and coverage reasons",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/discover.ts",
+        "app/tests/discover.test.ts"
+      ],
+      "details": {
+        "goal": "Walk a repository deterministically and record both what is indexed and what is skipped, with a reason.",
+        "contract": "discover.ts exports discover(repoRoot, {ignorePatterns?}): Promise<{files: Array<{path, lang, size, sha256}>, notIndexed: Array<{path, reason, language?}>, skipped: number}>. Rules: always exclude .git, node_modules, .codegraph, dist, vendor; honour repoRoot/.gitignore and repoRoot/.codegraphignore with simple glob matching; skip files larger than 512 MiB with reason size_cap; skip binary files (NUL byte in the first 8192 bytes) with reason binary; record a file whose extension is unknown as reason unsupported_ext; compute sha256 for every accepted file. Paths are repo-relative with forward slashes and no leading dot-slash. Deterministic ordering by path so two runs produce identical output.",
+        "steps": [
+          "Implement the recursive walk with the always-exclude list",
+          "Add .gitignore and .codegraphignore parsing with glob matching",
+          "Add the binary, size and unsupported-extension classifications with reasons",
+          "Compute sha256 for accepted files and sort by path",
+          "Write tests/discover.test.ts over a temp tree containing one .ts file, one binary, one unknown extension and one ignored path"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/discover.test.ts. Done when the fixture yields exactly one indexed file and three notIndexed entries with reasons ignored, binary and unsupported_ext, in deterministic order."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-012"
+      ]
+    },
+    {
+      "id": "TASK-015",
+      "title": "Generic table-driven extractor for nodes, containment and raw edges",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/extract.ts",
+        "app/tests/extract.test.ts"
+      ],
+      "details": {
+        "goal": "One cursor walk driven by the four node-type lists that produces nodes plus unresolved call and import targets.",
+        "contract": "extract.ts exports extractFile(tree, spec, relPath): {nodes: ExtractedNode[], rawEdges: ExtractedEdge[], unresolved: UnresolvedSite[]}. ExtractedNode carries kind (file|module|class|function|method|test|endpoint), name, qn built as relPath::Scope.name, startLine, endLine, signature, isTest, props (decorators, modifiers as JSON). Walk rules: a node matching classTypes emits a class node and pushes it onto the scope stack; functionTypes inside a class emit method nodes, outside emit function nodes; a node matching callTypes emits a rawEdge with target = the callee text and tier extracted_candidate; importTypes emit rawEdges with target = the imported module text; anything inside a call or import that cannot be named goes to unresolved with evidence_kind dynamic. Containment edges are emitted as contains from the enclosing file or class node to every declared node. The file node is always emitted first. No language-specific if branches other than a documented exception table with at most 3 entries.",
+        "steps": [
+          "Write the scope stack and the file and module node emission",
+          "Implement classTypes and functionTypes handling with method versus function distinction",
+          "Implement callTypes and importTypes producing rawEdges",
+          "Collect unresolved sites with evidence kinds",
+          "Emit contains edges for every declared node",
+          "Write tests/extract.test.ts over a Python fixture asserting node kinds, qns and at least one containment edge"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/extract.test.ts. Done when the Python fixture yields a file node, a class node, method nodes with the path::Class.method qn form, one containment edge per declaration and no unresolved entry."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-013"
+      ]
+    },
+    {
+      "id": "TASK-016",
+      "title": "Binding pass: resolve raw edges by same-file, import and inheritance evidence",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/resolve.ts",
+        "app/tests/resolve.test.ts"
+      ],
+      "details": {
+        "goal": "Turn raw edge targets into resolved node ids where evidence exists, and leave the rest in unresolved with a reason.",
+        "contract": "resolve.ts exports bind(units: FileUnit[], index: SymbolIndex): {edges: ResolvedEdge[], unresolved: UnresolvedSite[]}. FileUnit is the per-file extractor output. SymbolIndex maps qn and bare name to node ids and records imports per file. Binding order for a raw call or import target: exact qn within the same file, then a name visible through that file's imports, then a unique name in the whole index when exactly one node matches, then a superclass method when the receiver's class inherits it, otherwise unresolved with evidence_kind one of receiver_type_unknown, ambiguous (more than one candidate) or dynamic. Every resolved edge carries tier extracted for same-file and import evidence and tier inferred for unique-name and inheritance evidence. Never emit an edge whose target id does not exist.",
+        "steps": [
+          "Define SymbolIndex construction from units including per-file import tables",
+          "Implement the four-step binding order",
+          "Assign tier per evidence kind",
+          "Route every failure to unresolved with the matching evidence_kind",
+          "Write tests/resolve.test.ts covering a same-file call, an imported call, an ambiguous name and an unknown receiver"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/resolve.test.ts. Done when the four cases produce respectively resolved extracted, resolved extracted, unresolved ambiguous and unresolved receiver_type_unknown, and no edge is emitted with a missing target."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-015"
+      ]
+    },
+    {
+      "id": "TASK-017",
+      "title": "Persist a generation: metrics, FTS delta, tombstones",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/persist.ts",
+        "app/tests/persist.test.ts"
+      ],
+      "details": {
+        "goal": "Write one indexed unit set into the stage database and make the derived data consistent in the same transaction.",
+        "contract": "persist.ts exports persistUnit(tx, unit, resolved): void writing nodes, edges, unresolved and not_indexed for one file after deleting that file's previous rows by file_id; and finalizeGeneration(tx, {generationId, baseCommit, mode}): {nodes, edges, tombstones} which recomputes node_metrics for touched nodes plus their two-hop neighbourhood (in_degree, out_degree, is_entry, tested_depth as min hops to a test node, reachable_count only on full publish), updates node_fts_state and the node_fts index by rowid delta, appends a tombstone row for every qn that disappeared since the previous generation, and inserts the generation row plus meta.generation. FTS delta falls back to a full rebuild when the delta exceeds 35 percent of node rows. All writes go through the open transaction; no function in this file opens a connection.",
+        "steps": [
+          "Implement persistUnit with file-scoped delete then insert",
+          "Implement degree and tested_depth recomputation for the touched neighbourhood",
+          "Implement the FTS delta with the 35 percent rebuild threshold",
+          "Implement tombstone append for disappeared qns",
+          "Insert the generation row and update meta.generation",
+          "Write tests/persist.test.ts asserting a second persist of an edited file replaces rows and leaves one tombstone"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/persist.test.ts. Done when re-persisting an edited fixture deletes the removed symbol, records exactly one tombstone, keeps node counts consistent and leaves node_fts matching the node names."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-016"
+      ]
+    },
+    {
+      "id": "TASK-018",
+      "title": "Index worker entry: lock, incremental routing, publish, exit codes",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/worker.ts",
+        "app/tests/worker.test.ts"
+      ],
+      "details": {
+        "goal": "A standalone process that owns the writer and reports one machine-readable result, so the MCP server never indexes in-process.",
+        "contract": "worker.ts exports runWorker(opts: {repoRoot, dataDir, force, mode}): Promise<number> returning 0 published, 2 nothing to do, 75 lock held, 1 failure. Sequence: acquireLock (index_locked returns 75), ensure data dir and .codegraph/.gitignore containing a single star, migrate, discover, compute changed files by comparing sha256 against the file table and by git diff against meta generation base_commit, if nothing changed and not force return 2, withStage: persist each changed unit, bind edges, finalizeGeneration, seal, publish. On any throw: discard the stage, bump meta.consecutive_failures, set meta.indexer_state to failed, return 1. On success set indexer_state to idle. stdout must stay empty; all reporting is on stderr or the exit code. This file is invoked by bin/codegraph.ts worker mode and by the watcher; tools must never import it.",
+        "steps": [
+          "Implement option parsing and the lock acquisition with the 75 exit code",
+          "Implement data dir setup including the single-star .gitignore",
+          "Implement the incremental changed-file computation",
+          "Implement the withStage orchestration calling persistUnit and finalizeGeneration",
+          "Implement success and failure metadata writes and exit codes",
+          "Write tests/worker.test.ts running runWorker on a temp repo twice, expecting 0 then 2"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/worker.test.ts. Done when the first run returns 0 with one generation row, the second returns 2, and stdout captured during both runs is empty."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-014",
+        "TASK-017"
+      ]
+    },
+    {
+      "id": "TASK-019",
+      "title": "Phase 1 closing gate: parser parity and full-corpus index",
+      "agent": "verify",
+      "size": "M",
+      "files": [
+        "app/tests/parser-parity.test.ts",
+        "app/tests/index-integration.test.ts"
+      ],
+      "details": {
+        "goal": "Prove the indexer meets the four parser acceptance criteria and produces a real generation from the reference corpus.",
+        "contract": "parser-parity.test.ts indexes code-review-graph/ read-only into a temp data dir, then asserts: every one of the 12 languages files parse without rising ERROR count above 1 percent of files; per-language node counts are within 5 percent of the CRG oracle recorded in TOOL-OUTPUTS.md for python and typescript, and non-zero for the other languages present; p50 parse time at most 4 ms per file and p95 at most 25 ms per file, measured over at least 200 files. index-integration.test.ts runs runWorker on the same corpus and asserts: one generation row, node and edge counts printed to progress, unresolved rows exist and are non-zero, not_indexed contains no entry whose reason is unsupported_ext for a language we claim to support, and a second run returns 2 (idempotent). Both tests must leave code-review-graph/ unmodified (assert git status --porcelain on it is empty).",
+        "steps": [
+          "Write tests/parser-parity.test.ts with the three parser assertions and timing measurement",
+          "Write tests/index-integration.test.ts with the generation, unresolved and idempotence assertions",
+          "Run both against code-review-graph/ and record the measured numbers",
+          "Assert the reference corpus is unmodified after both runs"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/parser-parity.test.ts tests/index-integration.test.ts. Done when all assertions pass and the recorded p95 parse time and per-language node counts are written into the progress log as evidence."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-012",
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016",
+        "TASK-017",
+        "TASK-018"
+      ]
+    }
+  ]
+}

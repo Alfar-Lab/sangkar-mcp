@@ -1,0 +1,130 @@
+{
+  "phase": "phase_3",
+  "title": "Productization: watcher, freshness, instructions, acceptance",
+  "tasks": [
+    {
+      "id": "TASK-029",
+      "title": "Watcher: debounced change detection that spawns the worker",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/indexer/watch.ts",
+        "app/tests/watch.test.ts"
+      ],
+      "details": {
+        "goal": "Keep the graph current without putting the writer in the server process.",
+        "contract": "watch.ts exports startWatch(opts: {repoRoot, dataDir, intervalMs default 2000, debounceMs default 500, onSpawn?}): {stop()}. Poll every intervalMs: read git HEAD via git rev-parse HEAD and the working-tree signature via git status --porcelain, plus mtime of tracked files newer than the last generation; when the signature differs from the last observed one, wait debounceMs, re-check, then Bun.spawn bin/codegraph.ts worker and record the exit code. On exit 75 (lock held) log and retry on the next tick without counting a failure. On exit 1 increment an in-memory failure counter and back off to min(intervalMs << failures, 300000). Never writes the database itself and never imports the worker module. On stop(), kill a running child and resolve.",
+        "steps": [
+          "Implement the poll loop reading git HEAD and porcelain status",
+          "Implement the debounce with a re-check before spawning",
+          "Implement Bun.spawn of the worker and exit-code handling including 75",
+          "Implement exponential backoff on failure and cleanup on stop",
+          "Write tests/watch.test.ts with a stubbed spawn covering change detection, debounce and lock retry"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/watch.test.ts. Done when a file change triggers exactly one spawn after the debounce window, an exit 75 does not increment the failure counter, and stop() resolves after killing a running child."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-030",
+      "title": "Freshness checks and health reporting on status",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/shared/domain/freshness.ts",
+        "app/src/tools/status/handler.ts",
+        "app/tests/freshness.test.ts"
+      ],
+      "details": {
+        "goal": "Make staleness a computed, explained value rather than a boolean guess, and surface it on every status answer.",
+        "contract": "freshness.ts exports checkFreshness(conn, repoRoot): {stale, stale_reason?, files_changed_since, checked_at} comparing each indexed file's sha256 against the current bytes and comparing meta project_root against the canonical repo root. stale_reason is one of files_changed, root_mismatch, base_commit_moved, watcher_stalled (indexer_state busy for more than 10 minutes) or none. Also export health(conn): {indexer, last_publish_ms, consecutive_failures, statement_cache_entries}. Update tools/status/handler.ts to include health.statement_cache_entries and to use the freshness module for read_status rather than reading meta directly. Keep the payload keys from TASK-020 unchanged except for the added health field.",
+        "steps": [
+          "Write freshness.ts with the sha256 comparison and the four stale reasons",
+          "Add health() exposing statement cache size and failure counters",
+          "Wire status handler to freshness and health",
+          "Write tests/freshness.test.ts covering unchanged, changed, root mismatch and stalled watcher"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/freshness.test.ts && $HOME/.bun/bin/bun test tests/tools-status.test.ts. Done when the four stale reasons are each produced by their fixture and the status payload still has its documented keys plus health.statement_cache_entries."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-031",
+      "title": "Ship the instructions text that tells an agent how to use six tools",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "app/src/cli/instructions.ts",
+        "app/docs/INSTRUCTIONS.md",
+        "app/tests/instructions.test.ts"
+      ],
+      "details": {
+        "goal": "Turn the measured adoption lever into a deliverable: an agent that has never seen this server should call summary first, then trace, then expand.",
+        "contract": "docs/INSTRUCTIONS.md is one screen and contains, in this order: a start-of-task rule (call summary with scope change), an area rule (summary scope area with target), a lookup rule (trace with one query), a blast-radius rule (impact before edits and before merge), a detail rule (expand next, never large budgets), and an anti-pattern list stating do not call index, do not treat total_relation gte as none, do not use trace to read source, and do not pass a project argument because the repo is bound at startup. It must also state the agent profile has exactly 6 tools and name them. instructions.ts exports INSTRUCTIONS_TEXT (the same content as a string) and printInstructions(): void writing to stdout only in an explicit CLI mode, and exports nextToolsFor(tool: string): string[] used by the server to populate next_tools. tests/instructions.test.ts asserts the text mentions all six tool names, contains the four anti-patterns, and that nextToolsFor returns a subset of the six tool names for every tool.",
+        "steps": [
+          "Write app/docs/INSTRUCTIONS.md as the one-screen guide",
+          "Mirror it in instructions.ts as INSTRUCTIONS_TEXT",
+          "Implement nextToolsFor with the routing table",
+          "Write tests/instructions.test.ts for names, anti-patterns and the subset rule"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/instructions.test.ts. Done when the text names all six tools and the four anti-patterns, and nextToolsFor returns only real tool names for all seven tools."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-032",
+      "title": "Packaging: README, compiled binary smoke check",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "app/README.md",
+        "app/tests/binary-smoke.test.ts"
+      ],
+      "details": {
+        "goal": "Prove the artifact can be built and started, and document the two distribution paths with their measured sizes.",
+        "contract": "README.md documents: install (bun, then bun install), first run (bun run index then bun run mcp), the seven tools with one line each, the .codegraph directory and its single-star .gitignore, the data-dir override and why it exists (read-only mounts and network filesystems), and distribution options with measured sizes: compiled binary about 104 MB baseline plus grammars, versus npm package requiring Bun at about 102 MB. tests/binary-smoke.test.ts runs bun build --compile into a temp dir, spawns the binary with an initialize request on stdin, asserts a valid JSON-RPC response on stdout, then kills it. Skip the test with a clear message if the compile step exceeds 180 seconds.",
+        "steps": [
+          "Write app/README.md with install, first run, tools table and distribution sizes",
+          "Write tests/binary-smoke.test.ts building and spawning the binary",
+          "Assert one valid JSON-RPC initialize response and no non-JSON stdout",
+          "Add the timeout guard with an explicit skip reason"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/binary-smoke.test.ts. Done when the compiled binary answers initialize with a valid JSON-RPC response and stdout contains no non-JSON line."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-033",
+      "title": "Phase 3 closing gate: acceptance criteria from DESIGN section 14",
+      "agent": "verify",
+      "size": "M",
+      "files": [
+        "app/tests/acceptance.test.ts"
+      ],
+      "details": {
+        "goal": "Encode the whole product's acceptance criteria as tests so regressions are caught by CI, not by a user.",
+        "contract": "acceptance.test.ts indexes the reference corpus code-review-graph/ into a temp data dir and asserts, in one file: (1) every tool response is within its declared default budget plus 10 percent, measured on real payloads; (2) total_relation eq appears only when coverage.complete is true and no unresolved rows exist in the queried scope, zero exceptions across at least 20 calls; (3) a request touching a not_indexed path returns coverage.complete false and lists the reason; (4) trace p95 under 40 ms, search p95 under 60 ms, summary change p95 under 120 ms over 30 repetitions each, recorded in the test output; (5) every response carries all nine envelope fields with no undefined; (6) the seven tools are the only registered names and the agent profile exposes six. Failing threshold numbers must be printed so the report is actionable.",
+        "steps": [
+          "Write the fixture indexing step reusing the worker",
+          "Implement the budget, coverage and envelope sweeps across all tools",
+          "Implement the three latency measurements with 30 repetitions each",
+          "Assert profile composition and the seven-name registry",
+          "Record all measured numbers in the progress log"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/acceptance.test.ts. Done when all six acceptance assertions pass and the reported p95 values are under 40, 60 and 120 ms respectively."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-029",
+        "TASK-030",
+        "TASK-031",
+        "TASK-032"
+      ]
+    }
+  ]
+}
