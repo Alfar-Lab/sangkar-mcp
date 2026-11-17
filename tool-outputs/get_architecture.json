@@ -1,0 +1,3 @@
+{
+  "_text": "project: home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph\ntotal_nodes: 17230\ntotal_edges: 87766\nlanguages: 10  (cols: language files)\n  Python 408\n  TypeScript 28\n  YAML 24\n  Java 4\n  C 4\n  C++ 3\n  Rust 3\n  Bash 3\n  Go 2\n  R 2\npackages: 15  (cols: name nodes fan_in fan_out)\n  assets 827 0 0\n  parser 610 0 0\n  fixtures 515 0 0\n  test_incremental 218 0 0\n  src 168 0 0\n  test_graph 150 0 0\n  test_action_e2e 129 0 0\n  tools 116 0 0\n  test_rename_imports 105 0 0\n  eval 101 0 0\n  test_refactor 90 0 0\n  daemon 86 0 0\n  test_uninstall 70 0 0\n  test_workspace_resolver 67 0 0\n  test_tsconfig_resolver 67 0 0\n"
+}

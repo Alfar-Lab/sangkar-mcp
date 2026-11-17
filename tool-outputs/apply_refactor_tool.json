@@ -1,0 +1,35 @@
+{
+  "status": "ok",
+  "dry_run": true,
+  "applied": 0,
+  "edits_applied": 17,
+  "would_modify": [
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_derived_data_fallbacks.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_module_alias_shims.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_property_reads.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_receiver_evidence.py",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_unbound_call_targets.py"
+  ],
+  "files_modified": [],
+  "diffs": {
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py": "--- a//home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py\n+++ b//home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py\n@@ -3198,7 +3198,7 @@\n             edge_extra, node.qualified_name, node.file_path, node.parent_name,\n         )\n \n-    def resolve_bare_call_targets(self) -> int:\n+    def resolve_bare_call_targets_v2(self) -> int:\n         \"\"\"Resolve bare CALLS targets backed by same-file or import evidence.\n \n         After parsing, some CALLS edges have bare targets (no ``::`` separator)\n",
+    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py": "--- a//home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py\n+++ b//home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py\n@@ -87,7 +87,7 @@\n ) -> None:\n     \"\"\"Resolve bare and C++ scoped call targets before derived graph steps.\"\"\"\n     try:\n-        resolved = store.resolve_bare_call_targets()\n+        resolved = store.resolve_bare_call_targets_v2()\n         resolved += store.resolve_bare_tested_by_sources()\n         result[\"bare_edges_resolved\"] = resolved\n         result[\"cpp_scoped_edges_resolved\"] = (\n"
+  },
+  "diffs_total": 12,
+  "diffs_truncated": true,
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 274,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

@@ -1,0 +1,329 @@
+{
+  "status": "ok",
+  "pattern": "callers_of",
+  "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+  "description": "Find all functions that call a given function",
+  "summary": "Found 12 call site(s) across 12 node(s) for callers_of('/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets')",
+  "result_count": 12,
+  "results_omitted": 0,
+  "results": [
+    {
+      "id": 3233,
+      "kind": "Function",
+      "name": "_resolve_bare_endpoints",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py::_resolve_bare_endpoints",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py",
+      "line_start": 83,
+      "line_end": 103,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "call_site": {
+        "line": 90
+      }
+    },
+    {
+      "id": 5997,
+      "kind": "Test",
+      "name": "test_cross_file_receiver_call_without_type_evidence_stays_unresolved",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py::test_cross_file_receiver_call_without_type_evidence_stays_unresolved",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py",
+      "line_start": 779,
+      "line_end": 843,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 821
+      }
+    },
+    {
+      "id": 6073,
+      "kind": "Function",
+      "name": "_build",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py::_build",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py",
+      "line_start": 16,
+      "line_end": 32,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 30
+      }
+    },
+    {
+      "id": 6096,
+      "kind": "Test",
+      "name": "test_global_using_and_tested_by_survive_repeated_passes",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py::test_global_using_and_tested_by_survive_repeated_passes",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py",
+      "line_start": 599,
+      "line_end": 616,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 612
+      }
+    },
+    {
+      "id": 7679,
+      "kind": "Test",
+      "name": "test_same_file_call_target_is_strong_evidence",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py::TestResolveBareEndpoints.test_same_file_call_target_is_strong_evidence",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py",
+      "line_start": 1714,
+      "line_end": 1722,
+      "language": "python",
+      "parent_name": "TestResolveBareEndpoints",
+      "is_test": true,
+      "call_site": {
+        "line": 1721
+      }
+    },
+    {
+      "id": 7680,
+      "kind": "Test",
+      "name": "test_unique_unrelated_call_target_stays_bare",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py::TestResolveBareEndpoints.test_unique_unrelated_call_target_stays_bare",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py",
+      "line_start": 1724,
+      "line_end": 1732,
+      "language": "python",
+      "parent_name": "TestResolveBareEndpoints",
+      "is_test": true,
+      "call_site": {
+        "line": 1731
+      }
+    },
+    {
+      "id": 9397,
+      "kind": "Function",
+      "name": "_build",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py::TestCSharpNamespaceImpactAndCoverage._build",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+      "line_start": 1141,
+      "line_end": 1207,
+      "language": "python",
+      "parent_name": "TestCSharpNamespaceImpactAndCoverage",
+      "is_test": true,
+      "call_site": {
+        "line": 1205
+      }
+    },
+    {
+      "id": 10977,
+      "kind": "Function",
+      "name": "_resolved_store",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_module_alias_shims.py::_resolved_store",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_module_alias_shims.py",
+      "line_start": 86,
+      "line_end": 100,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 97
+      }
+    },
+    {
+      "id": 11011,
+      "kind": "Function",
+      "name": "_parse_repo",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_property_reads.py::_parse_repo",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_property_reads.py",
+      "line_start": 11,
+      "line_end": 22,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 21
+      }
+    },
+    {
+      "id": 11047,
+      "kind": "Function",
+      "name": "_resolved_store",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_receiver_evidence.py::_resolved_store",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_receiver_evidence.py",
+      "line_start": 73,
+      "line_end": 87,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 85
+      }
+    },
+    {
+      "id": 13001,
+      "kind": "Test",
+      "name": "test_bare_call_bound_by_evidence_is_inferred_not_extracted",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_unbound_call_targets.py::test_bare_call_bound_by_evidence_is_inferred_not_extracted",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_unbound_call_targets.py",
+      "line_start": 446,
+      "line_end": 465,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "call_site": {
+        "line": 456
+      }
+    },
+    {
+      "id": 3604,
+      "kind": "Function",
+      "name": "run_postprocess",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py::run_postprocess",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py",
+      "line_start": 865,
+      "line_end": 1061,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "target_resolution": "unresolved",
+      "call_site": {
+        "line": 919
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": 22387,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py::_resolve_bare_endpoints",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py",
+      "line": 90,
+      "confidence": 1.0,
+      "confidence_tier": "EXTRACTED"
+    },
+    {
+      "id": 45676,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py::test_cross_file_receiver_call_without_type_evidence_stays_unresolved",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py",
+      "line": 821,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 47060,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py::_build",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py",
+      "line": 30,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 47242,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py::test_global_using_and_tested_by_survive_repeated_passes",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_csharp_namespaces.py",
+      "line": 612,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 65128,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py::TestResolveBareEndpoints.test_same_file_call_target_is_strong_evidence",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py",
+      "line": 1721,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 65135,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py::TestResolveBareEndpoints.test_unique_unrelated_call_target_stays_bare",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_graph.py",
+      "line": 1731,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 85469,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py::TestCSharpNamespaceImpactAndCoverage._build",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+      "line": 1205,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 98630,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_module_alias_shims.py::_resolved_store",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_module_alias_shims.py",
+      "line": 97,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 99126,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_property_reads.py::_parse_repo",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_property_reads.py",
+      "line": 21,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 99555,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_receiver_evidence.py::_resolved_store",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_python_receiver_evidence.py",
+      "line": 85,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 118751,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_unbound_call_targets.py::test_bare_call_bound_by_evidence_is_inferred_not_extracted",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_unbound_call_targets.py",
+      "line": 456,
+      "confidence": 0.8,
+      "confidence_tier": "INFERRED"
+    },
+    {
+      "id": 25822,
+      "kind": "CALLS",
+      "source": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py::run_postprocess",
+      "target": "resolve_bare_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py",
+      "line": 919,
+      "confidence": 0.2,
+      "confidence_tier": "UNRESOLVED",
+      "target_resolution": "unresolved"
+    }
+  ],
+  "distinct_nodes": 12,
+  "resolution_split": {
+    "direct": 11,
+    "unresolved": 1
+  },
+  "confidence": "1 of 12 call sites match by name only and may be wrong; resolution='direct' keeps the confirmed ones",
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 160,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

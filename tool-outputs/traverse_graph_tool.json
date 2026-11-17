@@ -1,0 +1,148 @@
+{
+  "start_node": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+  "mode": "bfs",
+  "max_depth": 2,
+  "token_budget": 1500,
+  "nodes_visited": 18,
+  "traversal": [
+    {
+      "name": "GraphStore",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 0
+    },
+    {
+      "name": "__init__",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.__init__",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_read_only_uri",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._read_only_uri",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "__enter__",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.__enter__",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "__exit__",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.__exit__",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_init_schema",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._init_schema",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_invalidate_cache",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._invalidate_cache",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "shrink_memory",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.shrink_memory",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "close",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.close",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "upsert_node",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.upsert_node",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_qualified_for_upsert",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._qualified_for_upsert",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_semantic_disambiguator",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._semantic_disambiguator",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_semantic_signature",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._semantic_signature",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_row_semantic_signature",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._row_semantic_signature",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_is_collision_identity",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._is_collision_identity",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_collision_base",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._collision_base",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "_plan_file_identities",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._plan_file_identities",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    },
+    {
+      "name": "upsert_edge",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.upsert_edge",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "depth": 1
+    }
+  ],
+  "truncated": true,
+  "next_tool_suggestions": [
+    "query_graph_tool callers_of -- focused relationship query",
+    "get_impact_radius_tool -- blast radius analysis"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 160,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

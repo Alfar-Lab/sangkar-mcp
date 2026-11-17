@@ -1,0 +1,90 @@
+{
+  "status": "ok",
+  "summary": "Found 273 node(s) with >= 300 lines, showing 5 of 273:\n  25167 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py (code_review_graph/parser.py:1)\n  21366 lines |    Class | CodeParser (code_review_graph/parser.py:3801)\n  6216 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py (tests/test_multilang.py:1)\n  6035 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py (code_review_graph/graph.py:1)\n  5406 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py (code_review_graph/incremental.py:1)",
+  "total_found": 273,
+  "total": 273,
+  "result_count": 273,
+  "results_omitted": 268,
+  "truncated": true,
+  "min_lines": 300,
+  "results": [
+    {
+      "id": 2620,
+      "kind": "File",
+      "name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "line_start": 1,
+      "line_end": 25167,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "line_count": 25167,
+      "relative_path": "code_review_graph/parser.py"
+    },
+    {
+      "id": 2756,
+      "kind": "Class",
+      "name": "CodeParser",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "line_start": 3801,
+      "line_end": 25166,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "line_count": 21366,
+      "relative_path": "code_review_graph/parser.py"
+    },
+    {
+      "id": 9295,
+      "kind": "File",
+      "name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py",
+      "line_start": 1,
+      "line_end": 6216,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "line_count": 6216,
+      "relative_path": "tests/test_multilang.py"
+    },
+    {
+      "id": 1891,
+      "kind": "File",
+      "name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 1,
+      "line_end": 6035,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "line_count": 6035,
+      "relative_path": "code_review_graph/graph.py"
+    },
+    {
+      "id": 2136,
+      "kind": "File",
+      "name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py",
+      "line_start": 1,
+      "line_end": 5406,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "line_count": 5406,
+      "relative_path": "code_review_graph/incremental.py"
+    }
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 246,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

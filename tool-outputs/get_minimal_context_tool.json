@@ -1,0 +1,35 @@
+{
+  "status": "ok",
+  "summary": "13955 nodes, 130044 edges across 530 files. Risk: high (0.80).",
+  "key_entities": [
+    "GraphStore",
+    "resolve_cpp_scoped_call_targets",
+    "_resolve_bare_endpoints",
+    "_schema_written_by",
+    "test_release_list_tracks_the_newest_tag"
+  ],
+  "risk": "high",
+  "communities": [
+    "tests-file",
+    "code-review-graph-name",
+    "workflows"
+  ],
+  "flows_affected": [
+    "activate",
+    "benchmark_debug_workflow",
+    "benchmark_pre_merge_workflow"
+  ],
+  "next_tool_suggestions": [
+    "detect_changes_tool",
+    "semantic_search_nodes_tool",
+    "get_architecture_overview_tool"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 160,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

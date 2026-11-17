@@ -1,0 +1,16 @@
+{
+  "status": "ok",
+  "summary": "Wiki generated: 11 new, 0 updated, 0 unchanged (11 total pages)",
+  "wiki_dir": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.code-review-graph/wiki",
+  "pages_generated": 11,
+  "pages_updated": 0,
+  "pages_unchanged": 0,
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 274,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

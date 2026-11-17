@@ -1,0 +1,72 @@
+{
+  "status": "ok",
+  "summary": "13414 hub node(s) ranked by degree, showing 5 of 13414",
+  "hub_nodes": [
+    {
+      "name": "GraphStore",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "in_degree": 846,
+      "out_degree": 769,
+      "total_degree": 1615,
+      "community_id": 6
+    },
+    {
+      "name": "CodeParser",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "in_degree": 505,
+      "out_degree": 841,
+      "total_degree": 1346,
+      "community_id": 6
+    },
+    {
+      "name": "close",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.close",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "in_degree": 604,
+      "out_degree": 463,
+      "total_degree": 1067,
+      "community_id": 6
+    },
+    {
+      "name": "commit",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.commit",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "in_degree": 446,
+      "out_degree": 339,
+      "total_degree": 785,
+      "community_id": 6
+    },
+    {
+      "name": "NodeInfo",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::NodeInfo",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "in_degree": 547,
+      "out_degree": 238,
+      "total_degree": 785,
+      "community_id": 6
+    }
+  ],
+  "count": 5,
+  "total": 13414,
+  "truncated": true,
+  "next_tool_suggestions": [
+    "get_impact_radius_tool -- check blast radius of a hub",
+    "query_graph_tool callers_of -- see what calls a hub",
+    "get_bridge_nodes_tool -- find architectural chokepoints"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 163,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

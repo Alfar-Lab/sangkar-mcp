@@ -1,0 +1,10 @@
+# Reference implementations — cloned for analysis only, not vendored.
+# Re-create with:
+#   git clone https://github.com/DeusData/codebase-memory-mcp
+#   git clone https://github.com/tirth8205/code-review-graph
+codebase-memory-mcp/
+code-review-graph/
+
+# Local editor / OS noise
+.DS_Store
+*.swp

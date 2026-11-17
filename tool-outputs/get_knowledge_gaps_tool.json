@@ -1,0 +1,131 @@
+{
+  "status": "ok",
+  "summary": {
+    "isolated_nodes": 50,
+    "thin_communities": 0,
+    "untested_hotspots": 20,
+    "single_file_communities": 4,
+    "import_cycles": 1
+  },
+  "gaps": {
+    "isolated_nodes": [
+      {
+        "name": "$.backup.git-push",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml::yaml:0:$.backup.git-push",
+        "kind": "YamlPath",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml",
+        "degree": 1
+      },
+      {
+        "name": "$.database",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/metadata.json::json:$.database",
+        "kind": "JsonPath",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/metadata.json",
+        "degree": 1
+      },
+      {
+        "name": "$.backend",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/metadata.json::json:$.backend",
+        "kind": "JsonPath",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/metadata.json",
+        "degree": 1
+      }
+    ],
+    "thin_communities": [],
+    "untested_hotspots": [
+      {
+        "name": "_dispatch",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/cli.py::_dispatch",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/cli.py",
+        "degree": 324
+      },
+      {
+        "name": "registerCommands",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::registerCommands",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "degree": 170
+      },
+      {
+        "name": "_parse_sql",
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser._parse_sql",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+        "degree": 127
+      }
+    ],
+    "single_file_communities": [
+      {
+        "community_id": 3,
+        "name": "code-review-graph-2",
+        "size": 6,
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.mcp.json"
+      },
+      {
+        "community_id": 4,
+        "name": "code-review-graph",
+        "size": 52,
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/action.yml"
+      },
+      {
+        "community_id": 7,
+        "name": "diagrams-id",
+        "size": 23,
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/diagrams/generate_diagrams.py"
+      }
+    ],
+    "import_cycles": [
+      {
+        "name": "code_review_graph/aop_resolver.py -> code_review_graph/parser.py -> code_review_graph/incremental.py -> code_review_graph/aop_resolver.py",
+        "size": 10,
+        "load_time": false,
+        "files": [
+          "code_review_graph/aop_resolver.py",
+          "code_review_graph/communities.py",
+          "code_review_graph/embeddings.py",
+          "code_review_graph/event_resolver.py",
+          "code_review_graph/flows.py",
+          "code_review_graph/graph.py",
+          "code_review_graph/incremental.py",
+          "code_review_graph/jedi_resolver.py",
+          "code_review_graph/migrations.py",
+          "code_review_graph/parser.py"
+        ],
+        "loop_length": 3,
+        "cycle": [
+          {
+            "file": "code_review_graph/aop_resolver.py",
+            "line": 105,
+            "imports": "code_review_graph/parser.py"
+          },
+          {
+            "file": "code_review_graph/parser.py",
+            "line": 20398,
+            "imports": "code_review_graph/incremental.py"
+          },
+          {
+            "file": "code_review_graph/incremental.py",
+            "line": 304,
+            "imports": "code_review_graph/aop_resolver.py"
+          }
+        ]
+      }
+    ]
+  },
+  "total_gaps": 75,
+  "truncated": true,
+  "next_tool_suggestions": [
+    "refactor_tool dead_code -- find unused symbols",
+    "get_hub_nodes_tool -- find high-impact nodes",
+    "get_suggested_questions_tool -- review prompts"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 201,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "_text": "rows: 0  (cols: caller file)\nreturned: 0\ntotal: 0\ntotal_relation: eq\nhas_more: false\ntruncated: false\nhint: \"Query returned no results. Use get_graph_schema() to see available labels and edge types.\"\n"
+}

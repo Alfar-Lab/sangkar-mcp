@@ -1,0 +1,4 @@
+{
+  "error": "base_project and target_project must be distinct",
+  "code": "invalid_arguments"
+}

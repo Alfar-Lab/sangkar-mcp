@@ -1,0 +1,13 @@
+{
+  "status": "stored",
+  "label": "demo-run",
+  "pairs_stored": 0,
+  "paths_stored": 0,
+  "pairs_unmatched": 2,
+  "unmatched_sample": [
+    "main",
+    "GraphStore.build",
+    "GraphStore.resolve_bare_call_targets"
+  ],
+  "pair_total": 0
+}

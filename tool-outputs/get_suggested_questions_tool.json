@@ -1,0 +1,71 @@
+{
+  "questions": [
+    {
+      "category": "bridge_node",
+      "question": "'CodeParser' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "priority": "high"
+    },
+    {
+      "category": "bridge_node",
+      "question": "'GraphStore' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "priority": "high"
+    },
+    {
+      "category": "bridge_node",
+      "question": "'close' is a critical connector between multiple code regions. Is it adequately tested and documented?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.close",
+      "priority": "high"
+    },
+    {
+      "category": "surprising_connection",
+      "question": "'_spy' (community 10) calls 'map_changes_to_nodes' (community 6). Is this coupling intentional?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_changes.py::TestAnalyzeChangesInternalParseRemap._spy",
+      "priority": "medium"
+    },
+    {
+      "category": "surprising_connection",
+      "question": "'teardown_method' (community 10) calls 'close' (community 6). Is this coupling intentional?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_enrich.py::TestEnrichSearch.teardown_method",
+      "priority": "medium"
+    },
+    {
+      "category": "surprising_connection",
+      "question": "'teardown_method' (community 10) calls 'close' (community 6). Is this coupling intentional?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_enrich.py::TestEnrichFileRead.teardown_method",
+      "priority": "medium"
+    },
+    {
+      "category": "untested_hotspot",
+      "question": "'_dispatch' has 324 connections but no test coverage. Is this a risk?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/cli.py::_dispatch",
+      "priority": "medium"
+    },
+    {
+      "category": "untested_hotspot",
+      "question": "'registerCommands' has 170 connections but no test coverage. Is this a risk?",
+      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::registerCommands",
+      "priority": "medium"
+    }
+  ],
+  "count": 8,
+  "by_priority": {
+    "high": 3,
+    "medium": 5,
+    "low": 0
+  },
+  "next_tool_suggestions": [
+    "get_knowledge_gaps_tool -- structural weaknesses",
+    "detect_changes_tool -- risk-scored review",
+    "get_architecture_overview_tool -- community map"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 246,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

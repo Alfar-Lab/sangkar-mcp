@@ -1,0 +1,62 @@
+{
+  "status": "ok",
+  "summary": "8852 bridge node(s) ranked by betweenness, showing 5 of 8852",
+  "bridge_nodes": [
+    {
+      "name": "CodeParser",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "betweenness": 0.042807,
+      "community_id": 6
+    },
+    {
+      "name": "GraphStore",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "kind": "Class",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "betweenness": 0.024373,
+      "community_id": 6
+    },
+    {
+      "name": "commit",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.commit",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "betweenness": 0.011447,
+      "community_id": 6
+    },
+    {
+      "name": "close",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.close",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "betweenness": 0.010647,
+      "community_id": 6
+    },
+    {
+      "name": "incremental_update",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py::incremental_update",
+      "kind": "Function",
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/incremental.py",
+      "betweenness": 0.006341,
+      "community_id": 6
+    }
+  ],
+  "count": 5,
+  "total": 8852,
+  "truncated": true,
+  "next_tool_suggestions": [
+    "get_hub_nodes_tool -- find most connected nodes",
+    "get_impact_radius_tool -- check blast radius",
+    "detect_changes_tool -- see if bridges are affected"
+  ],
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 200,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

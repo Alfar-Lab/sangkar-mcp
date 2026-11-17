@@ -1,0 +1,358 @@
+{
+  "status": "ok",
+  "summary": "Analyzed 3 changed file(s):\n  - 5 changed function(s)/class(es)\n  - 52 affected flow(s)\n  - 0 test gap(s)\n  - Overall risk score: 0.80\n  - Response bounded: 5 of 5 changed function(s), 0 of 0 changed YAML path(s), 0 of 0 test gap(s), 20 of 52 flow(s) shown",
+  "risk_score": 0.8,
+  "changed_functions": [
+    {
+      "id": 1929,
+      "kind": "Class",
+      "name": "GraphStore",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 1006,
+      "line_end": 5859,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "risk_score": 0.7
+    },
+    {
+      "id": 2011,
+      "kind": "Function",
+      "name": "resolve_cpp_scoped_call_targets",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_cpp_scoped_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 3535,
+      "line_end": 3743,
+      "language": "python",
+      "parent_name": "GraphStore",
+      "is_test": false,
+      "risk_score": 0.7
+    },
+    {
+      "id": 2018,
+      "kind": "Function",
+      "name": "_resolve_bare_endpoints",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._resolve_bare_endpoints",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 3969,
+      "line_end": 4261,
+      "language": "python",
+      "parent_name": "GraphStore",
+      "is_test": false,
+      "risk_score": 0.8
+    },
+    {
+      "id": 13296,
+      "kind": "Function",
+      "name": "_schema_written_by",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py::_schema_written_by",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py",
+      "line_start": 744,
+      "line_end": 752,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "risk_score": 0.345
+    },
+    {
+      "id": 13297,
+      "kind": "Test",
+      "name": "test_release_list_tracks_the_newest_tag",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py::test_release_list_tracks_the_newest_tag",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py",
+      "line_start": 755,
+      "line_end": 780,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "risk_score": 0.295
+    }
+  ],
+  "changed_yaml_paths": [],
+  "changed_json_paths": [],
+  "affected_flows": [
+    {
+      "id": 2,
+      "name": "benchmark_debug_workflow",
+      "criticality": 0.739,
+      "depth": 15,
+      "node_count": 810,
+      "file_count": 20
+    },
+    {
+      "id": 3,
+      "name": "benchmark_pre_merge_workflow",
+      "criticality": 0.7378,
+      "depth": 15,
+      "node_count": 760,
+      "file_count": 19
+    },
+    {
+      "id": 4,
+      "name": "benchmark_architecture_workflow",
+      "criticality": 0.7376,
+      "depth": 15,
+      "node_count": 751,
+      "file_count": 19
+    },
+    {
+      "id": 5,
+      "name": "benchmark_onboard_workflow",
+      "criticality": 0.7365,
+      "depth": 15,
+      "node_count": 741,
+      "file_count": 17
+    },
+    {
+      "id": 6,
+      "name": "main",
+      "criticality": 0.7232,
+      "depth": 15,
+      "node_count": 1616,
+      "file_count": 59
+    },
+    {
+      "id": 7,
+      "name": "process",
+      "criticality": 0.7161,
+      "depth": 11,
+      "node_count": 271,
+      "file_count": 21
+    },
+    {
+      "id": 8,
+      "name": "_run",
+      "criticality": 0.7121,
+      "depth": 11,
+      "node_count": 301,
+      "file_count": 22
+    },
+    {
+      "id": 9,
+      "name": "run_token_benchmark",
+      "criticality": 0.691,
+      "depth": 6,
+      "node_count": 58,
+      "file_count": 6
+    },
+    {
+      "id": 13,
+      "name": "get_community_func",
+      "criticality": 0.6656,
+      "depth": 5,
+      "node_count": 48,
+      "file_count": 9
+    },
+    {
+      "id": 14,
+      "name": "get_surprising_connections_func",
+      "criticality": 0.6615,
+      "depth": 5,
+      "node_count": 39,
+      "file_count": 8
+    },
+    {
+      "id": 15,
+      "name": "find_large_functions",
+      "criticality": 0.6595,
+      "depth": 5,
+      "node_count": 37,
+      "file_count": 7
+    },
+    {
+      "id": 17,
+      "name": "get_bridge_nodes_func",
+      "criticality": 0.6488,
+      "depth": 5,
+      "node_count": 40,
+      "file_count": 8
+    },
+    {
+      "id": 18,
+      "name": "get_hub_nodes_func",
+      "criticality": 0.6487,
+      "depth": 5,
+      "node_count": 39,
+      "file_count": 8
+    },
+    {
+      "id": 19,
+      "name": "get_knowledge_gaps_func",
+      "criticality": 0.6443,
+      "depth": 5,
+      "node_count": 44,
+      "file_count": 8
+    },
+    {
+      "id": 21,
+      "name": "get_suggested_questions_func",
+      "criticality": 0.6398,
+      "depth": 5,
+      "node_count": 49,
+      "file_count": 8
+    },
+    {
+      "id": 22,
+      "name": "get_impact_radius_tool",
+      "criticality": 0.6392,
+      "depth": 6,
+      "node_count": 36,
+      "file_count": 5
+    },
+    {
+      "id": 23,
+      "name": "run",
+      "criticality": 0.6346,
+      "depth": 5,
+      "node_count": 26,
+      "file_count": 5
+    },
+    {
+      "id": 25,
+      "name": "generate_wiki_func",
+      "criticality": 0.6268,
+      "depth": 5,
+      "node_count": 41,
+      "file_count": 10
+    },
+    {
+      "id": 26,
+      "name": "main",
+      "criticality": 0.615,
+      "depth": 4,
+      "node_count": 26,
+      "file_count": 8
+    },
+    {
+      "id": 29,
+      "name": "__init__",
+      "criticality": 0.5787,
+      "depth": 3,
+      "node_count": 19,
+      "file_count": 4
+    }
+  ],
+  "test_gaps": [],
+  "test_gaps_total": 0,
+  "test_gaps_uncovered": 0,
+  "test_gaps_indirect": 0,
+  "removed_symbols": [],
+  "removed_symbols_total": 0,
+  "review_priorities": [
+    {
+      "id": 2018,
+      "kind": "Function",
+      "name": "_resolve_bare_endpoints",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore._resolve_bare_endpoints",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 3969,
+      "line_end": 4261,
+      "language": "python",
+      "parent_name": "GraphStore",
+      "is_test": false,
+      "risk_score": 0.8
+    },
+    {
+      "id": 1929,
+      "kind": "Class",
+      "name": "GraphStore",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 1006,
+      "line_end": 5859,
+      "language": "python",
+      "parent_name": null,
+      "is_test": false,
+      "risk_score": 0.7
+    },
+    {
+      "id": 2011,
+      "kind": "Function",
+      "name": "resolve_cpp_scoped_call_targets",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_cpp_scoped_call_targets",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line_start": 3535,
+      "line_end": 3743,
+      "language": "python",
+      "parent_name": "GraphStore",
+      "is_test": false,
+      "risk_score": 0.7
+    },
+    {
+      "id": 13296,
+      "kind": "Function",
+      "name": "_schema_written_by",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py::_schema_written_by",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py",
+      "line_start": 744,
+      "line_end": 752,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "risk_score": 0.345
+    },
+    {
+      "id": 13297,
+      "kind": "Test",
+      "name": "test_release_list_tracks_the_newest_tag",
+      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py::test_release_list_tracks_the_newest_tag",
+      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_upgrade_path.py",
+      "line_start": 755,
+      "line_end": 780,
+      "language": "python",
+      "parent_name": null,
+      "is_test": true,
+      "risk_score": 0.295
+    }
+  ],
+  "functions_truncated": false,
+  "yaml_paths_truncated": false,
+  "json_paths_truncated": false,
+  "diff_ranges_unavailable": "",
+  "churn_status": "ok",
+  "changed_files": [
+    "CHANGELOG.md",
+    "code_review_graph/graph.py",
+    "tests/test_upgrade_path.py"
+  ],
+  "changed_file_count": 3,
+  "changed_functions_total": 5,
+  "changed_yaml_paths_total": 0,
+  "changed_json_paths_total": 0,
+  "affected_flows_total": 52,
+  "truncated": true,
+  "_hints": {
+    "next_steps": [
+      {
+        "tool": "get_review_context_tool",
+        "suggestion": "Build a full review context with source snippets"
+      },
+      {
+        "tool": "get_affected_flows_tool",
+        "suggestion": "See which execution flows are affected"
+      },
+      {
+        "tool": "get_impact_radius_tool",
+        "suggestion": "Expand the blast radius analysis"
+      }
+    ],
+    "related": [],
+    "warnings": [
+      "High risk score (0.80) \u2014 review carefully"
+    ]
+  },
+  "context_savings": {
+    "estimated": true,
+    "saved_tokens": 122562,
+    "saved_percent": 98
+  },
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 161,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

@@ -1,0 +1,3 @@
+{
+  "_text": "projects: 3  (cols: name root_path branch nodes edges size_bytes)\n  home-ljosalfar-server-Documents-apps-ef-watcher /home/ljosalfar-server/Documents/apps/ef-watcher master 2597 5539 11337728\n  home-ljosalfar-server-Documents-apps-portfolio-web /home/ljosalfar-server/Documents/apps/portfolio-web main 739 1407 5046272\n  home-ljosalfar-server-Documents-harness-app-pi-web /home/ljosalfar-server/Documents/harness-app/pi-web custom 16571 68596 73269248\ntotal: 7\nreturned: 3\nhas_more: true\nnext_offset: 3\n"
+}

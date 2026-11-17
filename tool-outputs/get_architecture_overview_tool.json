@@ -1,0 +1,128 @@
+{
+  "status": "ok",
+  "summary": "Architecture: 10 communities, 3 community pairs, 1 warning(s)",
+  "communities": [
+    {
+      "id": 10,
+      "name": "tests-file",
+      "size": 9580,
+      "cohesion": 0.2617,
+      "dominant_language": "python"
+    },
+    {
+      "id": 6,
+      "name": "code-review-graph-name",
+      "size": 2722,
+      "cohesion": 0.1623,
+      "dominant_language": "python"
+    },
+    {
+      "id": 2,
+      "name": "workflows",
+      "size": 578,
+      "cohesion": 0.9792,
+      "dominant_language": "yaml"
+    },
+    {
+      "id": 5,
+      "name": "code-review-graph-vscode-node",
+      "size": 333,
+      "cohesion": 0.3701,
+      "dominant_language": "typescript"
+    },
+    {
+      "id": 9,
+      "name": "scripts-section",
+      "size": 104,
+      "cohesion": 0.1937,
+      "dominant_language": "python"
+    },
+    {
+      "id": 4,
+      "name": "code-review-graph",
+      "size": 52,
+      "cohesion": 0.9808,
+      "dominant_language": "yaml"
+    },
+    {
+      "id": 7,
+      "name": "diagrams-id",
+      "size": 23,
+      "cohesion": 0.4036,
+      "dominant_language": "python"
+    },
+    {
+      "id": 8,
+      "name": "hooks",
+      "size": 18,
+      "cohesion": 0.9444,
+      "dominant_language": "json"
+    },
+    {
+      "id": 1,
+      "name": "beads",
+      "size": 9,
+      "cohesion": 0.7778,
+      "dominant_language": "json"
+    },
+    {
+      "id": 3,
+      "name": "code-review-graph-2",
+      "size": 6,
+      "cohesion": 0.8333,
+      "dominant_language": "json"
+    }
+  ],
+  "cross_community_edges": [
+    {
+      "source_community": "code-review-graph-name",
+      "target_community": "tests-file",
+      "edge_count": 11063,
+      "top_kinds": [
+        "CALLS",
+        "REFERENCES"
+      ]
+    },
+    {
+      "source_community": "code-review-graph-name",
+      "target_community": "scripts-section",
+      "edge_count": 4,
+      "top_kinds": [
+        "CALLS"
+      ]
+    },
+    {
+      "source_community": "scripts-section",
+      "target_community": "tests-file",
+      "edge_count": 1,
+      "top_kinds": [
+        "CALLS"
+      ]
+    }
+  ],
+  "warnings": [
+    "High coupling (11063 edges) between 'code-review-graph-name' and 'tests-file'"
+  ],
+  "cross_community_edges_total": 3,
+  "truncated": false,
+  "_hints": {
+    "next_steps": [],
+    "related": [],
+    "warnings": [
+      "High coupling (11063 edges) between 'code-review-graph-name' and 'tests-file'"
+    ]
+  },
+  "context_savings": {
+    "estimated": true,
+    "saved_tokens": 1514667,
+    "saved_percent": 100
+  },
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 247,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

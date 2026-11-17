@@ -1,0 +1,429 @@
+{
+  "status": "ok",
+  "summary": "Flow 'activate': 39 nodes, depth 4, criticality 0.7426",
+  "flow": {
+    "id": 1,
+    "name": "activate",
+    "entry_point_id": 855,
+    "depth": 4,
+    "node_count": 39,
+    "file_count": 8,
+    "criticality": 0.7426,
+    "path": [
+      855,
+      783,
+      811,
+      836,
+      837,
+      839,
+      854,
+      853,
+      883,
+      884,
+      895,
+      902,
+      779,
+      784,
+      781,
+      780,
+      782,
+      819,
+      820,
+      824,
+      816,
+      825,
+      818,
+      838,
+      852,
+      869,
+      888,
+      812,
+      881,
+      788,
+      791,
+      826,
+      828,
+      821,
+      815,
+      827,
+      785,
+      786,
+      790
+    ],
+    "steps": [
+      {
+        "node_id": 855,
+        "name": "activate",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 886,
+        "line_end": 981,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::activate"
+      },
+      {
+        "node_id": 783,
+        "name": "stopWatch",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 135,
+        "line_end": 139,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.stopWatch"
+      },
+      {
+        "node_id": 811,
+        "name": "checkSchemaCompatibility",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 195,
+        "line_end": 227,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.checkSchemaCompatibility"
+      },
+      {
+        "node_id": 836,
+        "name": "findGraphDb",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 27,
+        "line_end": 39,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::findGraphDb"
+      },
+      {
+        "node_id": 837,
+        "name": "getWorkspaceRoot",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 45,
+        "line_end": 58,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::getWorkspaceRoot"
+      },
+      {
+        "node_id": 839,
+        "name": "registerCommands",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 80,
+        "line_end": 773,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::registerCommands"
+      },
+      {
+        "node_id": 854,
+        "name": "setupAutoUpdate",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 850,
+        "line_end": 881,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::setupAutoUpdate"
+      },
+      {
+        "node_id": 853,
+        "name": "watchGraphDb",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 803,
+        "line_end": 845,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::watchGraphDb"
+      },
+      {
+        "node_id": 883,
+        "name": "registerWalkthroughCommands",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/welcome.ts",
+        "line_start": 13,
+        "line_end": 64,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/welcome.ts::registerWalkthroughCommands"
+      },
+      {
+        "node_id": 884,
+        "name": "showWelcomeIfNeeded",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/welcome.ts",
+        "line_start": 74,
+        "line_end": 110,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/welcome.ts::showWelcomeIfNeeded"
+      },
+      {
+        "node_id": 895,
+        "name": "highlightNode",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/graphWebview.ts",
+        "line_start": 277,
+        "line_end": 284,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/graphWebview.ts::GraphWebviewPanel.highlightNode"
+      },
+      {
+        "node_id": 902,
+        "name": "show",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/statusBar.ts",
+        "line_start": 57,
+        "line_end": 59,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/statusBar.ts::StatusBar.show"
+      },
+      {
+        "node_id": 779,
+        "name": "buildGraph",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 62,
+        "line_end": 79,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.buildGraph"
+      },
+      {
+        "node_id": 784,
+        "name": "embedGraph",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 144,
+        "line_end": 153,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.embedGraph"
+      },
+      {
+        "node_id": 781,
+        "name": "isWatching",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 89,
+        "line_end": 91,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.isWatching"
+      },
+      {
+        "node_id": 780,
+        "name": "updateGraph",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 84,
+        "line_end": 86,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.updateGraph"
+      },
+      {
+        "node_id": 782,
+        "name": "watchGraph",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 98,
+        "line_end": 132,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.watchGraph"
+      },
+      {
+        "node_id": 819,
+        "name": "getEdgesBySource",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 318,
+        "line_end": 323,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getEdgesBySource"
+      },
+      {
+        "node_id": 820,
+        "name": "getEdgesByTarget",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 326,
+        "line_end": 331,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getEdgesByTarget"
+      },
+      {
+        "node_id": 824,
+        "name": "getImpactRadius",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 440,
+        "line_end": 506,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getImpactRadius"
+      },
+      {
+        "node_id": 816,
+        "name": "getNode",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 277,
+        "line_end": 282,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getNode"
+      },
+      {
+        "node_id": 825,
+        "name": "getNodesBySize",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 517,
+        "line_end": 551,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getNodesBySize"
+      },
+      {
+        "node_id": 818,
+        "name": "searchNodes",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 303,
+        "line_end": 311,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.searchNodes"
+      },
+      {
+        "node_id": 838,
+        "name": "navigateToNode",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 64,
+        "line_end": 75,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::navigateToNode"
+      },
+      {
+        "node_id": 852,
+        "name": "reinitialize",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts",
+        "line_start": 778,
+        "line_end": 798,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/extension.ts::reinitialize"
+      },
+      {
+        "node_id": 869,
+        "name": "update",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/features/scmDecorations.ts",
+        "line_start": 31,
+        "line_end": 111,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/features/scmDecorations.ts::ScmDecorationProvider.update"
+      },
+      {
+        "node_id": 888,
+        "name": "createOrShow",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/graphWebview.ts",
+        "line_start": 63,
+        "line_end": 103,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/views/graphWebview.ts::GraphWebviewPanel.createOrShow"
+      },
+      {
+        "node_id": 812,
+        "name": "close",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 230,
+        "line_end": 235,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.close"
+      },
+      {
+        "node_id": 881,
+        "name": "autoInstall",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/installer.ts",
+        "line_start": 62,
+        "line_end": 113,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/onboarding/installer.ts::Installer.autoInstall"
+      },
+      {
+        "node_id": 788,
+        "name": "exec",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 221,
+        "line_end": 235,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.exec"
+      },
+      {
+        "node_id": 791,
+        "name": "toCliResult",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 252,
+        "line_end": 276,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::toCliResult"
+      },
+      {
+        "node_id": 826,
+        "name": "_db",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 558,
+        "line_end": 563,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader._db"
+      },
+      {
+        "node_id": 828,
+        "name": "_rowToEdge",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 586,
+        "line_end": 595,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader._rowToEdge"
+      },
+      {
+        "node_id": 821,
+        "name": "getEdgesAmong",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 339,
+        "line_end": 351,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getEdgesAmong"
+      },
+      {
+        "node_id": 815,
+        "name": "getNodesByFile",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 267,
+        "line_end": 274,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader.getNodesByFile"
+      },
+      {
+        "node_id": 827,
+        "name": "_rowToNode",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts",
+        "line_start": 566,
+        "line_end": 583,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/sqlite.ts::SqliteReader._rowToNode"
+      },
+      {
+        "node_id": 785,
+        "name": "detectPythonInstaller",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 159,
+        "line_end": 176,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.detectPythonInstaller"
+      },
+      {
+        "node_id": 786,
+        "name": "installBackend",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 181,
+        "line_end": 207,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::CliWrapper.installBackend"
+      },
+      {
+        "node_id": 790,
+        "name": "isEnoent",
+        "kind": "Function",
+        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts",
+        "line_start": 248,
+        "line_end": 250,
+        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code-review-graph-vscode/src/backend/cli.ts::isEnoent"
+      }
+    ],
+    "created_at": "2026-11-17 06:50:26",
+    "updated_at": "2026-11-17 06:50:26",
+    "total_steps": 39,
+    "truncated": false
+  },
+  "_hints": {
+    "next_steps": [
+      {
+        "tool": "query_graph_tool",
+        "suggestion": "Inspect callers/callees of a step in this flow"
+      }
+    ],
+    "related": [],
+    "warnings": []
+  },
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 246,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

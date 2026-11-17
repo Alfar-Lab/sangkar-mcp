@@ -1,0 +1,72 @@
+{
+  "status": "ok",
+  "summary": "Rename preview: resolve_bare_call_targets -> resolve_bare_call_targets_v2, 17 edit(s), showing 3 of 17. Use apply_refactor_tool(refactor_id='fe7dccdd') to apply.",
+  "refactor_id": "fe7dccdd",
+  "type": "rename",
+  "old_name": "resolve_bare_call_targets",
+  "new_name": "resolve_bare_call_targets_v2",
+  "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+  "edits": [
+    {
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "line": 3201,
+      "column": 9,
+      "old": "resolve_bare_call_targets",
+      "new": "resolve_bare_call_targets_v2",
+      "site": "definition",
+      "confidence": "high"
+    },
+    {
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py",
+      "line": 90,
+      "column": 26,
+      "old": "resolve_bare_call_targets",
+      "new": "resolve_bare_call_targets_v2",
+      "site": "call",
+      "confidence": "high"
+    },
+    {
+      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py",
+      "line": 299,
+      "column": 34,
+      "old": "resolve_bare_call_targets",
+      "new": "resolve_bare_call_targets_v2",
+      "site": "call",
+      "confidence": "high"
+    }
+  ],
+  "stats": {
+    "high": 17,
+    "medium": 0,
+    "low": 0
+  },
+  "created_at": 1794898488.9393096,
+  "total": 17,
+  "truncated": true,
+  "_hints": {
+    "next_steps": [
+      {
+        "tool": "query_graph_tool",
+        "suggestion": "Verify call sites before applying a rename"
+      },
+      {
+        "tool": "detect_changes_tool",
+        "suggestion": "Check risk of the refactored code"
+      },
+      {
+        "tool": "semantic_search_nodes_tool",
+        "suggestion": "Find related symbols to also rename"
+      }
+    ],
+    "related": [],
+    "warnings": []
+  },
+  "_graph": {
+    "updated_at": "2026-11-17T13:50:15",
+    "age_seconds": 273,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

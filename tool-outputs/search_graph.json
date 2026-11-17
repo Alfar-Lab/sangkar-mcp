@@ -1,0 +1,32 @@
+{
+  "cols": [
+    "qn",
+    "label",
+    "file",
+    "lines",
+    "rank"
+  ],
+  "rows": [
+    [
+      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore.resolve_bare_call_targets",
+      "Method",
+      "code_review_graph/graph.py",
+      "3201-3216",
+      -50.69574092348044
+    ],
+    [
+      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.parser.CodeParser._resolve_call_targets",
+      "Method",
+      "code_review_graph/parser.py",
+      "8024-8385",
+      -12.27358801485935
+    ]
+  ],
+  "total": 2,
+  "total_relation": "eq",
+  "search_mode": "bm25",
+  "returned": 2,
+  "count": 2,
+  "has_more": false,
+  "truncated": false
+}

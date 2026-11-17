@@ -1,0 +1,42 @@
+{
+  "files_updated": 0,
+  "total_nodes": 0,
+  "total_edges": 0,
+  "changed_files": [],
+  "dependent_files": [],
+  "stale_files_removed": 0,
+  "flow_entry_point_qns": [],
+  "communities_were_affected": false,
+  "errors": [],
+  "freshness_advanced": true,
+  "python_resolution": null,
+  "rescript_resolution": null,
+  "spring_resolution": null,
+  "aop_resolution": null,
+  "event_resolution": null,
+  "temporal_resolution": null,
+  "hcl_resolution": null,
+  "scoped_resolution": null,
+  "jedi_enrichment": null,
+  "status": "ok",
+  "build_type": "incremental",
+  "base_resolved": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+  "summary": "No changes detected. Graph is up to date.",
+  "postprocess_level": "minimal",
+  "signatures_updated": true,
+  "fts_indexed": 13955,
+  "fts_rebuilt": false,
+  "postprocess_timing": {
+    "signatures_s": 0.004369,
+    "fts_s": 0.021489
+  },
+  "repaired_interrupted_build": false,
+  "_graph": {
+    "updated_at": "2026-11-17T13:54:49",
+    "age_seconds": 0,
+    "built_at_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "built_on_branch": "staging",
+    "head_sha": "bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208",
+    "head_matches_build": true
+  }
+}

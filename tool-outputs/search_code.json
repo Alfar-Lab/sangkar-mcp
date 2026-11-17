@@ -1,0 +1,75 @@
+{
+  "cols": [
+    "qn",
+    "label",
+    "file",
+    "lines",
+    "matches",
+    "matches_omitted",
+    "in",
+    "out"
+  ],
+  "rows": [
+    [
+      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.tools.query.get_impact_radius",
+      "Function",
+      "code_review_graph/tools/query.py",
+      "738-1011",
+      [
+        738
+      ],
+      0,
+      29,
+      19
+    ],
+    [
+      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore.get_impact_radius_sql",
+      "Method",
+      "code_review_graph/graph.py",
+      "4663-4902",
+      [
+        4663
+      ],
+      0,
+      18,
+      11
+    ]
+  ],
+  "raw_matches": {
+    "cols": [
+      "file",
+      "line",
+      "content",
+      "content_start_byte",
+      "content_returned_bytes",
+      "content_total_bytes",
+      "match_start_byte",
+      "match_end_byte",
+      "content_has_more",
+      "content_next_offset",
+      "match_fully_returned"
+    ],
+    "rows": []
+  },
+  "directories": {
+    "code_review_graph/": 5,
+    "tests/": 1,
+    "docs/": 1
+  },
+  "total_grep_matches": 7,
+  "total_results": 7,
+  "raw_match_count": 0,
+  "total_relation": "eq",
+  "result_offset": 0,
+  "results_returned": 2,
+  "has_more": true,
+  "next_offset": 2,
+  "raw_returned": 0,
+  "raw_has_more": false,
+  "directories_total": 3,
+  "directories_returned": 3,
+  "directories_has_more": false,
+  "truncated": true,
+  "elapsed_ms": 124,
+  "dedup_ratio": "1.0x"
+}
