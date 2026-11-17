@@ -15,17 +15,17 @@
         "app/bin/codegraph.ts"
       ],
       "details": {
-        "goal": "Create an installable Bun/TS project whose `package.json#imports` map is the module boundary, plus a CLI entry that dispatches modes without writing to stdout.",
-        "contract": "package.json must contain exactly: {\"name\":\"codegraph-mvp\",\"type\":\"module\",\"private\":true,\"imports\":{\"#shared/*\":\"./src/shared/*\"},\"scripts\":{\"mcp\":\"bun run bin/codegraph.ts\",\"index\":\"bun run bin/codegraph.ts index\",\"status\":\"bun run bin/codegraph.ts status\",\"dev\":\"bun --watch run bin/codegraph.ts\",\"test\":\"bun test\",\"typecheck\":\"tsc --noEmit\",\"lint\":\"biome check src tests bin\",\"build\":\"bun build --compile bin/codegraph.ts --outfile dist/codegraph\",\"db:generate\":\"drizzle-kit generate\"}}.\ndependencies: @modelcontextprotocol/sdk 1.32.2, drizzle-orm 0.45.4, web-tree-sitter 0.27.2, tree-sitter-wasms 0.1.13. devDependencies: typescript ^5.9, @types/bun latest, @biomejs/biome ^2, drizzle-kit 0.31.11.\ntsconfig: strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, verbatimModuleSyntax, moduleResolution bundler, types [\"bun\"], include [\"src\",\"tests\",\"bin\"], paths {\"#shared/*\":[\"./src/shared/*\"]}.\n.gitignore: node_modules, dist, .codegraph, *.db, *.db-wal, *.db-shm, .DS_Store.\nbin/codegraph.ts: `#!/usr/bin/env bun`, parse argv[2] mode: mcp (default) | index | status | worker; delegate to `../src/index.ts` main(mode, argv); on unknown mode print usage to **stderr** and exit 2. Must never write to stdout in worker mode.\nDo not create anything under src/shared/ — TASK-002 owns the kernel.",
+        "goal": "Create an installable Bun/TS project whose package.json#imports map is the module boundary, with every script later phases need frozen up front.",
+        "contract": "package.json must contain exactly: {\"name\":\"codegraph-mvp\",\"type\":\"module\",\"private\":true,\"imports\":{\"#shared/*\":\"./src/shared/*\"},\"scripts\":{\"mcp\":\"bun run bin/codegraph.ts\",\"index\":\"bun run bin/codegraph.ts index\",\"status\":\"bun run bin/codegraph.ts status\",\"dev\":\"bun --watch run bin/codegraph.ts\",\"test\":\"bun test\",\"typecheck\":\"tsc --noEmit\",\"lint\":\"biome check src tests bin\",\"build\":\"bun build --compile bin/codegraph.ts --outfile dist/codegraph\",\"db:generate\":\"drizzle-kit generate\",\"db:drift\":\"drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations\",\"db:parity\":\"bun test tests/schema-parity.test.ts\",\"acceptance\":\"bun test tests/acceptance.test.ts\"}}.\ndependencies: @modelcontextprotocol/sdk 1.32.2, drizzle-orm 0.45.4, web-tree-sitter 0.27.2, tree-sitter-wasms 0.1.13. devDependencies: typescript ^5.9, @types/bun latest, @biomejs/biome ^2, drizzle-kit 0.31.11.\ntsconfig: strict, noUncheckedIndexedAccess, exactOptionalPropertyTypes, verbatimModuleSyntax, moduleResolution bundler, types [\"bun\"], include [\"src\",\"tests\",\"bin\"], paths {\"#shared/*\":[\"./src/shared/*\"]}.\nbiome.json must enable the rule that enforces the stdout discipline: suspicious/noConsoleLog as an error over src, tests and bin (console.error and the shared logger remain allowed).\n.gitignore: node_modules, dist, .codegraph, *.db, *.db-wal, *.db-shm, .DS_Store.\nbin/codegraph.ts: shebang #!/usr/bin/env bun, parse argv[2] mode: mcp (default) | index | status | worker; delegate to ../src/index.ts main(mode, argv); on unknown mode print usage to stderr and exit 2. Must never write to stdout in worker mode.\nDo not create anything under src/shared/ — TASK-002 owns the kernel.",
         "steps": [
-          "Create app/package.json with the imports map, scripts and pinned dependencies above",
+          "Create app/package.json with the imports map, the twelve scripts and pinned dependencies above",
           "Create app/tsconfig.json with the strict flags and the #shared/* path mapping",
-          "Create app/.gitignore and app/biome.json (biome: recommended rules, formatter off)",
+          "Create app/.gitignore and app/biome.json including suspicious/noConsoleLog as an error",
           "Create app/bin/codegraph.ts with the mode dispatch and stderr-only usage text",
-          "Run bun install to produce bun.lock",
-          "Run tsc --noEmit to confirm the toolchain works"
+          "Run bun install to produce bun.lock, then tsc --noEmit to confirm the toolchain",
+          "Confirm no script later phases need is missing by grepping package.json for acceptance, lint, db:drift and db:parity"
         ],
-        "verify": "`cd app && $HOME/.bun/bin/bun install && $HOME/.bun/bin/bun x tsc --noEmit; echo exit=$?` — Done when `exit=0`, `bun.lock` exists, and `grep -c '\"#shared/\\*\"' app/package.json` prints 1."
+        "verify": "cd app and run: $HOME/.bun/bin/bun install && $HOME/.bun/bin/bun x tsc --noEmit; echo exit=$?. Done when exit=0, bun.lock exists, grep -c '#shared' package.json prints 2, and package.json contains the acceptance, lint, db:drift and db:parity scripts."
       },
       "status": "todo",
       "progress": []
@@ -39,17 +39,19 @@
         "app/src/shared/config.ts",
         "app/src/shared/log.ts",
         "app/src/shared/errors.ts",
+        "app/src/shared/paths.ts",
         "app/src/index.ts"
       ],
       "details": {
         "goal": "Provide the three kernel modules every other module imports, and a composition-root stub so `bin/codegraph.ts` resolves.",
-        "contract": "config.ts exports `type AppConfig` and `loadConfig(): AppConfig` reading env CODEGRAPH_DATA_DIR, CODEGRAPH_REPO_ROOT and defaulting dataDir to `<repoRoot>/.codegraph`; no other module may read process.env. log.ts exports `log` with debug/info/warn/error writing JSON lines {ts,level,msg,...fields} to **stderr only**. errors.ts exports `class AppError extends Error` with `code` from the closed union: wrong_project_db | unsupported_filesystem | schema_too_new | cursor_invalid | cursor_expired | cursor_mismatch | budget_too_large | bootstrapping | not_found | ambiguous | index_locked | internal, plus `toErrorPayload(e)`. src/index.ts exports `async function main(mode: string, argv: string[]): Promise<number>`; for now every mode logs 'not implemented' to stderr and returns 2. No tool registration yet — TASK-020 owns that. Subpath imports only (`#shared/config`), there is no barrel index.ts in shared.",
+        "contract": "config.ts exports type AppConfig and loadConfig(): AppConfig reading env CODEGRAPH_DATA_DIR, CODEGRAPH_REPO_ROOT, CODEGRAPH_PROFILE (default agent) and defaulting dataDir to <repoRoot>/.codegraph; no other module may read process.env. log.ts exports log with debug/info/warn/error writing JSON lines {ts,level,msg,...fields} to stderr only. errors.ts exports class AppError extends Error with code from the closed union: wrong_project_db | unsupported_filesystem | schema_too_new | cursor_invalid | cursor_expired | cursor_mismatch | budget_too_large | bootstrapping | not_found | ambiguous | index_locked | internal, plus toErrorPayload(e). paths.ts exports normalizeRel(p) returning repo-relative forwards-slash with no leading dot-slash, qn(relPath, scope, name) returning relPath::Scope.name, and prefixBounds(p) returning the ONLY correct half-open range for a path prefix: match when path equals p OR (path > p + '/' AND path < p + '0'). The naive form path >= p AND path < p + '0' is forbidden because it also matches siblings such as src-old for prefix src. src/index.ts exports async function main(mode: string, argv: string[]): Promise<number>; for now every mode logs 'not implemented' to stderr and returns 2. No tool registration yet — TASK-027 owns that. Subpath imports only (#shared/config), there is no barrel index.ts in shared.",
         "steps": [
-          "Write config.ts with the AppConfig type and env-driven loadConfig",
+          "Write config.ts with the AppConfig type and env-driven loadConfig including CODEGRAPH_PROFILE",
           "Write log.ts emitting JSON lines to stderr",
           "Write errors.ts with the AppError class and the closed code union",
+          "Write paths.ts with normalizeRel, qn and the corrected prefixBounds",
           "Write src/index.ts main() stub returning 2 for every mode",
-          "Add a test asserting a log call produces no stdout output"
+          "Add a test asserting a log call produces no stdout output and that prefixBounds rejects the src-old sibling"
         ],
         "verify": "`cd app && $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun -e 'import {log} from \"#shared/log\"; log.info(\"x\"); process.stdout.write(\"\");' 1>/tmp/out.txt; wc -c </tmp/out.txt` — Done when typecheck exits 0 and /tmp/out.txt is 0 bytes."
       },
@@ -64,21 +66,19 @@
       "files": [
         "app/src/shared/envelope.ts",
         "app/src/shared/budget.ts",
-        "app/src/shared/cursor.ts",
         "app/tests/envelope.test.ts",
         "app/tests/budget.test.ts"
       ],
       "details": {
         "goal": "Implement the single response contract, the single size chokepoint and stateless cursors, so no tool can invent its own shape or size policy.",
-        "contract": "envelope.ts exports `type Envelope<T>` with exactly the 9 fields status, summary, read_status{generation,indexed_at,stale,stale_reason?}, coverage{complete,indexed,skipped,failed,unresolved_edges,not_indexed[]}, totals{*_total,total_relation:\"eq\"|\"gte\"}, truncated, truncation_reason, next, next_tools, plus payload:T; constructors ok/ambiguous/notFound/fail/bootstrapping — each returns the full shape with defaults, never a partial object.\nbudget.ts exports `emit(env, budgetTokens)` that serialises, measures bytes (4 bytes/token), drops lowest-ranked items from the largest list until within budget, preserves *_total, sets truncated+truncation_reason+next. It must be the only place that truncates.\ncursor.ts exports `sign(payload:{generation,tool,argsHash,position})` and `verify(token,{tool,argsHash,generation})` using HMAC-SHA256 over a key from env CODEGRAPH_CURSOR_KEY (test key allowed); verify returns a discriminated result cursor_invalid | cursor_expired | cursor_mismatch | ok.\n`total_relation` may be \"eq\" only when coverage.complete is true; emit must not change it.\nTests: envelope always has 9 fields; emit never exceeds budget+10% for 500 random payloads; tampered/expired/mismatched cursors are refused.",
+        "contract": "envelope.ts exports type Envelope<T> with NINE REQUIRED fields that are always present — status, summary, read_status, coverage, totals, truncated, truncation_reason, next, next_tools — plus payload:T, plus ONE OPTIONAL field error that is present if and only if status is error or bootstrapping. read_status is {generation, indexed_at, stale, stale_reason?, stale_checked_at?}. coverage is {complete, indexed, skipped, failed, unresolved_edges, not_indexed[]}. totals is {*_total, total_relation: eq|gte}. error is {code, message, hint?, retryable?, retry_after_ms?} — retry_after_ms is what status bootstrapping carries. Constructors ok/ambiguous/notFound/fail/bootstrapping return the full shape and never a partial object.\nbudget.ts exports emit(env, budgetTokens, opts: {mint: (position: number) => string}) which is the ONLY place a payload is truncated: it serialises, measures at 4 bytes per token, drops lowest-ranked items from the largest list until within budget, preserves every *_total, sets truncated, truncation_reason and next via opts.mint (it cannot sign a cursor itself), and DOWNGRADES totals.total_relation from eq to gte whenever it truncates, because only emit knows truncation happened. It refuses budgetTokens above 32000 with AppError code budget_too_large rather than truncating silently.\nCursor signing is TASK-036; this task only calls the injected mint callback. No source file in shared may construct an Envelope literal outside envelope.ts.",
         "steps": [
-          "Write envelope.ts with the nine-field type and five constructors",
-          "Write budget.ts with ranking-aware truncation and the 4-bytes-per-token measure",
-          "Write cursor.ts with sign/verify and the three failure codes",
-          "Write tests/envelope.test.ts asserting the nine fields on all constructors",
-          "Write tests/budget.test.ts as the property test over 500 random payloads"
+          "Write envelope.ts with the nine required fields, the conditional error field and stale_checked_at in read_status",
+          "Write budget.ts with ranking-aware truncation, the mint callback, the gte downgrade and the 32000 ceiling",
+          "Write tests/envelope.test.ts asserting the nine required fields on all constructors and error presence only for error and bootstrapping",
+          "Write tests/budget.test.ts as the property test plus the gte downgrade, the mint-called-once case and the ceiling"
         ],
-        "verify": "`cd app && $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/envelope.test.ts tests/budget.test.ts` — Done when both test files pass and the property test reports 0 violations."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/envelope.test.ts tests/budget.test.ts. Done when both files pass, the property test reports 0 violations, a truncated payload shows total_relation gte with next set from the mint callback, and budget 40000 returns budget_too_large."
       },
       "status": "todo",
       "progress": []
@@ -114,19 +114,20 @@
       "files": [
         "app/src/shared/store/schema.ts",
         "app/drizzle.config.ts",
-        "app/src/shared/store/migrations/0000_init.sql"
+        "app/src/shared/store/migrations/0000_init.sql",
+        "app/src/shared/store/migrations/meta/**"
       ],
       "details": {
         "goal": "Declare the graph schema in Drizzle and commit the generated initial migration.",
-        "contract": "schema.ts declares every modeled table from DATABASE.md section 3 with explicit snake_case column names: file, node, edge, node_metrics, not_indexed, unresolved, tombstone, generation, meta, node_fts_state. Indexes per DATABASE.md section 4: node(qn) unique, node(name,kind), node(file_id,start_line), node(parent_id), node(kind), edge(dst_id,kind,tier), edge(src_id,kind,tier), edge(file_id,line), edge(kind), file(path) unique, file(language), not_indexed(path), unresolved(file_id), node_metrics(is_entry), node_metrics(tested_depth). Foreign keys with ON DELETE CASCADE from node.file_id and edge.src_id/dst_id/file_id and unresolved.file_id. edge carries local_name TEXT NOT NULL DEFAULT empty string inside its unique key (src_id,dst_id,kind,file_id,line,local_name). drizzle.config.ts: defineConfig with dialect sqlite, schema ./src/shared/store/schema.ts, out ./src/shared/store/migrations. Commit the generated 0000_init.sql. Do NOT model node_fts (FTS5) here, TASK-006 owns it.",
+        "contract": "schema.ts declares eleven tables from DATABASE.md section 3 with explicit snake_case column names: file, node, edge, node_metrics, not_indexed, unresolved, tombstone, generation, meta, node_fts_state, node_vector. node_vector is created but stays empty in the MVP (no embeddings), so DATABASE.md section 3.6 and plan.risk.md remain literally true. Indexes per DATABASE.md section 4: node(qn) unique, node(name,kind), node(file_id,start_line), node(parent_id), node(kind), edge(dst_id,kind,tier), edge(src_id,kind,tier), edge(file_id,line), edge(kind), file(path) unique, file(language), not_indexed(path), unresolved(file_id), node_metrics(is_entry), node_metrics(tested_depth). Foreign keys with ON DELETE CASCADE from node.file_id, edge.src_id/dst_id/file_id and unresolved.file_id. edge carries local_name TEXT NOT NULL DEFAULT empty string inside its unique key (src_id,dst_id,kind,file_id,line,local_name). drizzle.config.ts: defineConfig with dialect sqlite, schema ./src/shared/store/schema.ts, out ./src/shared/store/migrations. Commit the generated 0000_init.sql AND the drizzle meta directory (meta/_journal.json plus the snapshot), because the no-drift CI check regenerates and compares. Do NOT model node_fts (FTS5) here, TASK-006 owns it.",
         "steps": [
-          "Write app/src/shared/store/schema.ts with the ten tables and the index list above",
+          "Write app/src/shared/store/schema.ts with the eleven tables and the index list above",
           "Write app/drizzle.config.ts pointing at schema.ts and migrations/",
-          "Run drizzle-kit generate --name init to produce migrations/0000_init.sql",
+          "Run drizzle-kit generate --name init to produce 0000_init.sql plus migrations/meta/",
           "Read the generated SQL and confirm every index and FK from DATABASE.md section 4 is present",
           "Confirm no table is missing by diffing the generated DDL against DATABASE.md section 3"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x drizzle-kit generate --name init && $HOME/.bun/bin/bun x tsc --noEmit. Done when migrations/0000_init.sql exists, contains 10 CREATE TABLE statements and the 15 named indexes, and typecheck exits 0."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x drizzle-kit generate --name init && $HOME/.bun/bin/bun x tsc --noEmit. Done when migrations/0000_init.sql exists with 11 CREATE TABLE statements and the 15 named indexes, migrations/meta/_journal.json exists, and typecheck exits 0."
       },
       "status": "todo",
       "progress": []
@@ -218,7 +219,7 @@
     },
     {
       "id": "TASK-009",
-      "title": "Typed read primitives over the graph tables",
+      "title": "Typed read primitives: nodes, edges, metrics, coverage",
       "agent": "implement",
       "size": "M",
       "files": [
@@ -226,19 +227,19 @@
         "app/src/shared/store/read/edges.ts",
         "app/src/shared/store/read/metrics.ts",
         "app/src/shared/store/read/coverage.ts",
-        "app/src/shared/store/read/files.ts"
+        "app/tests/read.test.ts"
       ],
       "details": {
-        "goal": "Give the domain layer five typed primitives so no tool ever writes SQL, all built on the prepared-statement cache.",
-        "contract": "Each file exports domain row types (never Drizzle inferSelect types across the boundary) and functions: nodes.ts findByQn(conn, qn), findByName(conn, name, kinds), members(conn, parentId), nodesByFile(conn, fileId); edges.ts inbound(conn, ids, kinds), outbound(conn, ids, kinds), edgesByFile(conn, fileId); metrics.ts metricsFor(conn, ids) returning in_degree,out_degree,is_entry,tested_depth,reachable_count; coverage.ts rowsForPaths(conn, paths) using the prefix range path >= p and path < p||chr(0x30) form, returning indexed file rows and not_indexed rows, plus unresolvedForFiles(conn, fileIds); files.ts fileByPath(conn, path), allFiles(conn), censusByLanguage(conn). All queries go through prepared(key, build) from #shared/store/db and are prepared once per shape. No ranking, no limits, no formatting, no envelope construction in these files. All accept a connection handle as first argument so tests can pass a temp DB.",
+        "goal": "Typed read primitives for nodes, edges, metrics and coverage, built on the prepared-statement cache.",
+        "contract": "Each file exports domain row types (never Drizzle inferSelect types across the boundary) and functions: nodes.ts findByQn(conn, qn), findByName(conn, name, kinds), members(conn, parentId), nodesByFile(conn, fileId); edges.ts inbound(conn, ids, kinds), outbound(conn, ids, kinds); metrics.ts metricsFor(conn, ids) returning in_degree, out_degree, is_entry, tested_depth, reachable_count; coverage.ts rowsForPaths(conn, paths) and unresolvedForFiles(conn, fileIds). rowsForPaths uses the corrected prefix rule from #shared/paths prefixBounds: a path matches when it equals the request OR is strictly between request + '/' and request + '0' — never the naive path >= p AND path < p + '0' form, which also matches src-old for prefix src. Read files.ts and the GraphReader aggregate are TASK-034; diff is TASK-035. All queries go through prepared(key, build) from #shared/store/db and are prepared once per shape. No ranking, no limits, no formatting, no envelope construction here. Every function takes a connection handle first so tests can pass a temp DB.",
         "steps": [
-          "Write files.ts with the file and census primitives",
-          "Write nodes.ts with qn, name and member lookups",
+          "Write nodes.ts with qn, name, member and file lookups",
           "Write edges.ts with directional lookups by kind using the composite indexes",
-          "Write metrics.ts and coverage.ts including the prefix-range path query",
-          "Add tests/read.test.ts that migrates a temp DB, inserts a fixture graph and asserts each primitive"
+          "Write metrics.ts for degree, entry and tested_depth",
+          "Write coverage.ts including the corrected prefix-range query and unresolved lookup",
+          "Write tests/read.test.ts over a migrated temp DB asserting the prefix rule excludes the src-old sibling"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read.test.ts. Done when every primitive returns the expected rows for a three-node fixture and the prefix-range query finds both indexed and not_indexed entries."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read.test.ts. Done when every primitive returns the expected rows for a three-node fixture, and a prefix query for src excludes src-old while including src/a.ts."
       },
       "status": "todo",
       "progress": [],
@@ -257,20 +258,19 @@
         "app/src/shared/domain/neighbors.ts",
         "app/src/shared/domain/coverage.ts",
         "app/src/shared/domain/risk.ts",
-        "app/src/shared/domain/diff.ts"
+        "app/tests/domain.test.ts"
       ],
       "details": {
-        "goal": "Encode the three contracts that must exist once and never be reinvented per tool: resolution with ambiguity, grouped neighbour expansion, and absence assembly.",
-        "contract": "resolve.ts: resolve(conn, query, kinds) returns {status: ok, node} | {status: ambiguous, candidates up to 5 with qn, kind, file, lines, score, why} | {status: not_found, near_misses}. It must never pick when 2 or more candidates tie; detection order is exact qn, exact name plus kind, dotted tail, path, then @decorator treated as a property filter. neighbors.ts: expand(conn, seedIds, {direction, depth<=4, kinds}) returns groups keyed by edge kind and tier, each item carrying id, qn, kind, file, line, hop, external flag; intentionally unbounded, no truncation. coverage.ts: assemble(conn, scope) returns coverage, unresolved rows, and relation which is eq only when complete, unresolved is empty for the scope and the generation is fresh; otherwise gte. risk.ts: score(changed, impacted) returns score, band and drivers as sentences. diff.ts: changedSince(repoRoot, base) returns changed files, removed files and unmatched files, using git diff plus sha256 comparison against the file table, with a 30s timeout and no writes.",
+        "goal": "Encode the three contracts that must exist once and never be reinvented per tool: resolution with ambiguity, grouped neighbour expansion, absence assembly, and the risk formula.",
+        "contract": "resolve.ts: resolve(conn, query, kinds) returns {status: ok, node} | {status: ambiguous, candidates up to 5 with qn, kind, file, lines, score, why} | {status: not_found, near_misses}. It must never pick when 2 or more candidates tie; detection order is exact qn, exact name plus kind, dotted tail, path, then @decorator treated as a property filter. neighbors.ts: expand(conn, seedIds, {direction, depth<=4, kinds}) returns groups keyed by edge kind and tier, each item carrying id, qn, kind, file, line, hop, external flag; intentionally unbounded, no truncation. coverage.ts: assemble(conn, scope) returns coverage, unresolved rows, and relation which is eq only when complete, unresolved is empty for the scope and the generation is fresh; otherwise gte. risk.ts: score(changed, impacted) returns score, band and drivers as sentences.\nThe change-set diff function lives in TASK-035 (domain/diff.ts); this task must not duplicate it. tests/domain.test.ts covers the ambiguity refusal and the eq-versus-gte matrix using a fake GraphReader, not a database.",
         "steps": [
           "Write resolve.ts with the ambiguity contract and the kind inference order",
           "Write neighbors.ts producing grouped-by-kind-and-tier output with hop and external flags",
           "Write coverage.ts deriving eq versus gte from unresolved and not_indexed",
           "Write risk.ts producing driver sentences, not a bare number",
-          "Write diff.ts using git diff plus hash comparison",
-          "Add tests/domain.test.ts for ambiguity refusal and the eq-versus-gte matrix"
+          "Write tests/domain.test.ts against a fake GraphReader for ambiguity and the eq/gte matrix"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/domain.test.ts. Done when a two-candidate tie returns ambiguous with 2 candidates, and coverage returns gte whenever an unresolved row exists in scope."
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/domain.test.ts. Done when a two-candidate tie returns ambiguous with 2 candidates, coverage returns gte whenever an unresolved row exists in scope, and risk returns at least one driver sentence."
       },
       "status": "todo",
       "progress": [],
@@ -289,14 +289,14 @@
       ],
       "details": {
         "goal": "Prove phase 0 delivers its contracts before any parser or tool code is written.",
-        "contract": "smoke.test.ts: create a temp repo dir, run migrate, open a writer, insert one file and two nodes, publish through withStage, then open a reader and read them back. contract.test.ts: assert every envelope constructor returns exactly the nine fields with no undefined omissions; assert emit never exceeds budget plus 10 percent on 200 generated payloads; assert cursor verify refuses a token minted for a different tool and for a different generation. This task owns no source files and must not modify any.",
+        "contract": "smoke.test.ts: create a temp repo dir, run migrate, open a writer, insert one file and two nodes, publish through withStage, then open a reader and read them back. contract.test.ts: assert every envelope constructor returns the nine required fields with no undefined omissions and that error is present only for error and bootstrapping; assert emit never exceeds budget plus 10 percent on 200 generated payloads and downgrades to gte when truncating; assert cursor verify refuses a token minted for a different tool and for a different generation; assert the corrected prefixBounds excludes src-old for prefix src. This task owns no source files and must not modify any.",
         "steps": [
-          "Write tests/contract.test.ts covering the nine fields, the budget property and cursor refusal",
+          "Write tests/contract.test.ts covering the nine fields, the conditional error, the budget property, the gte downgrade and cursor refusal",
           "Write tests/smoke.test.ts covering migrate, write, publish, read on a temp repo",
           "Run the whole suite including boundary and schema parity",
           "Record the full suite output as progress evidence"
         ],
-        "verify": "cd app and run: $HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun test. Done when every test file in app/tests passes (boundary, envelope, budget, lock, publish, read, schema-parity, domain, contract, smoke) and the summary reports 0 failures."
+        "verify": "cd app and run: $HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun test. Done when every test file in app/tests passes (boundary, envelope, budget, cursor, lock, publish, read, read-files, diff, schema-parity, domain, contract, smoke) and the summary reports 0 failures."
       },
       "status": "todo",
       "progress": [],
@@ -310,8 +310,91 @@
         "TASK-007",
         "TASK-008",
         "TASK-009",
-        "TASK-010"
+        "TASK-010",
+        "TASK-034",
+        "TASK-035",
+        "TASK-036"
       ]
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "cursor.ts exports sign(payload:{generation, tool, argsHash, position}) returning an opaque token, and verify(token, {tool, argsHash, generation}) returning a discriminated result (ok with decoded position) | cursor_invalid | cursor_expired | cursor_mismatch. HMAC-SHA256 over a key from env CODEGRAPH_CURSOR_KEY with a length check at startup; the key never leaves this module. Expiry is generation-bound, not time-bound: a token whose generation differs from the current one is cursor_expired with hint re-run the original call, and a token whose tool or argsHash differ is cursor_mismatch. Tokens are base64url of payload plus 16-byte tag; no database table and no server memory. tests/cursor.test.ts covers round trip, tampered tag, expired generation, mismatched tool and mismatched argsHash.",
+        "goal": "Stateless signed cursors that make pagination stable within a generation and provably refuse a stale page.",
+        "steps": [
+          "Write cursor.ts with sign and verify plus the key load and length check",
+          "Encode payload as base64url with a 16-byte HMAC tag",
+          "Implement the three refusal codes with the tool and argsHash checks",
+          "Write tests/cursor.test.ts for the five cases"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/cursor.test.ts. Done when all five cases pass and a token minted for one generation is refused as cursor_expired under another."
+      },
+      "files": [
+        "app/src/shared/cursor.ts",
+        "app/tests/cursor.test.ts"
+      ],
+      "id": "TASK-036",
+      "pre_request": [
+        "TASK-002"
+      ],
+      "size": "S",
+      "title": "Signed stateless cursors with generation binding",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "read/files.ts exports fileByPath(conn, path), allFiles(conn), censusByLanguage(conn) returning language, files, parsed, failed — the fields the status payload needs, merging not_indexed rows for files that were skipped. read/reader.ts exports the GraphReader interface that every tool receives through ToolContext, aggregating the primitives from TASK-009 plus these: {findByQn, findByName, members, nodesByFile, inbound, outbound, metricsFor, rowsForPaths, unresolvedForFiles, fileByPath, allFiles, censusByLanguage} and readNodeFts(conn, matchQuery) for the FTS5 MATCH that Drizzle cannot model. It also exports makeReader(conn): GraphReader so handlers are unit-testable against a fake implementing the interface alone. No tool may import the concrete reader; tests implement the interface directly.",
+        "goal": "Own the two things phase 2 depends on: the file census primitives and the GraphReader interface every tool is written against.",
+        "steps": [
+          "Write read/files.ts with fileByPath, allFiles and censusByLanguage merging not_indexed",
+          "Write read/reader.ts with the GraphReader interface and makeReader(conn)",
+          "Include readNodeFts in the interface using raw sqlite MATCH",
+          "Write tests/read-files.test.ts asserting the census merges skipped files and that a fake GraphReader satisfies the interface"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun x tsc --noEmit && $HOME/.bun/bin/bun test tests/read-files.test.ts. Done when the census reports parsed and failed counts for a two-language fixture and a hand-written fake object typechecks as GraphReader."
+      },
+      "files": [
+        "app/src/shared/store/read/files.ts",
+        "app/src/shared/store/read/reader.ts",
+        "app/tests/read-files.test.ts"
+      ],
+      "id": "TASK-034",
+      "pre_request": [
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "File census primitives and the GraphReader interface",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "diff.ts exports changedSince(repoRoot, base) returning {changed: string[], removed: string[], unmatched: Array<{path, reason}>} computed as the union of git diff --name-status against base and a sha256 comparison of working-tree bytes against the file table. Rules: a git failure degrades to hash-only comparison and records degraded: true in the result rather than throwing, because the integration fixture is a plain temp directory that is not a git repository; every git invocation is bounded by a 30 s timeout; paths outside the repo root are dropped; a changed path with no file row and no parseable language lands in unmatched with a reason instead of disappearing; no writes of any kind.",
+        "goal": "One change-set computation shared by summary and impact, usable in a non-git directory.",
+        "steps": [
+          "Write diff.ts with the git diff call and the 30 s timeout",
+          "Add the sha256 comparison against the file table and union both sources",
+          "Implement the non-git degradation with degraded: true",
+          "Collect unmatched paths with reasons",
+          "Write tests/diff.test.ts covering a git fixture, a non-git directory and an unmatched markdown file"
+        ],
+        "verify": "cd app and run: $HOME/.bun/bin/bun test tests/diff.test.ts. Done when a modified file appears in changed, a deleted file in removed, a markdown change in unmatched with a reason, and a non-git directory returns degraded true without throwing."
+      },
+      "files": [
+        "app/src/shared/domain/diff.ts",
+        "app/tests/diff.test.ts"
+      ],
+      "id": "TASK-035",
+      "pre_request": [
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "Change-set diff with non-git degradation",
+      "status": "todo",
+      "progress": []
     }
   ]
 }

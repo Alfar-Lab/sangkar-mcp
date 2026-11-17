@@ -13,7 +13,10 @@
 - Measured query cost that shapes the store layer: raw prepared 0.69 µs, reused Drizzle prepared 1.7 µs,
   re-built Drizzle builder **42.7 µs** per read on the same indexed table.
 - The reference corpus for parity is `code-review-graph/` (530 files), where CRG measured 13 955 nodes /
-  130 044 edges and CBM 17 230 / 87 766 on the same tree. These are the oracles for TASK-020.
+  130 044 edges and CBM 17 230 / 87 766 on the same tree; the by-kind oracle those captures record is
+  File 530, Class 877, Function 5 197, Test 6 351, and CBM recorded per-language **file** counts
+  (python 408, typescript 28, yaml 24 …). No capture records per-language node counts, so TASK-019
+  asserts only oracles that exist.
 - `tree-sitter-language-pack` (CRG's parser) is PyPI-only; a WASM stack (`web-tree-sitter@0.27.2` +
   `tree-sitter-wasms@0.1.13`) replaces it.
 
@@ -52,9 +55,10 @@ Barrier because: every later task consumes these signatures (`Envelope`, `emit`,
 ### phase_1: indexer
 
 Deliverable: a real generation published from the reference corpus — discovery, 12-language extraction
-driven by the node-type tables, same-file/import/inheritance binding, metrics, FTS, tombstones, and the
-worker entry point — plus the parser acceptance evidence (node counts against the CRG oracle, p95 parse
-time).
+driven by the node-type tables, same-file/import/inheritance binding, the inheritance and reference edges
+the payloads group by, `tested_by` derivation, metrics, FTS, tombstones, and the worker entry point — plus
+the parser acceptance evidence (totals and by-kind counts against the recorded oracles, per-language file
+counts, p95 parse time, peak RSS).
 
 Barrier because: every tool's integration test needs a real indexed database, and the absence envelope
 cannot be verified without real `unresolved` rows.
