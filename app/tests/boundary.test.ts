@@ -192,6 +192,13 @@ const rootPrivileges: RuleCheck = (file, specifier) => {
   if (file === ROOT_FILE) {
     return rootAllowList(specifier);
   }
+  // Two callers are not "another module" in the sense of this rule. `src/indexer/**` is its own
+  // tree with its own isolation rule (rule 2), so one indexer file importing a sibling never
+  // crosses the root; and `tests/**` is the harness that has to exercise the indexer, never a
+  // module the composition root or a tool can reach at runtime.
+  if (isUnderPrefix(file, "src/indexer") || isUnderPrefix(file, "tests")) {
+    return null;
+  }
   const target = resolveSpecifier(file, specifier);
   if (target === null) {
     return null;
@@ -327,6 +334,26 @@ describe("rule self-check: synthetic imports must be rejected", () => {
       const violations = evaluateImport(file, specifier);
       expect(violations.map((violation) => violation.rule)).toContain("root-privileges");
     }
+  });
+
+  test("intra-indexer and test harness imports stay inside the boundary (rule 5)", () => {
+    const cases: ReadonlyArray<readonly [string, string]> = [
+      ["src/indexer/lang/registry.ts", "./types"],
+      ["src/indexer/parse.ts", "./lang/registry"],
+      ["tests/lang.test.ts", "../src/indexer/lang/registry"],
+    ];
+    for (const [file, specifier] of cases) {
+      expect(evaluateImport(file, specifier).map((violation) => violation.rule)).not.toContain(
+        "root-privileges",
+      );
+    }
+    // The exemption is scoped: an indexer file still may not reach the tools or the store's
+    // outsiders, which rule 2 keeps enforcing.
+    expect(
+      evaluateImport("src/indexer/lang/registry.ts", "../../tools/find/handler").map(
+        (violation) => violation.rule,
+      ),
+    ).toContain("indexer-isolation");
   });
 
   test("shared never reaches into the tools or the indexer (rule 3)", () => {
