@@ -131,6 +131,11 @@ erDiagram
 
 ## 3. Proposed DDL
 
+> **Authoring.** This DDL is the design. In the implementation the modeled tables and indexes are declared in
+> `src/shared/store/schema.ts` (Drizzle) and the SQL below is produced by `drizzle-kit generate`; the
+> virtual tables (`node_fts`) and bulk maintenance statements stay hand-written SQL. Both streams are applied
+> by one runner with one ledger — see `TECH-SPEC.md` §5.4.4. If the two ever disagree, the code is wrong.
+
 ### 3.0 Where the database lives
 
 One database file per project, **inside the project directory**:

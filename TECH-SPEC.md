@@ -40,6 +40,7 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 ├── package.json                # #/imports map = the module boundary
 ├── tsconfig.json               # strict; paths only for "#shared"
 ├── biome.json                  # style only, not the boundary
+├── drizzle.config.ts           # drizzle-kit: dialect sqlite, schema + out paths (§5.4.4)
 ├── bin/
 │   └── codegraph.ts            # single CLI entry: mcp (default) | index | status | worker
 ├── src/
@@ -53,9 +54,10 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 │   │   ├── cursor.ts
 │   │   ├── paths.ts
 │   │   ├── store/
-│   │   │   ├── db.ts           # open, pragmas, lock, stage/publish
-│   │   │   ├── schema.sql
-│   │   │   ├── migrate.ts
+│   │   │   ├── db.ts           # open, pragmas, lock, stage/publish; owns the Drizzle handle
+│   │   │   ├── schema.ts       # Drizzle table defs = typed source of truth (§5.4)
+│   │   │   ├── migrate.ts      # one runner, one ledger, applies both SQL streams
+│   │   │   ├── migrations/     # 0000_*.sql from drizzle-kit + raw/ for FTS5 objects
 │   │   │   └── read/           # typed primitives: nodes, edges, metrics, coverage, files
 │   │   └── domain/
 │   │       ├── resolve.ts      # free text -> node | candidates
@@ -156,6 +158,7 @@ for each file under src/:
     shared/*    -> not tools/, not indexer/
     tools/*     -> #shared only (plus ./ siblings inside the same tool)
     indexer/*   -> #shared only (plus ./ siblings)
+  assert the specifier "drizzle-orm" may appear only under src/shared/store/**
 ```
 
 No lint plugin, no extra dependency: `Bun.Transpiler.scan()` gives structured import paths without
@@ -188,8 +191,10 @@ shared layer that knows what `trace` means.
 | `budget.ts` | `emit(envelope, budgetTokens)` | ranking-aware truncation + `next` cursor; the single size chokepoint (`DESIGN.md` §7.1) |
 | `cursor.ts` | `sign(payload)`, `verify(token, {tool, argsHash})` | HMAC, stateless, generation-bound (`DATABASE.md` §8) |
 | `paths.ts` | `normalizeRel`, `prefixBounds(prefix)`, `qn(path, scope, name)` | the only place path→qn formatting lives |
-| `store/db.ts` | `openReader()`, `openWriter()`, `stage()`, `seal()`, `publish()`, `acquireLock()` | the transaction/publish protocol of `DATABASE.md` §5 |
-| `store/read/*` | `findByQn`, `findByName`, `neighbors(id, dir, kinds)`, `members(id)`, `metrics(id)`, `coverageOf(paths)`, `census()` | typed SQL. **No ranking, no limits, no formatting** |
+| `store/db.ts` | `openReader()`, `openWriter()`, `stage()`, `seal()`, `publish()`, `acquireLock()` | the transaction/publish protocol of `DATABASE.md` §5; owns the `Drizzle` handle |
+| `store/schema.ts` | Drizzle table definitions — the typed source of truth for modeled tables (§5.4) | types + migration generation; **never** imported by tools |
+| `store/migrations/` | `drizzle-kit` output (`0000_*.sql`) + hand-written raw SQL (`raw/0001_fts.sql`) | applied by one runner, one ledger (§5.4.4) |
+| `store/read/*` | `findByQn`, `findByName`, `neighbors(id, dir, kinds)`, `members(id)`, `metrics(id)`, `coverageOf(paths)`, `census()` | typed SQL via prepared Drizzle statements. **No ranking, no limits, no formatting** |
 | `domain/resolve.ts` | `resolve(query, kinds) -> Hit \| Candidates \| None` | the ambiguity contract (`DESIGN.md` §8) lives here, once, for `trace`/`search`/`expand` |
 | `domain/neighbors.ts` | `expand(seedIds, {direction, depth, kinds}) -> GroupedNeighbors` | BFS with per-hop index use; returns **grouped by edge+tier**, unbounded |
 | `domain/coverage.ts` | `assemble(scope) -> {coverage, unresolved, relation}` | produces `eq` vs `gte` — the absence contract (`DESIGN.md` §6) |
@@ -210,6 +215,116 @@ shared layer that knows what `trace` means.
 Concretely: `domain/neighbors` returns every neighbour it found, grouped, with tiers.
 `tools/trace` chooses depth default 2, drops `external` nodes when over budget, and orders groups
 `calls → tested_by → inherits → imports`.
+
+### 5.4 Drizzle ORM — confined to `shared/store/**`
+
+**Versions probed on Bun 1.4.4:** `drizzle-orm@0.45.4`, `drizzle-kit@0.31.11`. All of the following were
+run on this machine against a real `bun:sqlite` database.
+
+#### 5.4.1 What was measured
+
+| Probe | Result |
+|---|---|
+| `drizzle(new Database(...), { schema })` on `bun:sqlite` | works: insert, select, `innerJoin`, `where(and(...))` |
+| `.prepare()` on a query builder | exists, returns a reusable prepared query |
+| `db.transaction(cb)` | executes **immediately** (does not return a thunk) and returns the callback's value; a throw rolls back |
+| `db.transaction(cb, { behavior: "immediate" })` | supported — maps 1:1 onto the `BEGIN IMMEDIATE` the publish path needs |
+| FTS5 through Drizzle | not modeled — but raw `sqlite.query(… MATCH ?)` on the same connection works, `bm25()` included |
+| `drizzle-kit generate` | emits `drizzle/0000_init.sql` with `--> statement-breakpoint` delimiters, plus a `meta/` snapshot dir used for diffing |
+| `drizzle-orm/bun-sqlite/migrator` | exports `migrate` |
+| `getTableConfig` | lives in `drizzle-orm/sqlite-core` (**not** the root export); returns `{columns, indexes, foreignKeys}` |
+| import cost at startup | 9.7 ms (`drizzle-orm`) + 18.6 ms (`drizzle-orm/bun-sqlite`) |
+| compiled binary size | **104 MB** — identical to the no-Drizzle baseline, i.e. Drizzle adds nothing measurable to `bun build --compile` |
+
+#### 5.4.2 The performance result that becomes a hard rule
+
+20 000 identical point reads against an indexed table on `bun:sqlite`:
+
+| Path | Total | Per query | vs raw |
+|---|---|---|---|
+| raw prepared (`sqlite.query(sql).get()`) | 13.8 ms | 0.69 µs | 1× |
+| Drizzle builder re-built per call (`db.select().from(t).where(…)`) | **854.1 ms** | 42.7 µs | **62×** |
+| Drizzle `.prepare()` reused | 34.3 ms | 1.7 µs | 2.5× |
+
+Rules that follow, non-negotiable:
+
+1. **Never build a Drizzle query inside a loop, a request handler, or a BFS hop.** Building the query is
+   25× the cost of the raw round trip.
+2. **`.prepare()` and cache by query shape** in `store/db.ts`. Drizzle has no statement cache of its own
+   whose eviction policy we control.
+3. **The three hottest primitives may drop to raw `sqlite.query()`** on the same connection: `neighbors`
+   (per hop), `metrics` (per hit), `coverageOf` (per call). Raw and Drizzle share one connection, so this is
+   a local decision inside `store/read/**`, invisible to callers.
+4. Budget for it: `trace` p95 < 40 ms assumes ~35 µs of query time per call, which the prepared path
+   meets and the builder path does not at depth 2–4.
+
+#### 5.4.3 What stays raw SQL, always
+
+Drizzle models tables, columns, indexes and foreign keys. It does **not** model any of the following, and
+pretending otherwise is how a schema drifts:
+
+| Stays raw (`shared/store/migrations/raw/*.sql` + `sqlite.query`) | Why |
+|---|---|
+| `node_fts` (FTS5 virtual table) and its `MATCH` / `bm25()` queries | virtual tables are outside the model |
+| `node_fts_state` mirror maintenance (`insert … select`, delta replay) | bulk SQL, no row-level type value |
+| `VACUUM INTO`, `PRAGMA` set, `wal_checkpoint`, `quick_check`, `journal_mode` | not DDL/DML that types help with |
+| `rename()` of the stage file, lock files, fs operations | not SQL at all |
+| generated columns (if ever added) | keep the `local_name` plain column design of `DATABASE.md` §3.3 |
+
+If a raw query returns rows, it must be typed at the boundary — `sqlite.query<Row, Params>()` — and the
+row type declared next to it, so nothing untyped leaks past `store/read/**`.
+
+#### 5.4.4 Migrations: two streams, one ledger
+
+`schema.ts` is the typed source of truth for modeled tables; FTS5 and the mirror have no representation
+there. That creates two SQL streams, and they must not produce two ledgers.
+
+| Stream | Produced by | Applied by |
+|---|---|---|
+| modeled tables/indexes/FKs | `drizzle-kit generate` → `store/migrations/000N_*.sql` (committed) | **our runner** |
+| FTS5, mirror, any other raw object | hand-written → `store/migrations/raw/000N_*.sql` (committed) | **our runner** |
+
+Our runner (`store/migrate.ts`) keeps a single `schema_migration` ledger, applies both streams in order,
+sets `meta.schema_version`, and honours `meta.rebuild_required` (`DATABASE.md` §10).
+
+**Why not `drizzle-orm/bun-sqlite/migrator`:** it writes its own `__drizzle_migrations` ledger with its own
+hash bookkeeping, giving two ledgers and no place for `rebuild_required` — a forward-only graph store needs
+the rebuild flag more than it needs hash-based tracking. Use `migrate()` in **tests only**, to prove the
+generated SQL applies cleanly to an empty database.
+
+Two CI checks keep the streams honest:
+
+1. **no drift** — `drizzle-kit generate` on a clean checkout must produce no diff (schema.ts and the
+   committed migration agree).
+2. **schema parity** — apply all migrations to an empty DB, then compare the live schema against
+   `getTableConfig(schema)` (`drizzle-orm/sqlite-core`) for every table: columns, indexes, FKs. This is the
+   check that catches a `schema.ts` edit that was never migrated.
+
+#### 5.4.5 Type boundary
+
+```
+tools/*            -> domain types from shared        (never Drizzle types)
+shared/domain/*    -> domain types                     (never Drizzle types)
+shared/store/read  -> Drizzle row types ($inferSelect) internally, mapped to domain types on return
+```
+
+Drizzle types stop at `store/read/**`. Two reasons: tools must be unit-testable against a fake reader
+(§6), and the ORM stays replaceable without touching seven modules. §4.2's boundary test enforces the
+import half of this rule; the mapping half is a review rule with a single grep-able check — no
+`$inferSelect` outside `src/shared/store/`.
+
+#### 5.4.6 What Drizzle buys, stated narrowly
+
+| Benefit | Consequence |
+|---|---|
+| column and row types generated from the schema | no hand-written row interfaces to drift from the DDL |
+| `drizzle-kit generate` diffing | the `DATABASE.md` schema becomes an auditable SQL diff per change |
+| `{ behavior: "immediate" }` | the publish transaction is the one the design requires, expressed declaratively |
+| index/FK declarations in one place | `DATABASE.md` §4's index plan becomes `schema.ts`, reviewable in a PR |
+
+Not adopted: the relational query API (`db.query.node.findMany({ with })`). It batches related rows behind
+the caller's back, which is exactly the N+1-avoidance-as-hidden-magic that makes a BFS over `edges`
+unpredictable. Explicit joins only.
 
 ---
 
@@ -418,6 +533,8 @@ Error codes used so far (from `DATABASE.md` §5 and the tool specs): `wrong_proj
 | **contract** (`tests/envelope.test.ts`) | every tool returns all 9 envelope fields; `eq` only when coverage complete and no unresolved rows | fast |
 | **budget** (`tests/budget.test.ts`) | property test: for random payload sizes and budgets, `emit()` output ≤ budget + 10 % and always carries `total_relation` | ms |
 | **cursor** | tampered/expired/mismatched cursors are refused, and `expand` cannot cross a generation | ms |
+| **schema parity** (`tests/schema-parity.test.ts`) | migrations applied to an empty DB match `getTableConfig(schema)` — columns, indexes, FKs — for every table; catches a `schema.ts` edit with no migration (§5.4.4) | ms |
+| **statement cache** | the prepared-statement map stays bounded under 10 k distinct query shapes and its size is reported in `status.health` | ms |
 | **integration** | real `bun:sqlite` DB built from the reference corpus (`code-review-graph/`, 530 files) — the same fixture both parents were measured on | seconds |
 | **absence** | for a symbol with zero callers *and* an unresolved call site, `trace` returns `gte` + the unresolved row; with coverage incomplete, `complete: false` | seconds |
 | **regression vs oracle** | node/edge counts per language compared against CRG's measured numbers (`TOOL-OUTPUTS.md`) | one run |
@@ -432,13 +549,16 @@ protect, and the only ones with an external ground truth to compare against.
 ```json
 {
   "scripts": {
-    "mcp":    "bun run bin/codegraph.ts",
-    "index":  "bun run bin/codegraph.ts index",
-    "dev":    "bun --watch run bin/codegraph.ts",
-    "test":   "bun test",
-    "typecheck": "tsc --noEmit",
-    "lint":   "biome check src tests",
-    "build":  "bun build --compile bin/codegraph.ts --outfile dist/codegraph"
+    "mcp":        "bun run bin/codegraph.ts",
+    "index":      "bun run bin/codegraph.ts index",
+    "dev":        "bun --watch run bin/codegraph.ts",
+    "test":       "bun test",
+    "typecheck":  "tsc --noEmit",
+    "lint":       "biome check src tests",
+    "build":      "bun build --compile bin/codegraph.ts --outfile dist/codegraph",
+    "db:generate": "drizzle-kit generate",
+    "db:drift":    "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
+    "db:parity":   "bun test tests/schema-parity.test.ts"
   }
 }
 ```
@@ -447,7 +567,9 @@ protect, and the only ones with an external ground truth to compare against.
   `verbatimModuleSyntax`, `paths` mapping `#shared` for the editor (Bun uses `package.json#imports`).
 - Biome for style/format only. **The boundary is §4, not the linter** — a rule that lives in review is not
   a rule.
-- CI: `typecheck` → `boundary` → `test` → `budget` → integration on the fixture.
+- `drizzle-orm@0.45.4` is a runtime dependency; `drizzle-kit@0.31.11` is a **devDependency** and is never
+  shipped (it does not affect the compiled binary, §5.4.1).
+- CI: `typecheck` → `boundary` → `test` → `budget` → `db:drift` → `db:parity` → integration on the fixture.
 
 ## 14. Performance budgets
 
@@ -483,6 +605,7 @@ is still an open question (§9, 12 languages in v1).
 | S3 | Absence envelope end-to-end on the fixture | `eq`/`gte`/`not_indexed`/`stale` all reachable and asserted |
 | S4 | Publish atomicity with a concurrent reader | a reader holding the old handle completes its query unchanged while a publish renames over it |
 | S5 | Boundary enforcement in CI | a deliberate `../other-tool` import fails the build with a readable message |
+| S6 | Drizzle prepared-statement discipline holds the latency budget | with `.prepare()` caching, `trace` p95 < 40 ms at depth 2–4 on the fixture; re-running the same benchmark with per-call builders must fail the gate, proving the rule is load-bearing |
 
 S2 is the long pole and gates all extractor work; S3 gates `trace`, `summary` and `impact` together; S4
 gates the watcher. Do them in that order — none of the seven tools should be written before S2 and S3 pass.
@@ -496,9 +619,10 @@ gates the watcher. Do them in that order — none of the seven tools should be w
 2. **Zod for schemas, or literal JSON Schema.** Zod gives TS types for free but doubles the dependency
    surface and produces schemas the model sees. The spec's args are simple (string/enum/int) — a literal
    JSON Schema plus one tiny validator may be leaner. Decide at S2.
-3. **`bun:sqlite` statement caching.** `db.query()` caches prepared statements; the cache key (and its
-   eviction) is undocumented. If unbounded statement growth appears in long sessions, wrap it in a bounded
-   map in `store/db.ts`.
+3. **Prepared-statement cache key.** Drizzle has no statement cache whose eviction we control, and the
+   measured gap between a re-built builder (42.7 µs) and a prepared query (1.7 µs) makes the cache
+   load-bearing. Plan: a bounded map in `store/db.ts` keyed by `(sql, param-shape)`, LRU-capped, with a
+   counter exposed in `status.health` so cache growth is observable rather than guessed at. S6 validates it.
 4. **WASM module lifetime.** `web-tree-sitter` parsers are per-language objects; keeping 12 resident costs
    memory, recreating per file costs time. Measure at S2; likely a bounded LRU keyed by language.
 5. **Worker protocol.** Full JSON-serialised file results, or write results to the stage DB inside the
