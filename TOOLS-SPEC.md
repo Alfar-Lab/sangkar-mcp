@@ -570,6 +570,14 @@ only questions are "did it take" and "what did it still miss", and both are in t
 Ceiling: the server refuses `budget > 32000` with `error.code = "budget_too_large"` and a hint. An agent
 that wants 100 KB should page.
 
+Floor: every answer has a smallest size — the nine required envelope fields, the coverage counts and a
+continuation token — and a budget below it cannot be cut to fit. The server then refuses with
+`budget_too_large` and a hint naming the floor in tokens, rather than answering with a payload several
+times the allowance: a response that claims `truncated` while still over budget is worse than a
+refusal, because the caller cannot tell the two cases apart. `trace` is the one exception: a budget
+below a single neighbour returns a terminal page (`truncated: true`, `next: null`) that names the
+budget and points at `depth: 1`, since that is a smaller query rather than a smaller answer.
+
 ## 10. Total parameter surface
 
 | Tool | required | optional | total |

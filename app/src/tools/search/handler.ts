@@ -13,7 +13,7 @@
  * both name the generation the answer was served from.
  */
 import { createHash } from "node:crypto";
-import { emit } from "#shared/budget";
+import { budgetFloorOf, emit } from "#shared/budget";
 import { assemble } from "#shared/domain/coverage";
 import {
   bootstrapping,
@@ -337,14 +337,19 @@ export async function handle(ctx: ToolContext, args: SearchArgs): Promise<Search
     return fail(error, spec);
   }
 
-  if (emitted.truncated && window.length > 0 && emitted.payload.results.length === 0) {
-    // Nothing survived the cut. A page of zero rows carrying a continuation token would be an
-    // infinite loop, so the answer is the refusal the caller can act on.
+  // A zero-row page carrying a continuation token would be an infinite loop, and a budget below the
+  // floor this answer needs cannot be cut to fit at all (`emit` then returns the envelope untouched
+  // rather than mislabelling a cut). Both are the refusal the caller can act on, not a page they
+  // cannot use.
+  const floor = budgetFloorOf(emitted);
+  if (window.length > 0 && (emitted.payload.results.length === 0 || floor > budget)) {
     return fail(
       new AppError(
         "budget_too_large",
         `budget ${budget} fits none of the ${window.length} remaining declarations`,
-        { hint: `raise the budget; the default is ${DEFAULT_BUDGET_TOKENS} tokens` },
+        {
+          hint: `raise the budget; this answer needs at least ${floor} tokens`,
+        },
       ),
       spec,
     );

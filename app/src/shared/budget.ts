@@ -8,10 +8,13 @@ export const BYTES_PER_TOKEN = 4;
 export const MAX_BUDGET_TOKENS = 32_000;
 
 /**
- * Characters reserved for the continuation token while truncating. `next` is only minted once
- * the drop count is final, so the measurement has to charge for a token it has not seen yet.
+ * Characters reserved for the continuation token while truncating. `next` is only minted once the
+ * drop count is final, so the measurement has to charge for a token it has not seen yet — and a
+ * short charge is spent by the real token afterwards: a signed cursor for this app measures 211
+ * bytes (base64 JSON envelope, a dot, then the HMAC), so a 128-byte reserve left budget-filling
+ * replies up to 83 bytes over their own ceiling. 256 covers it with room for a longer cursor.
  */
-const NEXT_TOKEN_RESERVE_CHARS = 128;
+const NEXT_TOKEN_RESERVE_CHARS = 256;
 
 /** Bytes a drained array serialises to (`[]`): the floor a list can be cut to, never below. */
 const EMPTY_LIST_BYTES = 2;
@@ -324,9 +327,9 @@ function trimOnce(
  * `opts.mint` is called exactly once and only when something was actually dropped, with the number
  * of items (payload and coverage) that left the envelope. A payload with no lists to shrink and no
  * coverage to abridge cannot be cut, so it is returned unchanged rather than mislabelled as
- * truncated. An envelope whose own skeleton already exceeds the allowance is the one case a cut
- * cannot rescue: it is returned carrying the cut it could make, because a caller below the
- * envelope's floor has no smaller answer available (every declared default budget is far above it).
+ * truncated. An envelope whose own skeleton already exceeds the allowance is the same case from the
+ * other side — the budget is below the floor the required fields cost — so it is returned untouched
+ * too: no false `truncated`, and no token pointing at a page that cannot advance.
  * Budgets above `MAX_BUDGET_TOKENS` are refused: sizing is not a per-tool choice.
  */
 export function emit<T>(env: Envelope<T>, budgetTokens: number, opts: EmitOptions): Envelope<T> {
@@ -381,6 +384,25 @@ export function emit<T>(env: Envelope<T>, budgetTokens: number, opts: EmitOption
     return env.truncated ? asLowerBound(env) : env;
   }
 
+  // The floor: every droppable list is gone and the envelope still does not fit, so the budget is
+  // below what the required fields alone cost. A drained copy labelled `truncated` would claim a cut
+  // the caller can act on while still being over its allowance, and the minted position would be the
+  // one the call came in with — the head of a page that cannot advance. The honest answer is the
+  // envelope as it arrived: unchanged, unlabelled, and with no token `mint` was never asked for.
+  if (measured > budgetBytes) {
+    return env.truncated ? asLowerBound(env) : env;
+  }
+
   draft.next = opts.mint(dropped);
   return draft;
+}
+
+/**
+ * The smallest budget this answer can be delivered at: its serialised bytes at the declared exchange
+ * rate, rounded up. `emit` returns an answer untouched when the budget is below this — the floor the
+ * required fields cost — and a tool refuses then instead of serving it, because a response many
+ * times the caller's allowance is not an answer to its budget.
+ */
+export function budgetFloorOf(value: unknown): number {
+  return Math.ceil(byteSize(value) / BYTES_PER_TOKEN);
 }

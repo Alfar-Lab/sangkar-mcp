@@ -13,7 +13,7 @@
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests bin",
-    "build": "bun build --compile bin/codegraph.ts --outfile dist/codegraph",
+    "build": "bun build --compile bin/codegraph.ts --asset src/shared/store/migrations --outfile dist/codegraph",
     "db:generate": "drizzle-kit generate",
     "db:drift": "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
     "db:parity": "bun test tests/schema-parity.test.ts",

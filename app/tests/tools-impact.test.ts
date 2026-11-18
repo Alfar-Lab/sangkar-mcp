@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { BYTES_PER_TOKEN } from "#shared/budget";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import type { Envelope } from "#shared/envelope";
@@ -562,7 +563,19 @@ describe("impact handler: paging", () => {
     expect(full.truncated).toBe(false);
     expect(allIds.length).toBe(80);
 
-    const first = await handle(ctx, { paths: ["src/a.ts"], depth: 1, budget: 500 });
+    // The impact envelope's floor is above 500 tokens for an 80-dependant answer, and below the
+    // floor the handler now refuses instead of serving past the allowance. The tightest budget that
+    // still cuts is found from the whole answer rather than guessed.
+    const fullTokens = Math.ceil(Buffer.byteLength(JSON.stringify(full), "utf8") / BYTES_PER_TOKEN);
+    let budget = fullTokens - 1;
+    for (; budget > 1; budget -= 1) {
+      const cut = await handle(ctx, { paths: ["src/a.ts"], depth: 1, budget });
+      if (cut.status === "ok" && cut.truncated) {
+        break;
+      }
+    }
+    expect(budget).toBeGreaterThan(1);
+    const first = await handle(ctx, { paths: ["src/a.ts"], depth: 1, budget });
     const firstIds = idsOf(first);
     expect(first.truncated).toBe(true);
     expect(first.truncation_reason).toBe("budget");
@@ -578,7 +591,7 @@ describe("impact handler: paging", () => {
     const resumed = await handle(ctx, {
       paths: ["src/a.ts"],
       depth: 1,
-      budget: 500,
+      budget,
       cursor: first.next ?? "",
     });
     const resumedIds = idsOf(resumed);

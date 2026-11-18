@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BYTES_PER_TOKEN } from "#shared/budget";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import type { Envelope } from "#shared/envelope";
@@ -541,7 +542,21 @@ describe("status: budget", () => {
     );
     const ctx = contextFor({ files });
     const paths = files.map((file) => file.path);
-    const env = handle(ctx, { paths, budget: 200 });
+    // A 40-path report carries the language census and coverage as required fields, so its floor is
+    // above 200 tokens: below it `status` refuses rather than answering over the allowance. The
+    // tightest budget that still cuts is therefore found, not guessed.
+    const wholeTokens = Math.ceil(
+      Buffer.byteLength(JSON.stringify(handle(ctx, { paths })), "utf8") / BYTES_PER_TOKEN,
+    );
+    let budget = wholeTokens - 1;
+    for (; budget > 1; budget -= 1) {
+      const cut = handle(ctx, { paths, budget });
+      if (cut.status === "ok" && cut.truncated) {
+        break;
+      }
+    }
+    expect(budget).toBeGreaterThan(1);
+    const env = handle(ctx, { paths, budget });
 
     expect(env.truncated).toBe(true);
     expect(env.truncation_reason).toBe("budget");
@@ -555,7 +570,7 @@ describe("status: budget", () => {
     // The token is signed over this call's canonical arguments, which is what lets `expand` refuse
     // it for a different generation or a different request.
     const argsHash = `sha256:${createHash("sha256")
-      .update(JSON.stringify({ budget: 200, paths }))
+      .update(JSON.stringify({ budget, paths }))
       .digest("hex")}`;
     const resumed = ctx.cursor.verify(env.next ?? "", {
       generation: GENERATION,

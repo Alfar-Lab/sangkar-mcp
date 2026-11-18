@@ -29,7 +29,7 @@
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
-import { emit } from "#shared/budget";
+import { budgetFloorOf, emit } from "#shared/budget";
 import { checkFreshness, type Freshness, health, type ToolHealth } from "#shared/domain/freshness";
 import {
   bootstrapping,
@@ -41,6 +41,7 @@ import {
   type ReadStatus,
   relationFor,
 } from "#shared/envelope";
+import { AppError } from "#shared/errors";
 import { isUnderPrefix, normalizeRel } from "#shared/paths";
 import type { ToolContext } from "#shared/store/read/context";
 import type {
@@ -213,9 +214,22 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
 
   const argsHash = argsHashOf(requested, budget);
   try {
-    return emit(ok<StatusPayload>(payload, spec), budget, {
+    const emitted = emit(ok<StatusPayload>(payload, spec), budget, {
       mint: (position) => ctx.cursor.sign({ generation, tool: manifest.name, argsHash, position }),
     });
+    // A budget below the floor this report needs cannot be cut to fit, so `emit` hands the envelope
+    // back untouched: serving it would be a report many times the allowance. The status tool answers
+    // with the floor instead, and the same envelope-shape rule as the ceiling refuses it.
+    const floor = budgetFloorOf(emitted);
+    if (floor > budget) {
+      return fail(
+        new AppError("budget_too_large", `budget ${budget} is below the floor this report needs`, {
+          hint: `raise the budget to at least ${floor} tokens; the default is ${STATUS_DEFAULT_TOKENS}`,
+        }),
+        { ...spec, summary: "the requested budget could not be applied" },
+      );
+    }
+    return emitted;
   } catch (error) {
     // `emit` refuses a budget above its ceiling with an `AppError`, which is a client mistake and
     // part of the closed error union: it comes back as an envelope rather than as a thrown handler.

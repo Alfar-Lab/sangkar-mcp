@@ -78,8 +78,6 @@ function mint(position: number): string {
   return cursors.sign({ ...CURSOR_CALL, position });
 }
 
-const MINTED_TOKEN_BYTES = Buffer.byteLength(mint(1), "utf8");
-
 function bytes(value: unknown): number {
   return Buffer.byteLength(JSON.stringify(value), "utf8");
 }
@@ -344,32 +342,38 @@ describe("budget: ceiling, downgrade, minted continuation", () => {
     expect(env.truncated).toBe(false);
   });
 
-  test("the ceiling is budget + 10%, or the smallest envelope the payload can be cut to", () => {
+  test("the ceiling is budget + 10%, and below its floor the answer comes back untouched", () => {
     const env = ok(payload(items(80, "app"), items(40, "lib"), ["n"]), {
       ...baseSpec(),
       totals: { total_relation: "eq", calls_total: 80, callees_total: 40, notes_total: 1 },
     });
-    // Draining every list is the smallest emittable form of this payload: the skeleton, the
-    // `next` token and the preserved totals, none of which the budget may remove.
-    const drained = emit(env, 1, { mint: (position) => mint(position) });
-    const drainedBytes = bytes(drained);
-    expect(drained.truncated).toBe(true);
 
     const violations: string[] = [];
+    let honoured = 0;
+    let floored = 0;
     for (let budgetTokens = 1; budgetTokens <= 2400; budgetTokens += 1) {
       const budgetBytes = budgetTokens * BYTES_PER_TOKEN;
       const out = emit(env, budgetTokens, { mint: (position) => mint(position) });
-      const ceiling = Math.max(budgetBytes * 1.1, drainedBytes + MINTED_TOKEN_BYTES);
-      if (bytes(out) > ceiling) {
-        violations.push(`${budgetTokens} tokens: ${bytes(out)} B over ceiling ${ceiling} B`);
+      if (bytes(out) <= budgetBytes * 1.1) {
+        honoured += 1;
+        continue;
+      }
+      // The one way over the ceiling is a budget below the floor the required fields cost. Nothing
+      // was cut there, so nothing may claim it was: the envelope comes back as it arrived, with no
+      // token pointing at a page the caller already has.
+      const untouched = bytes(out) === bytes(env) && out.truncated === false && out.next === null;
+      if (untouched) {
+        floored += 1;
+      } else {
+        violations.push(
+          `${budgetTokens} tokens: ${bytes(out)} B over ceiling ${budgetBytes * 1.1} B`,
+        );
       }
     }
     expect(violations).toEqual([]);
-
-    // Why the second term is needed: at a budget this small the drained envelope alone is already
-    // over the 10% ceiling, so no cut can satisfy it — the budget is honored up to the size the
-    // envelope cannot go below, not below it.
-    expect(drainedBytes).toBeGreaterThan(100 * BYTES_PER_TOKEN * 1.1);
+    // Both regimes ran, so the sweep is not vacuous: some budgets were honoured, some were floors.
+    expect(honoured).toBeGreaterThan(0);
+    expect(floored).toBeGreaterThan(0);
   });
 
   test("a payload with no list to shrink is returned unchanged, never mislabelled as truncated", () => {

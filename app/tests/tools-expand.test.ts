@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { BYTES_PER_TOKEN } from "#shared/budget";
 import { type AppConfig, loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import type { Envelope } from "#shared/envelope";
@@ -754,25 +755,55 @@ describe("expand: budget", () => {
     }
   });
 
-  test("a tight budget truncates through emit and mints a cursor", async () => {
+  test("a budget below the envelope's floor refuses with the floor rather than paging forever", async () => {
+    const whole = await handle(ctx, { target: `${A_PATH}::Widget` });
     const env = await handle(ctx, { target: `${A_PATH}::Widget`, budget: 1 });
 
-    expect(env.status).toBe("ok");
-    expect(env.truncated).toBe(true);
-    expect(env.truncation_reason).toBe("budget");
-    expect(typeof env.next).toBe("string");
-    expect(env.totals.members_total).toBe(3);
-    expect(env.totals.total_relation).toBe("gte");
-    expect(env.summary).toContain("showing");
-    // The minted token is a real signed cursor for this call and generation: it verifies as a
-    // signature and refuses on arguments it was not minted for.
-    expect(
-      ctx.cursor.verify(env.next ?? "", {
-        generation: ROOT_GENERATION,
-        tool: TOOL_NAME,
-        argsHash: "sha256:0000",
-      }),
-    ).toMatchObject({ ok: false, code: "cursor_mismatch" });
+    // Below the floor no cut can reach the allowance, so `emit` returns the envelope untouched
+    // rather than a drained copy labelled `truncated`. Serving that would hand the caller a payload
+    // many times its allowance, so the answer is the refusal and the floor to raise to.
+    expect(env.status).toBe("error");
+    expect(env.error?.code).toBe("budget_too_large");
+    expect(env.error?.hint).toContain("tokens");
+    expect(env.next).toBeNull();
+    expect(env.truncated).toBe(false);
+    expect(env.totals.members_total).toBe(whole.totals.members_total);
+  });
+
+  test("every budget is either served whole or refused: never a cut that misses its allowance", async () => {
+    const whole = await handle(ctx, { target: `${A_PATH}::Widget` });
+    const wholeTokens = Math.ceil(
+      Buffer.byteLength(JSON.stringify(whole), "utf8") / BYTES_PER_TOKEN,
+    );
+    const served: number[] = [];
+    const refused: number[] = [];
+
+    for (let budget = 1; budget <= wholeTokens + 2; budget += 1) {
+      const env = await handle(ctx, { target: `${A_PATH}::Widget`, budget });
+      if (env.status === "error") {
+        // Below the floor the answer is the refusal and the number to raise the budget to, not a
+        // payload many times the allowance labelled as a budget cut.
+        expect(env.error?.code).toBe("budget_too_large");
+        expect(env.next).toBeNull();
+        expect(env.truncated).toBe(false);
+        refused.push(budget);
+        continue;
+      }
+      // This fixture's answer is small enough that anything above its floor carries it whole, so a
+      // served page is the whole payload with nothing claimed or minted. Truncation itself, and the
+      // signed token `emit` mints, are exercised where a page can actually split: `tools-trace`
+      // (dense depth-2 pagination) and `tools-search` (paged results).
+      expect(env.truncated).toBe(false);
+      expect(env.truncation_reason).toBeNull();
+      expect(env.next).toBeNull();
+      expect(env.payload).toEqual(whole.payload);
+      served.push(budget);
+    }
+
+    // The regime flips exactly once, and both sides of the flip were observed.
+    expect(refused.length).toBeGreaterThan(0);
+    expect(served.length).toBeGreaterThan(0);
+    expect(Math.max(...refused)).toBeLessThan(Math.min(...served));
   });
 });
 

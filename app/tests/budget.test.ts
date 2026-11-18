@@ -561,16 +561,17 @@ describe("emit: trimming the envelope-level coverage list", () => {
   });
 
   /**
-   * The floor is the one budget `emit` cannot honour, and the rule it follows there is deliberate:
-   * it answers with the smallest envelope the payload can be cut to and still says `truncated: true`,
-   * because items did leave. Returning the whole payload unflagged would hand a client an answer many
-   * times its declared budget with no signal at all — which is precisely what the handlers refuse on
-   * (`search` on a zero-row page, `trace` on a page below one neighbour, `expand` on `members`).
+   * The floor is the one budget `emit` cannot honour, and the rule it follows there is the same one
+   * it follows for a payload with nothing to cut: the envelope comes back **unchanged**. A drained
+   * copy labelled `truncated: true` would claim a cut the caller can act on while still being over
+   * its allowance, and the position it minted would be the one the call arrived with — the head of a
+   * page that cannot advance, which is how `expand` at `budget: 1` used to hand a client the same
+   * page forever.
    *
    * The regime is bounded: the floor here is well under the smallest declared default budget
    * (`status`: 800 tokens = 3 200 B), so no call at a declared default can reach it.
    */
-  test("below the envelope's own floor the answer is that floor, never the uncut payload", () => {
+  test("below the envelope's own floor the envelope is returned untouched and unlabelled", () => {
     const calls = items(40, "app");
     const entries = skipped(20);
     const spec = skippedSpec(entries);
@@ -580,21 +581,29 @@ describe("emit: trimming the envelope-level coverage list", () => {
     const spy = mintSpy();
     const out = emit(env, 1, { mint: spy.mint });
 
-    expect(out.truncated).toBe(true);
-    expect(out.truncation_reason).toBe("budget");
-    expect(out.payload.calls).toHaveLength(0);
-    expect(out.coverage.not_indexed).toHaveLength(0);
-    expect(out.coverage.skipped).toBe(entries.length);
-    expect(out.totals.calls_total).toBe(calls.length);
+    // Nothing was cut, so nothing may say it was, and no token may point at a page that would be
+    // byte-identical to this one.
+    expect(out.truncated).toBe(false);
+    expect(out.truncation_reason).toBeNull();
+    expect(out.next).toBeNull();
+    expect(spy.positions).toHaveLength(0);
+    expect(out).toEqual(env);
+    expect(bytes(out)).toBe(bytes(env));
+
+    // A caller-flagged truncation survives the floor untouched, so `emit` never erases the caller's
+    // own claim (`SearchEnvelope`-style zero-row pages depend on that).
+    const flagged = emit({ ...env, truncated: true, truncation_reason: "budget" }, 1, {
+      mint: spy.mint,
+    });
+    expect(flagged.truncated).toBe(true);
+    expect(flagged.totals.total_relation).toBe("gte");
+    expect(spy.positions).toHaveLength(0);
+
+    // The floor is a floor, not a leak: just under it the same payload is cut and minted.
+    const smallestHonoured = Math.ceil(bytes(env) / BYTES_PER_TOKEN);
+    const cut = emit(env, Math.max(2, smallestHonoured - 2), { mint: spy.mint });
+    expect(bytes(cut)).toBeLessThanOrEqual((smallestHonoured - 2) * BYTES_PER_TOKEN);
+    expect(cut.truncated).toBe(true);
     expect(spy.positions).toHaveLength(1);
-    expect(spy.positions[0]).toBe(calls.length + entries.length);
-    // What is left is the skeleton: smaller than the payload that came in, and far under the
-    // smallest default budget a real call can carry.
-    expect(bytes(out)).toBeLessThan(bytes(env));
-    expect(bytes(out)).toBeLessThan(800 * BYTES_PER_TOKEN);
-    // The floor is a floor, not a leak: at its own token-equivalent the same payload fits.
-    const smallestHonoured = Math.ceil(bytes(out) / BYTES_PER_TOKEN);
-    const fits = emit(env, smallestHonoured, { mint: spy.mint });
-    expect(bytes(fits)).toBeLessThanOrEqual(smallestHonoured * BYTES_PER_TOKEN);
   });
 });

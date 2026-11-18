@@ -30,7 +30,7 @@
  * that list, and the resumed page continues from it, so page N+1 overlaps page N by nothing.
  */
 import { createHash } from "node:crypto";
-import { emit, MAX_BUDGET_TOKENS } from "#shared/budget";
+import { budgetFloorOf, emit, MAX_BUDGET_TOKENS } from "#shared/budget";
 import { assemble } from "#shared/domain/coverage";
 import { changedSinceFrom, type UnmatchedReason } from "#shared/domain/diff";
 import { clampDepth, expand } from "#shared/domain/neighbors";
@@ -534,6 +534,27 @@ export async function handle(
         }),
     },
   );
+
+  // Below the floor this answer needs, `emit` returns it untouched: an impact report many times the
+  // allowance is not an answer to the budget, so the refusal names the floor to raise to.
+  const floor = budgetFloorOf(sized);
+  if (floor > budget) {
+    return fail(
+      new AppError("budget_too_large", `budget ${budget} is below the floor this report needs`, {
+        hint: `raise the budget to at least ${floor} tokens`,
+      }),
+      {
+        summary,
+        read_status: readStatusOf(generation, indexedAt, checkedAt, staleness),
+        coverage: assembly.coverage,
+        totals: { impacted_total: impacted.length, total_relation: assembly.relation },
+        next_tools: NEXT_TOOLS,
+        truncated: false,
+        truncation_reason: null,
+        next: null,
+      },
+    );
+  }
 
   if (!sized.truncated) {
     return { ...sized, summary: pageSummary(summary, start, page.length, impacted.length, false) };

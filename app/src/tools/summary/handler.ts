@@ -20,7 +20,7 @@
  * remains the only thing that cuts the payload: its drop count becomes the next position, which
  * is exact while the paged list is the list being cut (it leads and is the largest).
  */
-import { emit } from "#shared/budget";
+import { budgetFloorOf, emit } from "#shared/budget";
 import { assemble, type CoverageSource } from "#shared/domain/coverage";
 import { type ChangeSet, changedSinceFrom } from "#shared/domain/diff";
 import { type ChangedFacts, type ImpactedFacts, score } from "#shared/domain/risk";
@@ -740,7 +740,7 @@ export async function handle(
     truncation_reason: built.itemCapped ? "item_cap" : null,
   });
 
-  return emit(env, budget, {
+  const emitted = emit(env, budget, {
     // `emit` reports how many items it dropped, and the paged list is what it cuts: the undelivered
     // remainder of that list starts there, so a continuation cannot repeat a ranked item. A budget
     // too small to carry the supporting lists as well is the one case where the count includes
@@ -753,4 +753,35 @@ export async function handle(
         position: Math.min(built.pagedLength, Math.max(start, built.pagedLength - dropped)),
       }),
   });
+
+  // Below the floor this summary needs nothing can be cut to fit, so `emit` returns the envelope
+  // untouched: a full repository summary is many times a tiny allowance, and `summary` is the hot
+  // path — the refusal names the floor rather than spending the caller's budget on an answer it
+  // cannot afford to read.
+  const floor = budgetFloorOf(emitted);
+  return floor > budget
+    ? fail(
+        new AppError("budget_too_large", `budget ${budget} is below the floor this summary needs`, {
+          hint: `raise the budget to at least ${floor} tokens`,
+        }),
+        {
+          summary: built.summary,
+          read_status: readStatusOf(
+            generationId,
+            indexedAt ?? generation.publishedAt,
+            freshness,
+            ctx.now(),
+          ),
+          // The refusal is about the budget, so it carries no payload and no path list: the counts
+          // stay exact (`skipped` says how many were not indexed) while the 80 entries that would
+          // make this envelope several kilobytes are what the caller was told to make room for.
+          coverage: { ...assembly.coverage, not_indexed: [] },
+          totals: built.totals,
+          next_tools: built.nextTools,
+          truncated: false,
+          truncation_reason: null,
+          next: null,
+        },
+      )
+    : emitted;
 }

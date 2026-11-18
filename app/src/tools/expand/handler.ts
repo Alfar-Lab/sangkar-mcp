@@ -30,7 +30,7 @@
  * compute — `status` owns the repo-wide check.
  */
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
-import { emit } from "#shared/budget";
+import { budgetFloorOf, emit } from "#shared/budget";
 import { assemble } from "#shared/domain/coverage";
 import {
   type ExpandDirection,
@@ -497,6 +497,18 @@ function sized<T extends ExpandPayload>(
     const emitted = emit(env, budget, {
       mint: (position) => ctx.cursor.sign({ generation, tool: TOOL_NAME, argsHash, position }),
     });
+    // Below the floor this answer needs, `emit` returns the envelope untouched rather than
+    // mislabelling a cut. Serving that would hand the caller a payload many times its allowance (a
+    // dense `members` list is hundreds of kilobytes), so the answer is the floor to raise to.
+    const floor = budgetFloorOf(emitted);
+    if (floor > budget) {
+      return fail(
+        new AppError("budget_too_large", `budget ${budget} is below the floor this answer needs`, {
+          hint: `raise the budget to at least ${floor} tokens; the default is ${DEFAULT_BUDGET_TOKENS}`,
+        }),
+        { ...env, summary: summarize(env) },
+      );
+    }
     return { ...emitted, summary: summarize(emitted) };
   } catch (error) {
     // `emit` refuses a budget above the protocol ceiling with `budget_too_large`; a handler

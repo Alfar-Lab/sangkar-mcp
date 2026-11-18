@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { BYTES_PER_TOKEN } from "#shared/budget";
 import { type AppConfig, loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import type { Envelope } from "#shared/envelope";
@@ -410,17 +411,36 @@ describe("tools/search path filter", () => {
 });
 
 describe("tools/search pagination", () => {
+  /**
+   * The tightest budget that still truncates this fixture's answer, found rather than guessed: the
+   * whole answer first, then down one token at a time. The fixture's envelope floor sits just under
+   * its payload, so a hard-coded 200 would now land *below* the floor — where `search` refuses
+   * instead of paging, because a page that cannot be cut to fit is not a page.
+   */
+  async function tightestCuttingBudget(ctx: ToolContext): Promise<number> {
+    const whole = await search(ctx, { query: QUERY });
+    const wholeTokens = Math.ceil(
+      Buffer.byteLength(JSON.stringify(whole), "utf8") / BYTES_PER_TOKEN,
+    );
+    for (let budget = wholeTokens - 1; budget > 1; budget -= 1) {
+      const env = await search(ctx, { query: QUERY, budget });
+      if (env.status === "ok" && env.next !== null) {
+        return budget;
+      }
+    }
+    throw new Error("no budget truncates this fixture's answer");
+  }
+
   test("a truncated page's next cursor returns the following page with no duplicates", async () => {
     const ctx = fakeContext();
+    const budget = await tightestCuttingBudget(ctx);
     const pages: SearchPayload["results"][number][] = [];
     let cursor: string | undefined;
     let calls = 0;
 
     for (;;) {
       const args: SearchArgs =
-        cursor === undefined
-          ? { query: QUERY, budget: 200 }
-          : { query: QUERY, budget: 200, cursor };
+        cursor === undefined ? { query: QUERY, budget } : { query: QUERY, budget, cursor };
       const env = await search(ctx, args);
       calls += 1;
       expect(env.status).toBe("ok");
@@ -446,15 +466,20 @@ describe("tools/search pagination", () => {
 
   test("a resumed page may use a different budget: the list, not the page size, is the call", async () => {
     const ctx = fakeContext();
-    const first = await search(ctx, { query: QUERY, budget: 200 });
+    const first = await search(ctx, { query: QUERY, budget: await tightestCuttingBudget(ctx) });
     const next = first.next;
     expect(next).not.toBeNull();
+    const firstIds = resultsOf(first).map((result) => result.id);
+    expect(firstIds.length).toBeGreaterThan(0);
+    expect(firstIds).toEqual(ROWS.slice(0, firstIds.length).map((entry) => entry.hit.id));
 
     const resumed = await search(ctx, { query: QUERY, budget: 2000, cursor: next ?? "" });
     expect(resumed.status).toBe("ok");
-    expect(resultsOf(resumed).length).toBeGreaterThan(0);
-    expect(resultsOf(resumed)[0]?.id).toBe(12);
-    expect(resultsOf(resumed).some((result) => result.id === 11)).toBe(false);
+    const resumedIds = resultsOf(resumed).map((result) => result.id);
+    expect(resumedIds.length).toBeGreaterThan(0);
+    // The resumed page starts exactly where the tight one stopped, whatever budget either used.
+    expect(resumedIds[0]).toBe(ROWS[firstIds.length]?.hit.id);
+    expect(resumedIds.some((id) => firstIds.includes(id))).toBe(false);
   });
 });
 

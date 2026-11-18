@@ -63,6 +63,11 @@ per event.
 Registered names are exactly these seven: no `_tool` suffix, no aliases, and no eighth name in the
 agent profile.
 
+Every tool takes an optional `budget` in tokens and defaults it per tool (`status` 800, `summary`
+1200, `trace` 3200, `search` 2000, `impact` 2500, `expand` 2500). Above 32000 the call is refused
+with `budget_too_large`; so is a budget below the smallest size an answer can take, with a hint
+naming that floor — one refusal instead of a payload several times what you asked for.
+
 ## `.codegraph`
 
 One directory per working tree, beside the code it describes:
@@ -122,9 +127,9 @@ Two facts about the standalone artifact today:
     --outfile dist/codegraph
   ```
 
-  `app/package.json`'s `build` script does not pass `--asset` yet, so `dist/codegraph` from
-  `bun run build` cannot read an index. `tests/binary-smoke.test.ts` builds and drives the artifact
-  with the flag, which is the evidence that the flag is required.
+  `bun run build` passes exactly this flag, so `dist/codegraph`
+  can read and serve an index; `tests/binary-smoke.test.ts` builds and drives that artifact, which is
+  the evidence the flag is required rather than merely tidy.
 - **Grammar WASM is not embedded.** Grammars load lazily from `web-tree-sitter` and
   `tree-sitter-wasms` in `node_modules` at index time, never at startup, so a compiled binary serves
   an index with no `node_modules` beside it but cannot build one. Until the grammars are compiled in,
