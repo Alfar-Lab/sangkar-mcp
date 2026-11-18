@@ -6,7 +6,7 @@ import { isUnderPrefix } from "#shared/paths";
 import { type Conn, db, openReader, openWriter, statementCacheStats } from "#shared/store/db";
 import { migrate } from "#shared/store/migrate";
 import { rowsForPaths, unresolvedForFiles } from "#shared/store/read/coverage";
-import { inbound, outbound } from "#shared/store/read/edges";
+import { inbound, inboundMany, outbound, outboundMany } from "#shared/store/read/edges";
 import { metricsFor } from "#shared/store/read/metrics";
 import { findByName, findByQn, members, nodesByFile } from "#shared/store/read/nodes";
 import * as schema from "#shared/store/schema";
@@ -346,6 +346,71 @@ describe("read/edges", () => {
   test("no edge in either direction for a leaf on that side", () => {
     expect(outbound(reader, ALPHA).map((row) => row.edge.id)).toEqual([1]);
     expect(inbound(reader, ALPHA, ["defines"]).map((row) => row.node.name)).toEqual(["Beta"]);
+  });
+});
+
+describe("read/edges: batched lookups", () => {
+  /** Batches are unordered by contract, so a comparison sorts on the edge id first. */
+  const byEdgeId = (rows: readonly { edge: { id: number } }[]) =>
+    [...rows].sort((a, b) => a.edge.id - b.edge.id);
+
+  test("a batch returns exactly the rows the same ids return one at a time", () => {
+    expect(byEdgeId(inboundMany(reader, [ALPHA, BETA, GAMMA]))).toEqual(
+      byEdgeId([ALPHA, BETA, GAMMA].flatMap((id) => inbound(reader, id))),
+    );
+    expect(byEdgeId(outboundMany(reader, [ALPHA, BETA, GAMMA]))).toEqual(
+      byEdgeId([ALPHA, BETA, GAMMA].flatMap((id) => outbound(reader, id))),
+    );
+  });
+
+  test("the kind filter and both endpoints behave as they do per id", () => {
+    expect(inboundMany(reader, [ALPHA], ["calls"]).map((row) => row.edge.id)).toEqual([4]);
+    expect(inboundMany(reader, [GAMMA], ["calls"]).map((row) => row.edge.id)).toEqual([1]);
+    expect(inboundMany(reader, [GAMMA], ["contains"])).toEqual([]);
+    expect(outboundMany(reader, [BETA], ["defines"]).map((row) => row.node.qn)).toEqual([
+      "src/a.ts::Beta.alpha",
+    ]);
+  });
+
+  test("an empty batch is an empty answer, not a query", () => {
+    expect(inboundMany(reader, [])).toEqual([]);
+    expect(outboundMany(reader, [], ["calls"])).toEqual([]);
+  });
+
+  test("a repeated id is a membership test, so its rows are not duplicated", () => {
+    // The tail chunk is padded to the batch arity by repeating an id (`edges.ts` `toBatch`);
+    // this is the SQLite behaviour that padding relies on.
+    expect(byEdgeId(inboundMany(reader, [BETA, BETA, BETA]))).toEqual(
+      byEdgeId(inbound(reader, BETA)),
+    );
+  });
+
+  test("a frontier wider than one chunk is answered in full", () => {
+    // 201 ids: the real ones sit in different chunks, the rest match nothing. A chunking bug would
+    // either drop the second chunk or bind the wrong arity and raise.
+    const ids = Array.from({ length: 201 }, (_, index) => 1000 + index);
+    ids[0] = BETA;
+    ids[200] = GAMMA;
+    expect(byEdgeId(inboundMany(reader, ids))).toEqual(
+      byEdgeId([...inbound(reader, BETA), ...inbound(reader, GAMMA)]),
+    );
+  });
+
+  test("the statement cache stays bounded however many frontier lengths a caller asks for", () => {
+    // Every batch binds the same arity, so the `IN (?, …)` shape cannot flood the 200-entry cache
+    // the way one shape per frontier length would: 40 different sizes build exactly one statement.
+    const kinds = ["calls", "defines"];
+    const missesBefore = reader.statementCacheStats().misses;
+    for (let size = 1; size <= 40; size += 1) {
+      inboundMany(
+        reader,
+        Array.from({ length: size }, (_, index) => 1 + (index % 3)),
+        kinds,
+      );
+    }
+    const after = reader.statementCacheStats();
+    expect(after.misses - missesBefore).toBe(1);
+    expect(after.size).toBeLessThanOrEqual(after.capacity);
   });
 });
 

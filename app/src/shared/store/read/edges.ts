@@ -9,7 +9,13 @@
  *
  * Statements come from `prepared(conn, key, build)` and rows are mapped to
  * {@link NeighbourEdge} here — no Drizzle `$inferSelect` type crosses the boundary.
+ *
+ * The batched pair ({@link inboundMany}, {@link outboundMany}) exists because a walk's cost must
+ * not scale with the number of nodes it visits: a depth-2 hop over a dense corpus asks about ~1 200
+ * near-ids, and one statement per id spends the whole expansion budget on round trips. One
+ * `IN (?, …)` statement asks about {@link EDGE_BATCH_SIZE} of them at once.
  */
+import { AppError } from "#shared/errors";
 import { type Conn, prepared } from "#shared/store/db";
 import { NODE_SELECT, type NodeRow, type NodeSqlRow, toNodeRow } from "#shared/store/read/nodes";
 
@@ -64,18 +70,75 @@ function placeholders(count: number): string {
 }
 
 /**
- * One direction and kind-filter arity, assembled only when the shape is a cache miss. The two
- * interpolated values are a closed union and a count, never caller input.
+ * The near-side ids one batched statement asks about. Every batch is bound at exactly this arity,
+ * so the `IN (?, …)` shape is `(direction, kind arity)` — a handful of entries in the 200-entry
+ * statement cache, however many ids a walk visits. 200 stays far below SQLite's variable ceiling
+ * (999 even on the oldest supported builds) and keeps each chunk one range scan per index seek.
  */
-function incidentSql(direction: Direction, kindCount: number): string {
-  const near = direction === "inbound" ? "e.dst_id" : "e.src_id";
+const EDGE_BATCH_SIZE = 200;
+
+/**
+ * One statement shape. The near-side predicate is assembled by the caller ({@link singlePredicate}
+ * or {@link batchPredicate}) and the two interpolated values are a closed union and a count, never
+ * caller input.
+ *
+ * `ordered` is false only for the batched lookup: the sort that puts a chunk in `(kind, tier, line,
+ * qn)` order costs ~14 % of a dense walk, and the walk imposes its own total order on what it
+ * collects anyway (`#shared/domain/neighbors` `compareReached`). A batch therefore arrives in scan
+ * order — index order per near id — which is a fact a caller may not rely on.
+ */
+function incidentSql(
+  direction: Direction,
+  kindCount: number,
+  nearPredicate: string,
+  ordered: boolean,
+): string {
   const far = direction === "inbound" ? "e.src_id" : "e.dst_id";
   const kinds = kindCount === 0 ? "" : ` AND e.kind IN (${placeholders(kindCount)})`;
+  const order = ordered ? " ORDER BY e.kind, e.tier, e.line, n.qn" : "";
   return (
     `SELECT ${EDGE_SELECT}, ${NODE_SELECT} FROM edge e` +
     ` JOIN node n ON n.id = ${far} JOIN file f ON f.id = n.file_id` +
-    ` WHERE ${near} = ?${kinds} ORDER BY e.kind, e.tier, e.line, n.qn`
+    ` WHERE ${nearPredicate}${kinds}${order}`
   );
+}
+
+/** The near side of a single-id lookup: the endpoint that was asked about, bound to one value. */
+function singlePredicate(direction: Direction): string {
+  return `${direction === "inbound" ? "e.dst_id" : "e.src_id"} = ?`;
+}
+
+/** The near side of a batched lookup: the same endpoint, bound to {@link EDGE_BATCH_SIZE} values. */
+function batchPredicate(direction: Direction): string {
+  return `${direction === "inbound" ? "e.dst_id" : "e.src_id"} IN (${placeholders(EDGE_BATCH_SIZE)})`;
+}
+
+/**
+ * A chunk grown to the batch arity by repeating an id **from that same chunk**. Two consequences,
+ * both load-bearing:
+ *
+ * - `IN (?, …)` is a membership test, so a repeated value cannot match a row twice — the padding is
+ *   why the tail chunk needs no statement shape of its own, and the cache holds one entry per
+ *   direction and kind arity instead of one per frontier length;
+ * - ending a chunk with an id it already contains is what keeps a batch from repeating another
+ *   chunk's rows, so a batched lookup returns exactly what the same ids return one at a time.
+ */
+function toBatch(chunk: readonly number[]): number[] {
+  const filler = firstId(chunk);
+  const bound = [...chunk];
+  for (let index = chunk.length; index < EDGE_BATCH_SIZE; index += 1) {
+    bound.push(filler);
+  }
+  return bound;
+}
+
+/** The first id of a chunk the walk loop guarantees is non-empty; SQLite rejects `IN ()`. */
+function firstId(chunk: readonly number[]): number {
+  const id = chunk[0];
+  if (id === undefined) {
+    throw new AppError("internal", "edges: a chunk of ids cannot be empty");
+  }
+  return id;
 }
 
 function toNeighbourEdge(row: IncidentSqlRow): NeighbourEdge {
@@ -104,9 +167,41 @@ function incident(
 ): NeighbourEdge[] {
   const filter = kinds ?? [];
   const statement = prepared(conn, `edges.${direction}/${filter.length}`, (sqlite) =>
-    sqlite.query<IncidentSqlRow, (string | number)[]>(incidentSql(direction, filter.length)),
+    sqlite.query<IncidentSqlRow, (string | number)[]>(
+      incidentSql(direction, filter.length, singlePredicate(direction), true),
+    ),
   );
   return statement.all(nodeId, ...filter).map(toNeighbourEdge);
+}
+
+/**
+ * The batched half of {@link incident}: one statement for the whole frontier, spilled over
+ * `EDGE_BATCH_SIZE`-sized chunks. Rows arrive in scan order, chunk by chunk, so a caller that needs
+ * an order imposes it — which is exactly what the walk does, and why this one is not sorted here.
+ */
+function incidentMany(
+  conn: Conn,
+  direction: Direction,
+  nodeIds: readonly number[],
+  kinds: readonly string[] | undefined,
+): NeighbourEdge[] {
+  if (nodeIds.length === 0) {
+    return [];
+  }
+  const filter = kinds ?? [];
+  const statement = prepared(conn, `edges.${direction}Many/${filter.length}`, (sqlite) =>
+    sqlite.query<IncidentSqlRow, (string | number)[]>(
+      incidentSql(direction, filter.length, batchPredicate(direction), false),
+    ),
+  );
+  const rows: NeighbourEdge[] = [];
+  for (let start = 0; start < nodeIds.length; start += EDGE_BATCH_SIZE) {
+    const chunk = nodeIds.slice(start, start + EDGE_BATCH_SIZE);
+    for (const row of statement.all(...toBatch(chunk), ...filter)) {
+      rows.push(toNeighbourEdge(row));
+    }
+  }
+  return rows;
 }
 
 /**
@@ -124,4 +219,27 @@ export function inbound(conn: Conn, nodeId: number, kinds?: readonly string[]): 
  */
 export function outbound(conn: Conn, nodeId: number, kinds?: readonly string[]): NeighbourEdge[] {
   return incident(conn, "outbound", nodeId, kinds);
+}
+
+/**
+ * {@link inbound} for a whole set of ids: every edge whose destination is one of `nodeIds`, with
+ * the calling node attached. Same rows and same `kinds` filter as a loop of {@link inbound} calls;
+ * **unordered** — chunk by chunk in scan order — because a caller of a batch orders the batch, and
+ * the walk does exactly that.
+ */
+export function inboundMany(
+  conn: Conn,
+  nodeIds: readonly number[],
+  kinds?: readonly string[],
+): NeighbourEdge[] {
+  return incidentMany(conn, "inbound", nodeIds, kinds);
+}
+
+/** {@link outbound} for a whole set of ids: same contract as {@link inboundMany}. */
+export function outboundMany(
+  conn: Conn,
+  nodeIds: readonly number[],
+  kinds?: readonly string[],
+): NeighbourEdge[] {
+  return incidentMany(conn, "outbound", nodeIds, kinds);
 }

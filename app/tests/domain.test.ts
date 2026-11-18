@@ -384,6 +384,45 @@ function fakeNeighbourSource(graph: GraphFixture): NeighbourSource {
   };
 }
 
+/**
+ * The same fixture behind a source that only knows how to batch, and that answers each frontier
+ * **backwards** — ids in reverse, rows per id in reverse. A walk that let the arrival order decide
+ * anything (which group claims a node, which hop it is attributed to) would disagree with
+ * {@link fakeNeighbourSource} over this source, so the two are compared byte for byte below. The
+ * single-id members throw: the walk must reach for the batched pair, and a silent fallback would
+ * otherwise stay invisible here.
+ */
+function batchedNeighbourSource(graph: GraphFixture, log: string[]): NeighbourSource {
+  const collect = (
+    direction: "in" | "out",
+    nodeIds: readonly number[],
+    kinds: readonly string[] | undefined,
+  ): NeighbourEdge[] => {
+    log.push(`${direction}:${nodeIds.length}`);
+    const filter = kinds ?? [];
+    const rows: NeighbourEdge[] = [];
+    for (const id of [...nodeIds].reverse()) {
+      const list = (direction === "in" ? graph.in.get(id) : graph.out.get(id)) ?? [];
+      for (const edge of [...list].reverse()) {
+        if (filter.length === 0 || filter.includes(edge.edge.kind)) {
+          rows.push(edge);
+        }
+      }
+    }
+    return rows;
+  };
+  return {
+    inbound: () => {
+      throw new Error("this source only answers batches");
+    },
+    outbound: () => {
+      throw new Error("this source only answers batches");
+    },
+    inboundMany: (nodeIds, kinds) => collect("in", nodeIds, kinds),
+    outboundMany: (nodeIds, kinds) => collect("out", nodeIds, kinds),
+  };
+}
+
 const SEED = nodeOf({
   id: 1,
   name: "seed",
@@ -608,6 +647,62 @@ describe("expand: grouping, hop and external", () => {
     expect(ids).toEqual([CALLER.id]);
     // Deterministic winner: `calls` sorts before `references`.
     expect(at(result.out, 0).edge).toBe("calls");
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// expand: the hop is one batched lookup
+// ---------------------------------------------------------------------------------------------
+
+describe("expand: batching the frontier", () => {
+  const single = fakeNeighbourSource(EXPAND_GRAPH);
+
+  test("a batched source produces the identical payload as a per-id source", () => {
+    // Every knob the walk has, including the all-or-nothing kind filter and the depth ceiling.
+    for (const direction of ["all", "in", "out"] as const) {
+      for (const depth of [1, 2, 3, 4]) {
+        for (const kinds of [undefined, [], ["calls"], ["references", "contains"]]) {
+          const options = kinds === undefined ? { direction, depth } : { direction, depth, kinds };
+          expect(expand(batchedNeighbourSource(EXPAND_GRAPH, []), [SEED.id], options)).toEqual(
+            expand(single, [SEED.id], options),
+          );
+        }
+      }
+    }
+  });
+
+  test("one batched call per direction per hop, never one per node", () => {
+    // `in` is walked before `out`, so the log is the inbound walk's hops then the outbound walk's.
+    for (const [depth, expected] of [
+      [1, ["in:1", "out:1"]],
+      [2, ["in:1", "in:1", "out:1", "out:3"]],
+      [3, ["in:1", "in:1", "in:1", "out:1", "out:3", "out:1"]],
+    ] as const) {
+      const log: string[] = [];
+      expand(batchedNeighbourSource(EXPAND_GRAPH, log), [SEED.id], { direction: "all", depth });
+      // `in:N` / `out:N`: the frontier the hop was asked about, in the fixture's shape.
+      expect(log).toEqual([...expected]);
+    }
+  });
+
+  test("a walk that must fall back to single ids groups the same way", () => {
+    // `fakeNeighbourSource` has no batched members, which is the pre-batching walk verbatim.
+    const log: string[] = [];
+    const fallback: NeighbourSource = {
+      inbound: (nodeId, kinds) => {
+        log.push(`in:${nodeId}`);
+        return single.inbound(nodeId, kinds);
+      },
+      outbound: (nodeId, kinds) => {
+        log.push(`out:${nodeId}`);
+        return single.outbound(nodeId, kinds);
+      },
+    };
+    expect(expand(fallback, [SEED.id], { direction: "all", depth: 2 })).toEqual(
+      expand(single, [SEED.id], { direction: "all", depth: 2 }),
+    );
+    // The fallback is per id, which is the round-trip cost the batched member exists to remove.
+    expect(log).toEqual(["in:1", "in:5", "out:1", "out:2", "out:3", "out:7"]);
   });
 });
 

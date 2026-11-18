@@ -9,11 +9,13 @@
  *
  * Two limits are deliberate and visible in the payload:
  *
- * - `read_status.stale` is derived from what the graph can prove without touching the filesystem: a
- *   `file` row written by an earlier generation than the one being served. Working-tree drift and a
- *   `project_root` mismatch need `#shared/domain/freshness.ts` (phase 3, TASK-030), which is where
- *   this field moves; until then the verdict is graph-side only and `stale_checked_at` says when it
- *   ran, so the claim is dated rather than absolute.
+ * - `read_status` is the verdict of `#shared/domain/freshness.ts`, not a reading of `meta`: the
+ *   graph-side half of it survives (a `file` row written by an earlier generation than the one
+ *   being served) and the filesystem-side half is added — a `project_root` mismatch, a base commit
+ *   that is no longer `HEAD`, a watcher that has been busy with nothing to publish for ten minutes,
+ *   and a digest that no longer matches the bytes on disk. `stale_checked_at` is that module's
+ *   `checked_at`, so the claim is dated rather than absolute. This handler only decides how to word
+ *   the reason it is handed; it does not decide whether the answer is stale.
  * - `graph.db_path` and `graph.size_bytes`: `GraphReader` deliberately exposes no database path, so
  *   the path is derived from the injected `ctx.config.dataDir` — never from the environment — and
  *   the size is a `stat` of that file.
@@ -28,6 +30,7 @@ import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { emit } from "#shared/budget";
+import { checkFreshness, type Freshness, health, type ToolHealth } from "#shared/domain/freshness";
 import {
   bootstrapping,
   type Coverage,
@@ -98,11 +101,7 @@ export interface StatusPayload {
   };
   readonly languages: readonly StatusLanguage[];
   readonly paths: readonly StatusPath[];
-  readonly health: {
-    readonly indexer: string | null;
-    readonly last_publish_ms: number;
-    readonly consecutive_failures: number;
-  };
+  readonly health: ToolHealth;
 }
 
 /** The arguments the manifest declares; every one of them is optional. */
@@ -157,7 +156,17 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
   };
 
   const staleFiles = files.filter((file) => file.indexedGeneration !== generation).length;
-  const readStatus = readStatusOf(ctx, meta, generation, generationRow, staleFiles, files.length);
+  // Freshness is computed once, from the reader: both the envelope's `read_status` and the summary
+  // are worded from it. A tool decides what to show; `shared/domain` decides what is true.
+  const freshness = checkFreshness(ctx.reader, ctx.config.repoRoot, { now: ctx.now });
+  const readStatus = readStatusOf(
+    freshness,
+    meta,
+    generation,
+    generationRow,
+    staleFiles,
+    files.length,
+  );
 
   const report = pathReport(ctx, requested, rows);
   const dbPath = join(ctx.config.dataDir, "graph.db");
@@ -177,15 +186,20 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
     },
     languages: languageEntries(census),
     paths: report.entries,
-    health: {
-      indexer: meta.indexerState,
-      last_publish_ms: generationRow.durationMs,
-      consecutive_failures: meta.consecutiveFailures,
-    },
+    // The same module's answer: indexer state, the served publish's duration, the failure counter
+    // and the reader handle's prepared-statement cache size.
+    health: health(ctx.reader),
   };
 
   const spec: EnvelopeSpec = {
-    summary: summaryOf(coverage, generation, staleFiles, requested.length, report.indexedPaths),
+    summary: summaryOf(
+      coverage,
+      generation,
+      staleFiles,
+      freshness.files_changed_since,
+      requested.length,
+      report.indexedPaths,
+    ),
     read_status: readStatus,
     coverage,
     totals: {
@@ -240,34 +254,67 @@ function unpublished(ctx: ToolContext, meta: GraphMeta): StatusEnvelope {
 }
 
 /**
- * Freshness of the answer, stamped with the moment it was checked. The verdict is graph-side (see
- * the module comment), so it is reported as a dated claim rather than as an absolute one.
+ * The freshness verdict as the envelope spells it. `stale` and `stale_checked_at` come from
+ * `#shared/domain/freshness.ts` untouched; this function only chooses the words.
+ *
+ * The graph-side fact stays visible, because it is a different fact from disk drift: a `file` row
+ * the indexer wrote in an earlier generation means the served graph is behind its own tree. It is
+ * reported first whenever freshness found nothing, in the wording earlier answers used, and it is
+ * appended when freshness did find something, so one reason never hides the other. A fresh answer
+ * carries no `stale_reason` key at all — absent, not empty.
  */
 function readStatusOf(
-  ctx: ToolContext,
+  freshness: Freshness,
   meta: GraphMeta,
   generation: string,
   generationRow: GenerationRow,
   staleFiles: number,
   indexedFiles: number,
 ): ReadStatus {
-  const checkedAt = ctx.now().toISOString();
-  const indexedAt = meta.indexedAt ?? generationRow.publishedAt;
-  if (staleFiles === 0) {
-    return {
-      generation,
-      indexed_at: indexedAt,
-      stale: false,
-      stale_checked_at: checkedAt,
-    };
-  }
-  return {
+  const status: ReadStatus = {
     generation,
-    indexed_at: indexedAt,
-    stale: true,
-    stale_reason: `${staleFiles} of ${indexedFiles} indexed files were written by an earlier generation`,
-    stale_checked_at: checkedAt,
+    indexed_at: meta.indexedAt ?? generationRow.publishedAt,
+    stale: freshness.stale,
+    stale_checked_at: freshness.checked_at,
   };
+  const older = olderGenerationReason(staleFiles, indexedFiles);
+  const reason = freshnessReason(freshness, indexedFiles);
+  if (reason !== null) {
+    status.stale = true;
+    status.stale_reason = older === null ? reason : `${reason}; ${older}`;
+    return status;
+  }
+  if (older !== null) {
+    status.stale = true;
+    status.stale_reason = older;
+  }
+  return status;
+}
+
+/** The words for each filesystem-side verdict; `none` and the graph-side fact are handled above. */
+function freshnessReason(freshness: Freshness, indexedFiles: number): string | null {
+  switch (freshness.stale_reason) {
+    case "root_mismatch":
+      // The one verdict that makes every other comparison meaningless: the graph describes another
+      // directory, so no count of this one belongs next to it.
+      return "the graph was built for a different project_root";
+    case "base_commit_moved":
+      return "the indexed base commit is no longer HEAD";
+    case "watcher_stalled":
+      return "the indexer has been busy for over 10 minutes with nothing published";
+    case "files_changed":
+      return `${freshness.files_changed_since} of ${indexedFiles} indexed files changed on disk since the index`;
+    case "none":
+      return null;
+  }
+}
+
+/** The graph-side half: rows the indexer wrote in a generation other than the one being served. */
+function olderGenerationReason(staleFiles: number, indexedFiles: number): string | null {
+  if (staleFiles === 0) {
+    return null;
+  }
+  return `${staleFiles} of ${indexedFiles} indexed files were written by an earlier generation`;
 }
 
 /**
@@ -422,6 +469,7 @@ function summaryOf(
   coverage: Coverage,
   generation: string,
   staleFiles: number,
+  filesChanged: number,
   requestedCount: number,
   indexedPaths: number,
 ): string {
@@ -431,6 +479,7 @@ function summaryOf(
     ...(coverage.skipped > 0 ? [`${coverage.skipped} skipped`] : []),
     ...(coverage.failed > 0 ? [`${coverage.failed} failed to parse`] : []),
     ...(staleFiles > 0 ? [`${staleFiles} written by an earlier generation`] : []),
+    ...(filesChanged > 0 ? [`${filesChanged} changed on disk since the index`] : []),
   ].join(", ");
   const scope =
     requestedCount === 0

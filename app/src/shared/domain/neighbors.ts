@@ -11,11 +11,19 @@
  * why a row does not repeat it. Every item carries `hop` so a 2-hop neighbour is never mistaken
  * for a direct dependency, and `external` so the agent stops trying to resolve a builtin.
  *
- * Each hop goes through `inbound`/`outbound`, whose statements come from
- * `prepared(conn, sqlKey, build)`; nothing here builds a query inside the walk.
+ * Each hop asks the store for the *whole* frontier at once (`inboundMany`/`outboundMany`), whose
+ * statements come from `prepared(conn, sqlKey, build)`; nothing here builds a query inside the walk.
+ * Asking per id is what made a dense depth-2 trace spend its latency in round trips rather than in
+ * the graph, and a hop is the natural unit of that query because the frontier is what it has.
  */
 import type { Conn } from "#shared/store/db";
-import { inbound, type NeighbourEdge, outbound } from "#shared/store/read/edges";
+import {
+  inbound,
+  inboundMany,
+  type NeighbourEdge,
+  outbound,
+  outboundMany,
+} from "#shared/store/read/edges";
 import type { NodeRow } from "#shared/store/read/nodes";
 
 /** The hop budget ceiling. `TOOLS-SPEC.md` §3 clamps `depth` to `1–4`, not a caller knob. */
@@ -71,13 +79,23 @@ export interface GroupedNeighbors {
 export interface NeighbourSource {
   inbound(nodeId: number, kinds?: readonly string[]): NeighbourEdge[];
   outbound(nodeId: number, kinds?: readonly string[]): NeighbourEdge[];
+  /**
+   * The batched forms: one lookup for a whole frontier, which is what {@link walk} asks for and
+   * what keeps a hop's cost independent of how many nodes the previous hop found. Optional so a
+   * hand-written single-id fake stays a valid source; without them the walk falls back to one call
+   * per id and returns exactly the same groups.
+   */
+  inboundMany?(nodeIds: readonly number[], kinds?: readonly string[]): NeighbourEdge[];
+  outboundMany?(nodeIds: readonly number[], kinds?: readonly string[]): NeighbourEdge[];
 }
 
-/** Binds the store's two directional lookups to a connection. */
+/** Binds the store's directional lookups, single-id and batched, to a connection. */
 export function neighbourSource(conn: Conn): NeighbourSource {
   return {
     inbound: (nodeId, kinds) => inbound(conn, nodeId, kinds),
     outbound: (nodeId, kinds) => outbound(conn, nodeId, kinds),
+    inboundMany: (nodeIds, kinds) => inboundMany(conn, nodeIds, kinds),
+    outboundMany: (nodeIds, kinds) => outboundMany(conn, nodeIds, kinds),
   };
 }
 
@@ -128,6 +146,24 @@ function compareReached(a: Reached, b: Reached): number {
   return byQn !== 0 ? byQn : a.edge.node.id - b.edge.node.id;
 }
 
+/**
+ * One hop's worth of edges out of `ids`, in one call when the source can batch and one call per
+ * id when it cannot. Same rows either way: the walk sorts and de-duplicates them afterwards.
+ */
+function hopEdges(
+  source: NeighbourSource,
+  direction: "in" | "out",
+  ids: readonly number[],
+  kinds: readonly string[] | undefined,
+): NeighbourEdge[] {
+  const many = direction === "in" ? source.inboundMany : source.outboundMany;
+  if (many !== undefined) {
+    return many.call(source, ids, kinds);
+  }
+  const single = direction === "in" ? source.inbound : source.outbound;
+  return ids.flatMap((id) => single.call(source, id, kinds));
+}
+
 interface Bucket {
   readonly edge: string;
   readonly tier: string;
@@ -152,12 +188,9 @@ function walk(
 
   for (let hop = 1; hop <= depth && frontier.length > 0; hop += 1) {
     const reached: Reached[] = [];
-    for (const id of frontier) {
-      const edges = direction === "in" ? source.inbound(id, kinds) : source.outbound(id, kinds);
-      for (const edge of edges) {
-        if (!visited.has(edge.node.id)) {
-          reached.push({ edge, hop });
-        }
+    for (const edge of hopEdges(source, direction, frontier, kinds)) {
+      if (!visited.has(edge.node.id)) {
+        reached.push({ edge, hop });
       }
     }
 

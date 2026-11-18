@@ -30,7 +30,13 @@ import {
   type UnresolvedRef,
   unresolvedForFiles,
 } from "#shared/store/read/coverage";
-import { inbound, type NeighbourEdge, outbound } from "#shared/store/read/edges";
+import {
+  inbound,
+  inboundMany,
+  type NeighbourEdge,
+  outbound,
+  outboundMany,
+} from "#shared/store/read/edges";
 import {
   allFiles,
   censusByLanguage,
@@ -170,6 +176,14 @@ export interface GraphReader {
   inbound(nodeId: number, kinds?: readonly string[]): NeighbourEdge[];
   /** Edges out of `nodeId` with the called node attached. */
   outbound(nodeId: number, kinds?: readonly string[]): NeighbourEdge[];
+  /**
+   * The batched forms of {@link inbound}/{@link outbound}: one lookup for a whole frontier
+   * (`#shared/store/read/edges`), which is what a hop of `expand` asks for. Optional for the same
+   * reason as `statementCacheEntries` below: a hand-written fake knows nothing about batching, and a
+   * walk over one falls back to the single-id methods and returns the identical groups.
+   */
+  inboundMany?(nodeIds: readonly number[], kinds?: readonly string[]): NeighbourEdge[];
+  outboundMany?(nodeIds: readonly number[], kinds?: readonly string[]): NeighbourEdge[];
   /** Derived degrees, entry flag and `tested_depth`; `null` when the publish never measured it. */
   metricsFor(nodeId: number): NodeMetrics | null;
   /** Indexed files and skipped paths under `prefixes`: both halves of a coverage answer. */
@@ -184,6 +198,13 @@ export interface GraphReader {
   censusByLanguage(): LanguageCensus[];
   /** Identity and health; never the environment, never the filesystem. */
   metaFor(): GraphMeta;
+  /**
+   * Entries the handle's prepared-statement cache currently retains (`store/db.ts`
+   * `statementCacheStats().size`, the bounded LRU exposed from where it lives). Optional because a
+   * hand-written fake in a unit test has no cache to report, and `status.health` says `0` for one
+   * rather than inventing a number.
+   */
+  statementCacheEntries?(): number;
   /** The newest publish by `seq`; `null` before the first publish. */
   latestGeneration(): GenerationRow | null;
   /**
@@ -359,6 +380,8 @@ export function makeReader(conn: Conn): GraphReader {
     nodesByFile: (fileId) => nodesByFile(conn, fileId),
     inbound: (nodeId, kinds) => inbound(conn, nodeId, kinds),
     outbound: (nodeId, kinds) => outbound(conn, nodeId, kinds),
+    inboundMany: (nodeIds, kinds) => inboundMany(conn, nodeIds, kinds),
+    outboundMany: (nodeIds, kinds) => outboundMany(conn, nodeIds, kinds),
     metricsFor: (nodeId) => metricsFor(conn, nodeId),
     rowsForPaths: (prefixes) => rowsForPaths(conn, prefixes),
     unresolvedForFiles: (fileIds) => unresolvedForFiles(conn, fileIds),
@@ -379,6 +402,11 @@ export function makeReader(conn: Conn): GraphReader {
         consecutiveFailures: failureCount(values.get("consecutive_failures")),
       };
     },
+
+    // The bounded LRU is `store/db.ts`'s, and this handle's own count is what a health report about
+    // *this reader* means; `statementCacheStats()` with no argument sums every live handle, which is
+    // the wrong number when a process holds a reader and a writer.
+    statementCacheEntries: () => conn.statementCacheStats().size,
 
     latestGeneration(): GenerationRow | null {
       const row = prepared(conn, "reader.latestGeneration", (sqlite) =>

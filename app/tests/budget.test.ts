@@ -311,3 +311,290 @@ describe("emit: the 32 000 token ceiling", () => {
     expect(MAX_BUDGET_TOKENS * BYTES_PER_TOKEN).toBe(128_000);
   });
 });
+
+/**
+ * The envelope-level list. `coverage.not_indexed` is part of the serialised answer, so a payload
+ * whose own lists are small can still breach the ceiling on it alone (`summary` on the reference
+ * corpus did: 6 103 B against a 5 280 B ceiling, with 126 B of payload). These tests pin the two
+ * halves of the fix: the list is trimmable, and trimming it keeps the coverage claim honest.
+ *
+ * `budgetByteAllowance(tokens)` is `tokens * BYTES_PER_TOKEN` for a budget inside the ceiling, so
+ * every ceiling here is written that way rather than reaching into the module's private helper.
+ */
+describe("emit: trimming the envelope-level coverage list", () => {
+  const BUDGET_TOKENS = 800;
+  const ALLOWANCE = BUDGET_TOKENS * BYTES_PER_TOKEN;
+
+  interface Skipped {
+    path: string;
+    reason: string;
+  }
+
+  /** Skipped paths in the reader's own order (path ascending), which is what a trim cuts from the end. */
+  function skipped(count: number): Skipped[] {
+    return Array.from({ length: count }, (_, i) => ({
+      path: `code_review_graph/module_${String(i).padStart(3, "0")}.xslt`,
+      reason: "unsupported_ext",
+    }));
+  }
+
+  /** Coverage over a scope that skipped `notIndexed.length` paths: incomplete, and it says so. */
+  function skippedSpec(notIndexed: readonly Skipped[]): EnvelopeSpec {
+    return {
+      summary: `${notIndexed.length} paths were looked at and skipped`,
+      read_status: { ...FRESH },
+      coverage: {
+        complete: false,
+        indexed: 400,
+        skipped: notIndexed.length,
+        failed: 0,
+        unresolved_edges: 0,
+        not_indexed: [...notIndexed],
+      },
+    };
+  }
+
+  function mintSpy(): { mint: (position: number) => string; positions: number[] } {
+    const positions: number[] = [];
+    return {
+      positions,
+      mint: (position) => {
+        positions.push(position);
+        return `cur_${position}`;
+      },
+    };
+  }
+
+  test("a large coverage.not_indexed is trimmed until the envelope fits the allowance", () => {
+    const entries = skipped(80);
+    const env = ok(
+      { base: "HEAD", risk: { score: 0, band: "low", drivers: ["changed_files", "untested"] } },
+      skippedSpec(entries),
+    );
+    // The shape the defect was reproduced on: the payload is 126 B and the envelope is 6 KB.
+    expect(bytes(env)).toBeGreaterThan(ALLOWANCE);
+
+    const spy = mintSpy();
+    const out = emit(env, BUDGET_TOKENS, { mint: spy.mint });
+
+    expect(bytes(out)).toBeLessThanOrEqual(ALLOWANCE);
+    expect(out.truncated).toBe(true);
+    expect(out.truncation_reason).toBe("budget");
+    expect(out.totals.total_relation).toBe("gte");
+
+    // Coverage stays honest: the count is exact, `complete` stays false, and what is left is the
+    // head of the reader's path order rather than an arbitrary sample.
+    expect(out.coverage.skipped).toBe(80);
+    expect(out.coverage.complete).toBe(false);
+    expect(out.coverage.not_indexed.length).toBeGreaterThan(0);
+    expect(out.coverage.not_indexed.length).toBeLessThan(80);
+    expect(isPrefixOf(out.coverage.not_indexed, entries)).toBe(true);
+
+    // The payload's own list is drained first, then the coverage list pays for the rest, and the
+    // count `emit` reports is everything that left the envelope — rows and paths alike.
+    expect(out.payload.risk.drivers).toHaveLength(0);
+    const droppedRows = env.payload.risk.drivers.length - out.payload.risk.drivers.length;
+    const droppedPaths = entries.length - out.coverage.not_indexed.length;
+    expect(spy.positions).toHaveLength(1);
+    expect(spy.positions[0]).toBe(droppedRows + droppedPaths);
+    expect(out.next).toBe(`cur_${spy.positions[0]}`);
+  });
+
+  test("a path the payload answers about survives the trim; the unpinned tail does not", () => {
+    // Sorts last, so a trim that only knew about paths would drop it first.
+    const touched = "code_review_graph/zzz_touched.xslt";
+    const entries = [...skipped(80), { path: touched, reason: "grammar_unavailable" }];
+
+    const answering = ok(
+      { paths: [{ path: touched, indexed: false, reason: "grammar_unavailable" }] },
+      skippedSpec(entries),
+    );
+    const blind = ok({ paths: [] as { path: string }[] }, skippedSpec(entries));
+
+    const kept = emit(answering, BUDGET_TOKENS, { mint: (position) => `cur_${position}` });
+    const cut = emit(blind, BUDGET_TOKENS, { mint: (position) => `cur_${position}` });
+
+    const keptPaths = kept.coverage.not_indexed.map((entry) => entry.path);
+    const cutPaths = cut.coverage.not_indexed.map((entry) => entry.path);
+
+    // The control proves the pin changed the outcome rather than the trim being lenient.
+    expect(keptPaths).toContain(touched);
+    expect(cutPaths).not.toContain(touched);
+    expect(keptPaths.length).toBeLessThan(entries.length);
+    expect(kept.coverage.skipped).toBe(entries.length);
+    expect(bytes(kept)).toBeLessThanOrEqual(ALLOWANCE);
+  });
+
+  test("the caller's coverage.not_indexed array is never mutated by a trim", () => {
+    const entries = skipped(80);
+    const env = ok({ base: "HEAD" }, skippedSpec(entries));
+    const before = env.coverage.not_indexed.map((entry) => entry.path);
+
+    const out = emit(env, BUDGET_TOKENS, { mint: (position) => `cur_${position}` });
+
+    expect(out.coverage.not_indexed.length).toBeLessThan(before.length);
+    // Neither the envelope the caller passed in nor the fixture it was built from lost an entry.
+    expect(env.coverage.not_indexed.map((entry) => entry.path)).toEqual(before);
+    expect(entries.map((entry) => entry.path)).toEqual(before);
+    expect(env.truncated).toBe(false);
+    expect(env.next).toBeNull();
+    // The trimmed list is the draft's own array: the copy is what makes the mutation safe.
+    expect(out.coverage.not_indexed).not.toBe(env.coverage.not_indexed);
+  });
+
+  test("a list a cut took with its parent is not counted as trimmed", () => {
+    // `groups` holds two groups of 40 items; `spill` is a further 60 items beside it. The budget is
+    // small enough that draining `groups` is not enough, so the pass has to reach `spill` — and the
+    // 80 items that left with the groups are not lists it may cut a second time.
+    const env = ok(
+      {
+        groups: [
+          { name: "calls", derived: false, items: items(40, "app") },
+          { name: "calls", derived: false, items: items(40, "lib") },
+        ],
+        spill: items(60, "lib"),
+      },
+      baseSpec(),
+    );
+
+    const spy = mintSpy();
+    const out = emit(env, 500, { mint: spy.mint });
+
+    expect(bytes(out)).toBeLessThanOrEqual(500 * BYTES_PER_TOKEN);
+    expect(out.payload.groups).toHaveLength(0);
+    expect(out.payload.spill.length).toBeGreaterThan(0);
+    expect(out.payload.spill.length).toBeLessThan(60);
+
+    // Two groups plus the spill rows that went: counting the detached lists would report ~80 more
+    // drops than the envelope lost, and a client resuming from that count would skip rows.
+    expect(spy.positions).toHaveLength(1);
+    expect(spy.positions[0]).toBe(2 + (60 - out.payload.spill.length));
+  });
+
+  test("every budget from the envelope's floor upwards is honoured, with one mint and kept totals", () => {
+    const calls = items(40, "app");
+    const entries = skipped(30);
+    const spec = skippedSpec(entries);
+    spec.totals = {
+      total_relation: "gte",
+      calls_total: calls.length,
+      skipped_total: entries.length,
+    };
+
+    // The floor: every list drained, so what is left is the skeleton, the required fields and the
+    // token. Rounding it up to whole tokens is the smallest budget the envelope can honour.
+    const floor = emit(ok({ calls: [] as Item[] }, skippedSpec(entries)), BUDGET_TOKENS, {
+      mint: (position) => `cur_${position}`,
+    });
+    const smallestHonoured = Math.ceil(bytes(floor) / BYTES_PER_TOKEN);
+
+    const violations: string[] = [];
+    let cutRuns = 0;
+    let wholeRuns = 0;
+    for (const budgetTokens of [
+      smallestHonoured,
+      smallestHonoured + 1,
+      400,
+      600,
+      900,
+      1200,
+      2000,
+    ]) {
+      const env = ok({ calls: [...calls] }, spec);
+      const spy = mintSpy();
+      const out = emit(env, budgetTokens, { mint: spy.mint });
+      const where = `${budgetTokens} tokens (${budgetTokens * BYTES_PER_TOKEN} B)`;
+      const allowance = budgetTokens * BYTES_PER_TOKEN;
+
+      if (bytes(out) > allowance) {
+        violations.push(`${where}: emitted ${bytes(out)} B`);
+      }
+      if (out.totals.calls_total !== calls.length || out.totals.skipped_total !== entries.length) {
+        violations.push(`${where}: a *_total was not preserved (${JSON.stringify(out.totals)})`);
+      }
+      if (isPrefixOf(out.payload.calls, calls) === false) {
+        violations.push(`${where}: the surviving rows are not the ranked head`);
+      }
+      if (isPrefixOf(out.coverage.not_indexed, entries) === false) {
+        violations.push(`${where}: the surviving paths are not the path-order head`);
+      }
+
+      if (out.truncated) {
+        cutRuns += 1;
+        if (out.truncation_reason !== "budget") {
+          violations.push(`${where}: truncation_reason ${String(out.truncation_reason)}`);
+        }
+        if (out.totals.total_relation !== "gte") {
+          violations.push(`${where}: a cut envelope still claims eq`);
+        }
+        if (spy.positions.length !== 1) {
+          violations.push(`${where}: mint called ${spy.positions.length} times`);
+        }
+        const droppedRows = calls.length - out.payload.calls.length;
+        const droppedPaths = entries.length - out.coverage.not_indexed.length;
+        if (spy.positions[0] !== droppedRows + droppedPaths) {
+          violations.push(
+            `${where}: minted ${String(spy.positions[0])} for ${droppedRows + droppedPaths} dropped items`,
+          );
+        }
+        if (out.next !== `cur_${String(spy.positions[0])}`) {
+          violations.push(`${where}: next is not the minted token`);
+        }
+      } else {
+        wholeRuns += 1;
+        if (spy.positions.length !== 0) {
+          violations.push(`${where}: mint called without a cut`);
+        }
+        if (out.next !== null) {
+          violations.push(`${where}: next present without a cut`);
+        }
+      }
+    }
+
+    expect({ violations: violations.length, detail: violations }).toEqual({
+      violations: 0,
+      detail: [],
+    });
+    // Both halves ran, so the sweep is not vacuous.
+    expect(cutRuns).toBeGreaterThan(0);
+    expect(wholeRuns).toBeGreaterThan(0);
+  });
+
+  /**
+   * The floor is the one budget `emit` cannot honour, and the rule it follows there is deliberate:
+   * it answers with the smallest envelope the payload can be cut to and still says `truncated: true`,
+   * because items did leave. Returning the whole payload unflagged would hand a client an answer many
+   * times its declared budget with no signal at all — which is precisely what the handlers refuse on
+   * (`search` on a zero-row page, `trace` on a page below one neighbour, `expand` on `members`).
+   *
+   * The regime is bounded: the floor here is well under the smallest declared default budget
+   * (`status`: 800 tokens = 3 200 B), so no call at a declared default can reach it.
+   */
+  test("below the envelope's own floor the answer is that floor, never the uncut payload", () => {
+    const calls = items(40, "app");
+    const entries = skipped(20);
+    const spec = skippedSpec(entries);
+    spec.totals = { total_relation: "gte", calls_total: calls.length };
+    const env = ok({ calls: [...calls] }, spec);
+
+    const spy = mintSpy();
+    const out = emit(env, 1, { mint: spy.mint });
+
+    expect(out.truncated).toBe(true);
+    expect(out.truncation_reason).toBe("budget");
+    expect(out.payload.calls).toHaveLength(0);
+    expect(out.coverage.not_indexed).toHaveLength(0);
+    expect(out.coverage.skipped).toBe(entries.length);
+    expect(out.totals.calls_total).toBe(calls.length);
+    expect(spy.positions).toHaveLength(1);
+    expect(spy.positions[0]).toBe(calls.length + entries.length);
+    // What is left is the skeleton: smaller than the payload that came in, and far under the
+    // smallest default budget a real call can carry.
+    expect(bytes(out)).toBeLessThan(bytes(env));
+    expect(bytes(out)).toBeLessThan(800 * BYTES_PER_TOKEN);
+    // The floor is a floor, not a leak: at its own token-equivalent the same payload fits.
+    const smallestHonoured = Math.ceil(bytes(out) / BYTES_PER_TOKEN);
+    const fits = emit(env, smallestHonoured, { mint: spy.mint });
+    expect(bytes(fits)).toBeLessThanOrEqual(smallestHonoured * BYTES_PER_TOKEN);
+  });
+});

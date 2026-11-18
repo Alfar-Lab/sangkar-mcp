@@ -171,6 +171,8 @@ interface FakeOptions {
   readonly clean?: boolean;
   /** An indexed file written by another publish: the answer is about a stale file. */
   readonly indexedGeneration?: string;
+  /** How many unbound call sites the file scope holds; enough of them out-bid a page. */
+  readonly unresolvedRows?: number;
 }
 
 function makeReader(options: FakeOptions = {}): GraphReader {
@@ -178,7 +180,16 @@ function makeReader(options: FakeOptions = {}): GraphReader {
     ...FILE_A,
     indexedGeneration: options.indexedGeneration ?? GENERATION,
   };
-  const unresolved = options.clean === true ? [] : [UNBOUND];
+  const unresolved: UnresolvedRef[] =
+    options.clean === true
+      ? []
+      : options.unresolvedRows === undefined
+        ? [UNBOUND]
+        : Array.from({ length: options.unresolvedRows }, (_, index) => ({
+            ...UNBOUND,
+            id: index + 1,
+            line: 7 + index,
+          }));
   return {
     findByQn: (qn) => (qn === ALPHA.qn ? ALPHA : null),
     findByName: (name, kinds) => {
@@ -516,6 +527,72 @@ describe("trace: a truncated page resumes on the flattened sequence", () => {
       ["calls", "inherits", "implements", "references", "tested_by", "imports"].indexOf(edge);
     expect(groups).toEqual([...groups].sort((a, b) => rank(a) - rank(b)));
     expect(allItems(payload).every((item) => item.hop >= 1)).toBe(true);
+  });
+});
+
+describe("trace: a page always advances on a dense neighbour sequence", () => {
+  test("the second page carries a different token and shares no row with the first", async () => {
+    // The dense case in miniature: the evidence list is bigger than the page it competes with, which
+    // is what let `emit` empty the neighbour groups and mint a token at the position it was given.
+    const dense = makeContext(makeReader({ unresolvedRows: 160 }));
+    const whole = allItems(payloadOf(await handle(dense, { query: "alpha" }))).map(
+      (item) => item.id,
+    );
+    const first = await handle(dense, { query: "alpha", budget: SMALL_BUDGET });
+    const firstIds = allItems(payloadOf(first)).map((item) => item.id);
+    expect(first.truncated).toBe(true);
+    expect(typeof first.next).toBe("string");
+    expect(firstIds.length).toBeGreaterThan(0);
+
+    const second = await handle(dense, {
+      query: "alpha",
+      budget: SMALL_BUDGET,
+      cursor: first.next ?? "",
+    });
+    const secondIds = allItems(payloadOf(second)).map((item) => item.id);
+    expect(secondIds.length).toBeGreaterThan(0);
+    expect(second.truncated).toBe(true);
+
+    // The defect: a page whose token repeats the position it was given re-serves itself forever.
+    expect(typeof second.next).toBe("string");
+    expect(second.next).not.toBe(first.next);
+    expect(secondIds.filter((id) => firstIds.includes(id))).toEqual([]);
+
+    // Contiguous, in sequence order: the two pages are the first and second slice of the whole.
+    expect(firstIds).toEqual(whole.slice(0, firstIds.length));
+    expect(secondIds).toEqual(whole.slice(firstIds.length, firstIds.length + secondIds.length));
+    expect(first.summary).toContain("neighbours shown");
+    expect(second.summary).toContain("neighbours shown");
+    expect(second.totals.total_relation).toBe("gte");
+  });
+
+  test("unresolved evidence is capped so the neighbour rows still reach the page", async () => {
+    // 160 unbound call sites in one file: uncapped, the evidence list alone is the whole budget,
+    // which is how the neighbour groups were emptied while the payload still claimed to be a page.
+    const noisy = makeContext(makeReader({ unresolvedRows: 160 }));
+    const envelope = await handle(noisy, { query: "alpha", budget: SMALL_BUDGET });
+    const payload = payloadOf(envelope);
+    expect(envelope.coverage.unresolved_edges).toBe(160);
+    expect(payload.unresolved.length).toBeLessThan(160);
+    expect(payload.unresolved.length).toBeGreaterThan(0);
+    expect(allItems(payload).length).toBeGreaterThan(0);
+    expect(envelope.truncated).toBe(true);
+    expect(envelope.totals.total_relation).toBe("gte");
+  });
+
+  test("a budget below one neighbour terminates honestly instead of minting a token", async () => {
+    const envelope = await handle(ctx, { query: "alpha", budget: 120 });
+    expect(envelope.status).toBe("ok");
+    // A zero-row page is only honest as the last one: the cut is at the envelope's floor.
+    expect(envelope.truncated).toBe(true);
+    expect(envelope.truncation_reason).toBe("budget");
+    expect(envelope.next).toBeNull();
+    expect(allItems(payloadOf(envelope)).length).toBe(0);
+    expect(envelope.summary).toContain("does not fit budget 120 tokens");
+    // The cheaper query is the route it names; `expand` cannot stand in for a neighbour list.
+    expect(envelope.next_tools).toContain("trace");
+    expect(envelope.next_tools).not.toContain("expand");
+    expect(envelope.totals.total_relation).toBe("gte");
   });
 });
 

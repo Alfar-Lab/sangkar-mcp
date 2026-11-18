@@ -117,6 +117,8 @@ interface Fixture {
   readonly generation?: string | null;
   readonly indexerState?: string | null;
   readonly consecutiveFailures?: number;
+  /** What the fake handle's statement cache holds; absent models a reader without one. */
+  readonly statementCacheEntries?: number;
 }
 
 /**
@@ -244,6 +246,9 @@ function fakeReader(fixture: Fixture): GraphReader {
       consecutiveFailures: fixture.consecutiveFailures ?? 0,
     }),
     latestGeneration: () => (generation === null ? null : generationRow),
+    // A real reader reports its own `store/db.ts` cache; a hand-written fake reports what its
+    // fixture says, so `health.statement_cache_entries` is asserted rather than assumed.
+    statementCacheEntries: () => fixture.statementCacheEntries ?? 0,
     removedSymbolsFor: () => [],
     entryPoints: () => [],
     hotspots: () => [],
@@ -372,6 +377,7 @@ describe("status: complete coverage", () => {
       indexer: "idle",
       last_publish_ms: 41_200,
       consecutive_failures: 0,
+      statement_cache_entries: 0,
     });
   });
 
@@ -498,7 +504,17 @@ describe("status: freshness and health", () => {
       indexer: null,
       last_publish_ms: 41_200,
       consecutive_failures: 3,
+      statement_cache_entries: 0,
     });
+  });
+
+  test("health reports the reader handle's statement-cache size", () => {
+    const env = handle(contextFor({ ...CLEAN, statementCacheEntries: 17 }));
+    const payload = expectOk(env);
+
+    // The count comes from the reader (`store/db.ts` `statementCacheStats().size`), not from the
+    // handler: `shared` decides the number, `status` only carries it.
+    expect(payload.health.statement_cache_entries).toBe(17);
   });
 });
 

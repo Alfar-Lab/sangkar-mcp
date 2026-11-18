@@ -14,12 +14,22 @@
  *   group shares it by construction;
  * - **the page boundary lies on the flattened neighbour sequence.** `position` indexes that sequence,
  *   so a resumed page continues exactly where the last one stopped;
+ * - **the page is sized before it is emitted.** `emit` cuts the *largest* list first, which on a
+ *   dense symbol is the neighbour sequence itself: handing it 3 000 rows so it can tell us what fits
+ *   leaves the flat `unresolved` evidence list as the only survivor and mints a page that advances by
+ *   zero rows. So the sequence is measured here, the longest prefix that fits is materialised, and
+ *   `emit` is handed a page it can only confirm — the boundary is still emit's to move, and a cut it
+ *   makes is read back out of what survived;
+ * - **content may not be outbid by evidence.** `unresolved` is the explanation of a miss, not the
+ *   answer, so it is capped to a share of the allowance instead of eating the page;
+ * - **a truncated page always advances.** The continuation token is minted past the rows served; the
+ *   only zero-row page is a terminal one, which says so and points at the cheaper query;
  * - **a direction that was not walked is not a zero.** `callers_total` is omitted for
  *   `direction: "out"` rather than reported as `0`.
  *
  * Never source text: nothing here reads a file, and `emit` is the only place the payload shrinks.
  */
-import { emit } from "#shared/budget";
+import { BYTES_PER_TOKEN, emit } from "#shared/budget";
 import type { CursorRefusal } from "#shared/cursor";
 import { assemble, type CoverageAssembly } from "#shared/domain/coverage";
 import {
@@ -80,6 +90,13 @@ const EDGE_ORDER = [
 /** Where an agent goes next from a trace: one item's detail. `expand` is the only address for it. */
 const NEXT_TOOLS = ["expand"] as const;
 
+/**
+ * Where a page that fits no neighbour sends the agent: the same query one hop cheaper. `expand` is
+ * not offered because a neighbour list is what could not be served, and detail on one node is not a
+ * substitute for it.
+ */
+const NEXT_TOOLS_NARROWER = ["trace"] as const;
+
 /** A miss is routed to `search` (a broader query) or `status` (is the graph even complete). */
 const NEXT_TOOLS_AFTER_MISS = ["search", "status"] as const;
 
@@ -94,6 +111,41 @@ const NO_EVIDENCE = "no evidence recorded";
 
 /** `DESIGN.md` §8's tier for a call site whose target no node matches. */
 const UNRESOLVED_TIER = "unresolved";
+
+/**
+ * Characters reserved for the continuation token while the page is being sized. `budget.ts` charges
+ * 128 for the same token, and a real one is ~150; over-reserving costs a few bytes of page, while
+ * under-reserving would make `emit` cut a page that was meant to fit.
+ */
+const CURSOR_RESERVE_CHARS = 192;
+
+/**
+ * Bytes of slack between the measured envelope floor and the page that is added to it: the summary
+ * digits move with the counts, and a group contributes a separator that is charged at its start.
+ * A page that lands a little short is fine; one that lands long is cut by `emit`.
+ */
+const SKELETON_SLACK_BYTES = 128;
+
+/**
+ * Bytes a row may cost beyond its own field lengths: JSON escaping in a name (a quote or a backslash
+ * adds one) and the group separators. Escapes in indexed names are rare, so this is a floor under the
+ * estimate rather than a per-row allowance — `emit` still measures the page it is handed.
+ */
+const ITEM_SLACK_BYTES = 8;
+
+/**
+ * How much of the byte allowance the evidence lists may claim: `unresolved` plus `not_indexed` may
+ * take a quarter, and the neighbour rows — the answer — keep the rest. Before this cap, a dense
+ * symbol's 94 unresolved call sites alone were ~90 % of a 3 200-token budget.
+ */
+const EVIDENCE_SHARE = 4;
+
+/**
+ * Page emits per response. Sizing is one emit; a cut `emit` makes anyway is re-sized from what
+ * survived, and five attempts is far past the one or two a real payload needs. With the terminal
+ * page's own emit, six calls size any call this tool can make.
+ */
+const MAX_SIZING_PASSES = 5;
 
 /** One neighbour as the payload shows it: identity, where to read it, which hop found it. */
 export interface TraceItem {
@@ -270,32 +322,146 @@ interface FlatEntry {
   readonly item: TraceItem;
 }
 
+/** The flattened sequence's two directions, in the order the sequence is defined by `in` then `out`. */
+const DIRECTIONS = ["in", "out"] as const;
+
 /**
- * The flattened neighbour sequence the page boundary and the payload are both derived from: `in`
- * groups in the fixed order, then `out`. Two calls with the same arguments and the same generation
- * produce the same sequence, which is what makes `position` meaningful (`DATABASE.md` §8).
+ * Bytes a serialised value occupies. `emit` owns the budget decision, but sizing a page needs a
+ * number *before* there is an envelope to hand it, so the same measurement is taken here.
  */
-function flatten(groups: {
-  readonly in: readonly NeighbourGroup[];
-  readonly out: readonly NeighbourGroup[];
-}): FlatEntry[] {
+function serialisedBytes(value: unknown): number {
+  const text = JSON.stringify(value) as string | undefined;
+  return text === undefined ? 0 : Buffer.byteLength(text, "utf8");
+}
+
+/**
+ * Bytes a row's punctuation costs, measured once from a template with empty fields and one-digit
+ * numbers: the key order is `toItem`'s, and the template is cheaper to read than a hand-counted
+ * constant is to verify.
+ */
+const ITEM_PUNCTUATION_BYTES = serialisedBytes({
+  id: 0,
+  qn: "",
+  kind: "",
+  file: "",
+  line: 0,
+  hop: 0,
+});
+
+/** `,"external":true` and `,"is_test":true`, present only when true (`toItem`). */
+const EXTERNAL_FLAG_BYTES = Buffer.byteLength(',"external":true', "utf8");
+const IS_TEST_FLAG_BYTES = Buffer.byteLength(',"is_test":true', "utf8");
+
+/** Digits of a non-negative integer, without allocating a string for the common widths. */
+function digitCount(value: number): number {
+  if (value < 10) {
+    return 1;
+  }
+  if (value < 100) {
+    return 2;
+  }
+  if (value < 1_000) {
+    return 3;
+  }
+  if (value < 10_000) {
+    return 4;
+  }
+  if (value < 1_000_000) {
+    return 5;
+  }
+  return String(Math.trunc(value)).length;
+}
+
+/**
+ * What one row adds to its group: its own field sizes plus the punctuation `toItem` writes.
+ *
+ * Measured arithmetically rather than serialised, because sizing a dense page walks the sequence
+ * row by row and serialising every row to learn its length costs more than the walk it is sizing.
+ * `ITEM_SLACK_BYTES` covers what a string length cannot see, and the estimate is only a starting
+ * point: `emit` measures the page it is handed.
+ */
+function itemBytes(item: TraceItem): number {
+  return (
+    ITEM_PUNCTUATION_BYTES +
+    (digitCount(item.id) - 1) +
+    (digitCount(item.line) - 1) +
+    (digitCount(item.hop) - 1) +
+    Buffer.byteLength(item.qn, "utf8") +
+    Buffer.byteLength(item.kind, "utf8") +
+    Buffer.byteLength(item.file, "utf8") +
+    (item.external === true ? EXTERNAL_FLAG_BYTES : 0) +
+    (item.is_test === true ? IS_TEST_FLAG_BYTES : 0) +
+    ITEM_SLACK_BYTES
+  );
+}
+
+/**
+ * What one group adds on top of its rows: `{"edge":…,"tier":…,"items":[]}`. Its `[]` is charged
+ * here, its rows are charged per row, and the separator before a later group is charged with it.
+ */
+function groupBytes(edge: string, tier: string): number {
+  return serialisedBytes({ edge, tier, items: [] }) + 1;
+}
+
+/**
+ * The longest prefix of the remaining neighbour sequence that fits `allowance` bytes, materialised
+ * in the same forward pass that measures it: `in` groups in the fixed order, then `out`.
+ *
+ * Two calls with the same arguments and the same generation walk the same sequence in the same
+ * order, which is what makes `position` meaningful as an index into it (`DATABASE.md` §8); this
+ * pass only picks where the page ends. It stops at the first row that does not fit, so a symbol with
+ * 3 000 neighbours costs the page it serves and not the 3 000 rows it does not.
+ *
+ * The number is an estimate, not the sizing decision: `emit` measures the envelope it is handed and
+ * cuts it if the estimate was optimistic, and the caller re-sizes from what survived.
+ */
+function takePage(
+  groups: {
+    readonly in: readonly NeighbourGroup[];
+    readonly out: readonly NeighbourGroup[];
+  },
+  start: number,
+  allowance: number,
+): FlatEntry[] {
   const entries: FlatEntry[] = [];
-  for (const direction of ["in", "out"] as const) {
+  let used = 0;
+  let offset = 0;
+  let run = "";
+
+  for (const direction of DIRECTIONS) {
     for (const group of orderedGroups(groups[direction])) {
-      for (const item of group.items) {
-        entries.push({
-          direction,
-          edge: group.edge,
-          tier: group.tier,
-          item: toItem(item),
-        });
+      const items = group.items;
+      // Rows of this group that belong to earlier pages are skipped, not counted.
+      const first = Math.max(0, start - offset);
+      offset += items.length;
+      if (first >= items.length) {
+        continue;
+      }
+      const key = `${direction}\u0000${group.edge}\u0000${group.tier}`;
+      for (let index = first; index < items.length; index += 1) {
+        const neighbour = items[index];
+        if (neighbour === undefined) {
+          continue;
+        }
+        const item = toItem(neighbour);
+        // The comma before this row, and the group wrapper when the page opens a new group.
+        const cost =
+          itemBytes(item) +
+          (entries.length > 0 ? 1 : 0) +
+          (key === run ? 0 : groupBytes(group.edge, group.tier));
+        if (used + cost > allowance) {
+          return entries;
+        }
+        used += cost;
+        run = key;
+        entries.push({ direction, edge: group.edge, tier: group.tier, item });
       }
     }
   }
   return entries;
 }
 
-/** Groups rebuilt from a slice of {@link flatten}, keeping the order the entries arrived in. */
+/** Groups rebuilt from a page, keeping the order the entries arrived in. */
 function groupsOf(entries: readonly FlatEntry[], direction: "in" | "out"): TraceGroup[] {
   const byKey = new Map<string, TraceItem[]>();
   for (const entry of entries) {
@@ -321,14 +487,14 @@ function keyOf(direction: "in" | "out", edge: string, tier: string, id: number):
 }
 
 /**
- * How many entries of `rest` a truncated envelope still carried, counted as a prefix.
+ * How many entries of a page `emit` still carried, counted as a prefix.
  *
  * `emit` pops the last row of the largest list, which can be a whole group rather than the tail of
  * this sequence, so what it delivered is not necessarily a prefix. The page is cut back to the prefix
  * it did deliver and the remainder is served by the next page; that is what keeps pages
- * duplicate-free without hand-sizing the payload here.
+ * duplicate-free when `emit` disagrees with the page's own estimate.
  */
-function leadingSurvivors(payload: TracePayload, rest: readonly FlatEntry[]): number {
+function leadingSurvivors(payload: TracePayload, page: readonly FlatEntry[]): number {
   const present = new Set<string>();
   for (const group of payload.in) {
     for (const item of group.items) {
@@ -341,7 +507,7 @@ function leadingSurvivors(payload: TracePayload, rest: readonly FlatEntry[]): nu
     }
   }
   let survived = 0;
-  for (const entry of rest) {
+  for (const entry of page) {
     if (!present.has(keyOf(entry.direction, entry.edge, entry.tier, entry.item.id))) {
       break;
     }
@@ -358,6 +524,34 @@ function unresolvedOf(rows: readonly UnresolvedRef[]): TraceUnresolved[] {
     evidence: row.evidence ?? row.evidenceKind ?? NO_EVIDENCE,
     tier: UNRESOLVED_TIER,
   }));
+}
+
+/**
+ * The longest prefix of `rows` whose serialised form fits `maxBytes`, separators included. The tail
+ * is what goes: these lists are read from the top, and `coverage` keeps the exact counts, so a
+ * shortened list still reads as "some of N".
+ */
+function capRows<T>(rows: readonly T[], maxBytes: number): T[] {
+  const kept: T[] = [];
+  let used = 0;
+  for (const row of rows) {
+    const size = serialisedBytes(row) + (kept.length > 0 ? 1 : 0);
+    if (used + size > maxBytes) {
+      break;
+    }
+    used += size;
+    kept.push(row);
+  }
+  return kept;
+}
+
+/**
+ * The byte allowance a budget buys, computed the way `budget.ts` computes it so a page is sized
+ * against the number `emit` will apply. A budget above the protocol ceiling is still `emit`'s
+ * refusal: sizing it as if it were legal is what lets `emit` answer exactly once.
+ */
+function allowanceOf(budgetTokens: number): number {
+  return Math.max(0, Math.floor(budgetTokens) * BYTES_PER_TOKEN);
 }
 
 function payloadOf(
@@ -392,14 +586,23 @@ function payloadOf(
   };
 }
 
-function countsOf(entries: readonly FlatEntry[]): { in: number; out: number } {
+/**
+ * How many neighbours the walk reached in each direction. Counted over the groups rather than over
+ * a materialised sequence: the totals and the page arithmetic need the counts, not the rows.
+ */
+function countsOf(groups: {
+  readonly in: readonly NeighbourGroup[];
+  readonly out: readonly NeighbourGroup[];
+}): { in: number; out: number } {
   let inCount = 0;
-  for (const entry of entries) {
-    if (entry.direction === "in") {
-      inCount += 1;
-    }
+  for (const group of groups.in) {
+    inCount += group.items.length;
   }
-  return { in: inCount, out: entries.length - inCount };
+  let outCount = 0;
+  for (const group of groups.out) {
+    outCount += group.items.length;
+  }
+  return { in: inCount, out: outCount };
 }
 
 /**
@@ -422,6 +625,22 @@ function totalsOf(
   return totals;
 }
 
+/**
+ * The counts line every trace summary opens with. Extracted because a page that could not be served
+ * still has to say what it is a page *of*.
+ */
+function headOf(
+  node: NodeRow,
+  counts: { in: number; out: number },
+  direction: TraceDirection,
+): string {
+  return direction === "in"
+    ? `${node.name}: ${counts.in} callers`
+    : direction === "out"
+      ? `${node.name}: ${counts.out} callees`
+      : `${node.name}: ${counts.in} callers, ${counts.out} callees`;
+}
+
 function summaryOf(
   node: NodeRow,
   counts: { in: number; out: number },
@@ -429,12 +648,7 @@ function summaryOf(
   page: { shown: number; available: number } | null,
   unresolvedCount: number,
 ): string {
-  const head =
-    direction === "in"
-      ? `${node.name}: ${counts.in} callers`
-      : direction === "out"
-        ? `${node.name}: ${counts.out} callees`
-        : `${node.name}: ${counts.in} callers, ${counts.out} callees`;
+  const head = headOf(node, counts, direction);
   const paged = page === null ? "" : ` (${page.shown} of ${page.available} neighbours shown)`;
   const gap =
     unresolvedCount === 0
@@ -543,6 +757,67 @@ function mintAt(
   };
 }
 
+/**
+ * A page that fits no neighbour at all: the terminal answer to a budget below one row.
+ *
+ * It is the *only* zero-row page this tool serves. A zero-row page that carries a continuation token
+ * would hand the client the position it just asked from, and a client that follows `next` would read
+ * the same envelope forever and never reach a single caller; so the page states the floor it hit and
+ * points at the cheaper query instead of minting one.
+ *
+ * The evidence lists ride along when they fit (`emit` measures), because "there are 94 unbound call
+ * sites here" is still true and still useful even when no neighbour row can be served.
+ */
+function noNeighbourFits(page: {
+  readonly node: NodeRow;
+  readonly counts: { readonly in: number; readonly out: number };
+  readonly direction: TraceDirection;
+  readonly query: string;
+  readonly resolution: Extract<Resolution, { status: "ok" }>;
+  readonly readStatus: ReadStatus;
+  readonly coverage: Coverage;
+  readonly totals: Totals;
+  readonly unresolved: readonly TraceUnresolved[];
+  readonly notIndexed: readonly NotIndexedEntry[];
+  readonly budgetTokens: number;
+  readonly remaining: number;
+}): Envelope<TracePayload> {
+  const gap =
+    page.remaining > 0
+      ? `a single neighbour does not fit budget ${page.budgetTokens} tokens`
+      : `the remaining page does not fit budget ${page.budgetTokens} tokens`;
+  const spec: EnvelopeSpec = {
+    summary: `${headOf(page.node, page.counts, page.direction)}; ${gap}, re-run trace with depth: 1`,
+    read_status: page.readStatus,
+    coverage: page.coverage,
+    totals: page.totals,
+    next_tools: NEXT_TOOLS_NARROWER,
+    truncated: true,
+    truncation_reason: "budget",
+    next: null,
+  };
+  const served = emit(
+    ok(
+      payloadOf(page.node, page.query, page.resolution, [], page.unresolved, page.notIndexed),
+      spec,
+    ),
+    page.budgetTokens,
+    // A terminal page never carries a token: the cut is already at the envelope's floor, so a minted
+    // position could only repeat the one this call was given.
+    { mint: () => "" },
+  );
+  return { ...served, next: null, next_tools: [...NEXT_TOOLS_NARROWER] };
+}
+
+/**
+ * A truncation that could not advance the cursor is terminal. The candidate and near-miss lists are
+ * capped upstream, so a cut here means the budget is below the envelope's floor: minting a position at
+ * the head of that list would re-serve the same candidates forever.
+ */
+function noRepeat<T>(envelope: Envelope<T>): Envelope<T> {
+  return envelope.truncated && envelope.next !== null ? { ...envelope, next: null } : envelope;
+}
+
 /** A resolved query: the walk, the page and the envelope. */
 function traced(
   ctx: ToolContext,
@@ -555,6 +830,7 @@ function traced(
   const generation = identity.generation;
   const node = resolution.node;
   const direction = directionOf(args);
+  const budgetTokens = budgetOf(args);
   const readStatus = readStatusFor(ctx, meta, generation, node);
   const assembly: CoverageAssembly = assemble(ctx.reader, {
     paths: [node.path],
@@ -563,70 +839,122 @@ function traced(
     fileIds: [node.fileId],
   });
   const grouped = expand(ctx.reader, [node.id], { direction, depth: depthOf(args) });
-  const all = flatten({ in: grouped.in, out: grouped.out });
-  const counts = countsOf(all);
-  const unresolved = unresolvedOf(assembly.unresolved);
-  const notIndexed = [...assembly.coverage.not_indexed];
-  const rest = all.slice(start);
+  const counts = countsOf(grouped);
   const totals = totalsOf(counts, direction, assembly.relation);
+  // Neighbours still to serve once the rows earlier pages delivered are discounted.
+  const remaining = Math.max(0, counts.in + counts.out - start);
+
+  // Evidence may not outbid content. `unresolved` is the explanation of a miss and `not_indexed` is
+  // the caveat on coverage, so between them they may claim a quarter of the allowance; the neighbour
+  // rows — the answer — keep the rest. Both counts stay exact in `coverage`, so a shortened list is
+  // still readable as "some of N".
+  const allowance = allowanceOf(budgetTokens);
+  const evidenceAllowance = Math.floor(allowance / EVIDENCE_SHARE);
+  const notIndexed = capRows(assembly.coverage.not_indexed, Math.floor(evidenceAllowance / 2));
+  const unresolvedAll = unresolvedOf(assembly.unresolved);
+  const unresolved = capRows(
+    unresolvedAll,
+    Math.max(0, evidenceAllowance - serialisedBytes(notIndexed)),
+  );
+  const coverage: Coverage = { ...assembly.coverage, not_indexed: notIndexed };
   const spec: EnvelopeSpec = {
-    summary: summaryOf(node, counts, direction, null, unresolved.length),
+    summary: summaryOf(node, counts, direction, null, unresolvedAll.length),
     read_status: readStatus,
-    coverage: assembly.coverage,
+    coverage,
     totals,
     next_tools: NEXT_TOOLS,
   };
 
-  // Pass one measures with the whole remaining sequence. `emit` is the only sizing decision, so the
-  // page boundary is read back out of what it chose to keep rather than computed here.
-  let pageLength = rest.length;
-  let envelope: Envelope<TracePayload> = emit(
-    ok(payloadOf(node, args.query, resolution, rest, unresolved, notIndexed), spec),
-    budgetOf(args),
-    { mint: mintAt(ctx, identity, start + pageLength) },
-  );
-
-  // `emit` pops the last row of the largest list, which can be a whole group from the middle of the
-  // sequence, so what it kept is not always a prefix of `rest`. Shrinking the page to the prefix that
-  // did survive is what makes every page a contiguous slice of the sequence: no duplicates, and no
-  // neighbour skipped between one page and the next.
-  //
-  // The price is that a page can stop at a group boundary and leave part of the budget unused: losing
-  // no row is worth more than filling the budget exactly, and the alternative — trusting `emit`'s drop
-  // count as an offset — would skip neighbours a client never received.
-  while (envelope.truncated) {
-    const survived = leadingSurvivors(envelope.payload, rest);
-    if (survived >= pageLength) {
-      // Either every neighbour is here (only the evidence lists were cut), or a budget below one
-      // neighbour cannot advance: both are `emit`'s own answer, and `next` re-serves the same page
-      // rather than silently skipping rows the client never received.
-      break;
-    }
-    pageLength = survived;
-    const page = rest.slice(0, pageLength);
+  const pageEnvelope = (
+    entries: readonly FlatEntry[],
+    truncated: boolean,
+  ): Envelope<TracePayload> => {
+    const end = start + entries.length;
     const pageSpec: EnvelopeSpec = {
       ...spec,
       summary: summaryOf(
         node,
         counts,
         direction,
-        { shown: page.length, available: rest.length },
-        unresolved.length,
+        truncated ? { shown: entries.length, available: remaining } : null,
+        unresolvedAll.length,
+      ),
+      truncated,
+      truncation_reason: truncated ? "budget" : null,
+      next: truncated
+        ? ctx.cursor.sign({ generation, tool: TOOL, argsHash: identity.argsHash, position: end })
+        : null,
+    };
+    return emit(
+      ok(payloadOf(node, args.query, resolution, entries, unresolved, notIndexed), pageSpec),
+      budgetTokens,
+      { mint: mintAt(ctx, identity, end) },
+    );
+  };
+
+  // What the envelope costs before a single neighbour is served. Measured, not guessed: the node, the
+  // resolution block, the evidence and the continuation token all have to fit first, and the summary
+  // is taken at its longest (every neighbour shown) so its digits cannot make the page overshoot.
+  const floor = serialisedBytes(
+    ok(payloadOf(node, args.query, resolution, [], unresolved, notIndexed), {
+      ...spec,
+      summary: summaryOf(
+        node,
+        counts,
+        direction,
+        { shown: remaining, available: remaining },
+        unresolvedAll.length,
       ),
       truncated: true,
       truncation_reason: "budget",
-      next: ctx.cursor.sign({
-        generation,
-        tool: TOOL,
-        argsHash: identity.argsHash,
-        position: start + page.length,
-      }),
-    };
-    envelope = emit(
-      ok(payloadOf(node, args.query, resolution, page, unresolved, notIndexed), pageSpec),
-      budgetOf(args),
-      { mint: mintAt(ctx, identity, start + page.length) },
-    );
+      next: "x".repeat(CURSOR_RESERVE_CHARS),
+    }),
+  );
+
+  const terminal = (): Envelope<TracePayload> =>
+    noNeighbourFits({
+      node,
+      counts,
+      direction,
+      query: args.query,
+      resolution,
+      readStatus,
+      coverage,
+      totals,
+      unresolved,
+      notIndexed,
+      budgetTokens,
+      remaining,
+    });
+
+  // The page: the longest prefix of the remaining sequence that fits what is left of the allowance.
+  let entries = takePage(grouped, start, allowance - floor - SKELETON_SLACK_BYTES);
+  if (entries.length === 0 && remaining > 0) {
+    return terminal();
+  }
+
+  let envelope = pageEnvelope(entries, entries.length < remaining);
+
+  // `emit` measures the page it was handed and is the only sizing decision; if it cuts the page's
+  // tail (the estimate was optimistic), the page shrinks to the prefix `emit` kept. That is what keeps
+  // every page a contiguous slice of the sequence: no duplicates, and no neighbour skipped between
+  // one page and the next. A page that cannot advance is terminal rather than a loop.
+  for (let pass = 1; envelope.truncated && entries.length > 0; pass += 1) {
+    const survived = leadingSurvivors(envelope.payload, entries);
+    if (survived >= entries.length) {
+      break; // only the evidence lists were cut; every neighbour of this page is here
+    }
+    if (survived === 0 || pass >= MAX_SIZING_PASSES) {
+      return terminal();
+    }
+    entries = entries.slice(0, survived);
+    envelope = pageEnvelope(entries, true);
+  }
+
+  // The progress guarantee, stated once for every path above: a truncated page never hands back a
+  // position at or before the one it was given. Zero rows served means nothing can advance.
+  if (envelope.truncated && envelope.next !== null && entries.length === 0) {
+    return terminal();
   }
   return envelope;
 }
@@ -664,15 +992,17 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<TraceRe
         next_tools: NEXT_TOOLS_AFTER_MISS,
       };
       // The candidate list is capped at `CANDIDATE_CAP` by the resolution contract, so `emit` has
-      // nothing to cut unless the budget is below the envelope's own floor; the minted position is
-      // then the head of the list, which re-serves the same candidates rather than skipping any.
-      return emit(
-        ambiguous<TraceCandidates>(
-          { candidates: resolution.candidates.slice(0, CANDIDATE_CAP) },
-          spec,
+      // nothing to cut unless the budget is below the envelope's own floor; a cut then cannot advance
+      // the cursor, and re-serving the same candidates is a loop rather than a page.
+      return noRepeat(
+        emit(
+          ambiguous<TraceCandidates>(
+            { candidates: resolution.candidates.slice(0, CANDIDATE_CAP) },
+            spec,
+          ),
+          budgetOf(args),
+          { mint: mintAt(ctx, identity, start) },
         ),
-        budgetOf(args),
-        { mint: mintAt(ctx, identity, start) },
       );
     }
     case "not_found": {
@@ -683,13 +1013,15 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<TraceRe
         totals: { total_relation: "gte", near_misses_total: resolution.near_misses.length },
         next_tools: NEXT_TOOLS_AFTER_MISS,
       };
-      return emit(
-        notFound<TraceNearMisses>(
-          { near_misses: resolution.near_misses.slice(0, CANDIDATE_CAP) },
-          spec,
+      return noRepeat(
+        emit(
+          notFound<TraceNearMisses>(
+            { near_misses: resolution.near_misses.slice(0, CANDIDATE_CAP) },
+            spec,
+          ),
+          budgetOf(args),
+          { mint: mintAt(ctx, identity, start) },
         ),
-        budgetOf(args),
-        { mint: mintAt(ctx, identity, start) },
       );
     }
     default:
