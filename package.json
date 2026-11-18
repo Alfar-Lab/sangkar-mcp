@@ -1,12 +1,41 @@
 {
   "name": "sangkar-mcp",
+  "version": "0.1.0-beta.0",
+  "description": "Read-only MCP server and CLI over one repository's call graph, backed by SQLite.",
   "type": "module",
-  "private": true,
   "bin": {
     "sangkar": "./bin/sangkar.ts"
   },
+  "files": [
+    "bin",
+    "src",
+    "README.md"
+  ],
   "imports": {
     "#shared/*": "./src/shared/*"
+  },
+  "engines": {
+    "bun": ">=1.4.4"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "code-graph",
+    "call-graph",
+    "tree-sitter",
+    "sqlite"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Alfar-Lab/sangkar-mcp.git"
+  },
+  "homepage": "https://github.com/Alfar-Lab/sangkar-mcp#readme",
+  "bugs": {
+    "url": "https://github.com/Alfar-Lab/sangkar-mcp/issues"
+  },
+  "publishConfig": {
+    "access": "public",
+    "tag": "beta"
   },
   "scripts": {
     "mcp": "bun run bin/sangkar.ts",

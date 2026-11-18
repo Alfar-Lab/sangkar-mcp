@@ -11,6 +11,19 @@ Bun 1.4.4 or newer. The app is a Bun program — `bun:sqlite`, `bun build`, `Bun
 cannot run it.
 
 ```sh
+bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
+```
+
+`0.1.0-beta.0` publishes under the `beta` tag, so the version qualifier is required: an untagged
+install resolves `latest`, which a prerelease does not set. It resolves once a non-prerelease ships.
+
+The package ships TypeScript, so the `sangkar` binary runs under Bun through its shebang; the Bun
+prerequisite is not optional. Installing creates no database and writes nothing outside Bun's global
+directory.
+
+### From a checkout
+
+```sh
 bun install
 bun link            # puts `sangkar` on PATH
 ```
