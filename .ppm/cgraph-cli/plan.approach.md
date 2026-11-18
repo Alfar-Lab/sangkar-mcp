@@ -36,9 +36,12 @@
    `#shared/cli/args.ts`; `parseCliArgs` builds the raw argument object from argv and then hands it to
    `parseArgs`, wrapping its `AppError` as `CliUsageError`. CLI and MCP cannot drift because they run
    the same check against the same manifest literal.
-2. **argv is derived from the manifest, not written per tool.** Positional binds the single
-   `required: true` field; every other field is `--name value`, with `--name=value`, repeated flags for
-   arrays, `--flag` / `--no-flag` for booleans. `--help` prints `usageOf` generated from `input`.
+2. **argv is derived from the manifest, not written per tool.** The tool token is `argv[0]`, then
+   `splitGlobals` removes `--repo-root`, `--data-dir`, `--json` and `--help`/`-h` from anywhere in the
+   remaining argv; only what is left reaches `parseCliArgs`. There, a positional binds the single
+   `required: true` string field, every other field is `--name value`, with `--name=value`, repeated
+   flags for arrays, `--flag` / `--no-flag` for booleans, and a bare positional for a tool with no
+   required field is a usage error. `--help` prints `usageOf` on stdout and exits 0.
 3. **Repo root autodetect walks up from cwd**: nearest ancestor with `.codegraph/`, else nearest with
    `.git`, else cwd. Rationale: it fixes today's footgun where running from `app/src/` would index a
    subtree, and it keeps `.codegraph` beside the code as the project identity.
@@ -49,9 +52,14 @@
    of a protocol-level filter: `index` is registered everywhere and the guide says to call it only when
    `status` reports a broken graph. Rationale: a bash command that hides one of its own tools is worse
    than an agent that can see a repair tool the docs tell it not to use.
-6. **Human output only for `status`.** `cgraph status` keeps today's four lines; `cgraph status --json`
-   and every other tool print the envelope as one compact JSON document, so `| jq` works and no second
-   formatter has to be maintained.
+5b. **`index` stays a reserved CLI verb.** `openStore` returns `absent` before any handler runs, so a
+   tool call cannot create the first index; `cgraph index` therefore routes to `runWorker` exactly as
+   today, and the same-named MCP tool serves clients. Both take `--force`/`--mode`.
+6. **Human output only for `status`.** `cgraph status` keeps today's human output (a status line plus
+   project, database, graph and health), `cgraph status --json` and every other tool print the envelope
+   as one compact JSON document, so `| jq` works and no second formatter has to be maintained. `status`
+   is a tool name like the others: the old `status` CLI mode and its `runStatus` function are deleted,
+   not bypassed.
 7. **Children get flags, never environment.** `worker` mode parses `--repo-root`/`--data-dir` like every
    other mode, so the server and its worker cannot disagree about which tree they are on.
 8. **Exit codes are part of the CLI contract**: 0 for `ok`/`ambiguous`/`not_found`, 1 for

@@ -32,6 +32,12 @@ Rules every task must respect. Violating one is a defect, not a preference.
   `CODEGRAPH_NO_WATCH` read. After this plan no other `CODEGRAPH_*` variable exists.
 - Exit codes: `0` for `ok` / `ambiguous` / `not_found`, `1` for `error` / `bootstrapping`, `2` for
   usage or configuration refusal.
+- CLI grammar: `argv[0]` is the tool name (or the reserved `mcp`/`worker`); `splitGlobals` removes
+  `--repo-root`, `--data-dir`, `--json` and `--help`/`-h` from the rest of argv, so they are legal
+  before or after the tool name; only what remains reaches `parseCliArgs`. `--help` prints the tool's
+  usage on stdout and exits 0. `cgraph --repo-root X status` (tool token not first) is not legal.
+- `status` is a tool name, not a mode: `cgraph status` prints the human lines, `--json` prints the
+  envelope, and the old `runStatus` path is deleted rather than kept beside it.
 - Bun is **not on `PATH`** in this environment: use `$HOME/.bun/bin/bun` in every command.
 
 ## Data
@@ -60,3 +66,5 @@ Rules every task must respect. Violating one is a defect, not a preference.
 - Forbidden for the executor: migrating a live database, running `bun link` / installing globally,
   force-pushing, editing `.ppm/*/tasks/*.json` by hand, or changing an unrelated test to make a
   failing check pass.
+- Rollback: the whole change is code-only — no schema, no migration, `guardRoot` preserved — so
+  reverting the phase commits restores the previous behaviour completely.

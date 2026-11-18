@@ -50,9 +50,14 @@ measurements and is not edited.
    `tests/binary-smoke.test.ts`.
 3. From an indexed tree, `cgraph status`, `cgraph search <symbol>`, `cgraph trace <symbol> --depth 1`
    and `cgraph impact` answer without any `CODEGRAPH_*` variable set, and from a nested subdirectory
-   they answer about the same database.
+   they answer about the same database. The first index of a fresh tree is created by `cgraph index`
+   (the reserved verb, exit 0) — a tool call alone cannot bootstrap an absent graph.
 4. `cgraph nonsense` and `cgraph trace` (no positional) exit 2 with usage on stderr; `cgraph --help`
-   lists the seven tools and the two modes.
-5. `grep -rn "CODEGRAPH_REPO_ROOT\|CODEGRAPH_DATA_DIR\|CODEGRAPH_PROFILE" app/src app/bin app/tests
-   docs/my-product app/README.md` returns nothing, and `grep -rn "profile" app/src` returns nothing.
-6. `cgraph mcp --repo-root /path --data-dir /path` serves the same graph the old env contract served.
+   lists the seven tools, the three verbs and the three global flags; `cgraph index --help` runs no index.
+5. (a) `grep -rn "CODEGRAPH_REPO_ROOT\|CODEGRAPH_DATA_DIR\|CODEGRAPH_PROFILE" app/src app/bin app/docs
+   app/README.md docs/my-product` returns nothing, and (b) `grep -rn "profile" app/src app/bin app/docs
+   app/README.md docs/my-product/TECH-SPEC.md` returns nothing. `app/tests/**` is exempt: a test that
+   asserts a removed variable is absent must name it. `docs/my-product/DESIGN.md`'s historical
+   measurement paragraph is the one permitted mention of profiles in the normative docs.
+6. `cgraph mcp --repo-root /path --data-dir /path` serves a graph over stdio and reports the same
+   `read_status.generation` that `cgraph status --json` reports for that tree.

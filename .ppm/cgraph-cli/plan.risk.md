@@ -14,12 +14,18 @@
 - **Test fixtures silently stop pointing at their tree.** A `loadConfig({env:{CODEGRAPH_REPO_ROOT}})` call
   that is missed will fall back to cwd and open the repository's own `app/.codegraph`, so the test could
   pass for the wrong reason. Mitigation: every migrated test passes `--repo-root` explicitly through
-  `argv`; the phase_1 closing check greps for the three variable names in `app/tests` and must return
-  nothing.
+  `argv`, and the phase_1 closing check sweeps `app/src`, `app/bin`, `app/docs` and `app/README.md` for
+  the three variable names. `app/tests/**` is deliberately exempt from that sweep: a test that asserts a
+  removed variable is absent has to name it on the left-hand side of a property read.
 - **Widening the agent surface to `index`.** Measured, an agent called indexing 1 081 times at 12.9 %
   failure. All-seven registration re-exposes that. Mitigation: the instructions keep an explicit rule
   (call `index` only when `status` says the graph is broken, and never as a query); it is now
   prose-level, so this is an accepted, documented trade — not a silent one.
+- **`index` has two roles.** It stays a reserved CLI verb routed to `runWorker` (the only path that can
+  bootstrap an absent graph, since `openStore` returns `absent` before any handler runs) *and* a
+  registered MCP tool. Both take the same `--force`/`--mode` arguments. The risk is drift between the
+  two; mitigation: the verb delegates to `workerOptions`, which reads the same names the manifest
+  declares, and `tests/cli.test.ts` bootstraps a tree through the verb.
 - **`parseArgs` does not clamp `min`/`max`.** It only checks the type; handlers clamp. The CLI inherits
   exactly that behaviour on purpose (parity with MCP). Not fixed here, so no divergence is introduced.
 - **`tests/binary-smoke.test.ts` takes minutes** and builds a 105 MB artifact into a temp dir. It stays
