@@ -246,7 +246,7 @@ function makeContext(reader: GraphReader): ToolContext {
     now: () => NOW,
     config: loadConfig({
       argv: ["--repo-root", "/tmp/fixture"],
-      env: { CODEGRAPH_CURSOR_KEY: KEY },
+      env: { SANGKAR_CURSOR_KEY: KEY },
     }),
   };
 }

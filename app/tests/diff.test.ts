@@ -14,7 +14,7 @@ import * as schema from "#shared/store/schema";
  * result and not an exception).
  *
  * Every fixture is a `mkdtemp` directory, and the database sits where the product puts it —
- * `<root>/.codegraph/graph.db` — so the tracked files and the graph are exercised together. The
+ * `<root>/.sangkar/graph.db` — so the tracked files and the graph are exercised together. The
  * module writes nothing, which is asserted here rather than assumed: `git status --porcelain` and
  * the index mtime must be identical before and after a call.
  */
@@ -56,7 +56,7 @@ interface IndexedFile {
 
 /** A migrated database recording `files` as indexed, opened read-only like every read path. */
 function openGraph(root: string, files: readonly IndexedFile[]): Conn {
-  const path = join(root, ".codegraph", "graph.db");
+  const path = join(root, ".sangkar", "graph.db");
   mkdirSync(dirname(path), { recursive: true });
   const writer = openWriter(path);
   try {
@@ -115,7 +115,7 @@ function commit(root: string, message: string): void {
 
 /** A committed repository holding an indexable file, a second one to delete and a README. */
 function makeGitRepo(): string {
-  const root = tempDir("codegraph-diff-git-");
+  const root = tempDir("sangkar-diff-git-");
   write(root, "src/a.ts", TS_A);
   write(root, "src/b.ts", TS_B);
   write(root, "README.md", MD_DOC);
@@ -203,7 +203,7 @@ describe("changedSince against a git fixture", () => {
   });
 
   test("a git invocation that exceeds the bound degrades instead of hanging", async () => {
-    const root = tempDir("codegraph-diff-slow-");
+    const root = tempDir("sangkar-diff-slow-");
     write(root, "src/a.ts", TS_A);
     // A clean filter that sleeps makes `git diff` read the working tree through a slow pipe.
     write(root, ".gitattributes", "*.ts filter=slow\n");
@@ -261,7 +261,7 @@ describe("changedSince against a git fixture", () => {
 
 describe("changedSince outside git", () => {
   test("a plain temp directory degrades to the hash comparison without throwing", async () => {
-    const root = tempDir("codegraph-diff-plain-");
+    const root = tempDir("sangkar-diff-plain-");
     write(root, "a.ts", TS_A);
     write(root, "b.ts", TS_B);
     const reader = openGraph(root, [
@@ -282,7 +282,7 @@ describe("changedSince outside git", () => {
   });
 
   test("a file row that points outside the repo root is dropped, never reported", async () => {
-    const parent = tempDir("codegraph-diff-outside-");
+    const parent = tempDir("sangkar-diff-outside-");
     const root = join(parent, "repo");
     mkdirSync(root, { recursive: true });
     write(parent, "outside.ts", TS_A_CHANGED);

@@ -207,7 +207,7 @@ describe("key handling", () => {
     } catch (e) {
       expect(e).toBeInstanceOf(AppError);
       expect((e as AppError).code).toBe("internal");
-      expect((e as AppError).hint).toContain("CODEGRAPH_CURSOR_KEY");
+      expect((e as AppError).hint).toContain("SANGKAR_CURSOR_KEY");
     }
   });
 

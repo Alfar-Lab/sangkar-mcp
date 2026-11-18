@@ -1,22 +1,22 @@
 {
-  "name": "codegraph-mvp",
+  "name": "sangkar-mcp",
   "type": "module",
   "private": true,
   "bin": {
-    "cgraph": "./bin/codegraph.ts"
+    "sangkar": "./bin/sangkar.ts"
   },
   "imports": {
     "#shared/*": "./src/shared/*"
   },
   "scripts": {
-    "mcp": "bun run bin/codegraph.ts",
-    "index": "bun run bin/codegraph.ts index",
-    "status": "bun run bin/codegraph.ts status",
-    "dev": "bun --watch run bin/codegraph.ts",
+    "mcp": "bun run bin/sangkar.ts",
+    "index": "bun run bin/sangkar.ts index",
+    "status": "bun run bin/sangkar.ts status",
+    "dev": "bun --watch run bin/sangkar.ts",
     "test": "bun test",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src tests bin",
-    "build": "bun build --compile bin/codegraph.ts --asset src/shared/store/migrations --outfile dist/codegraph",
+    "build": "bun build --compile bin/sangkar.ts --asset src/shared/store/migrations --outfile dist/sangkar",
     "db:generate": "drizzle-kit generate",
     "db:drift": "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
     "db:parity": "bun test tests/schema-parity.test.ts",

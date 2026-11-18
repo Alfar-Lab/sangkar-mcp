@@ -82,7 +82,7 @@ function assertKey(key: string): void {
     throw new AppError(
       "internal",
       `cursor key must be at least ${CURSOR_KEY_MIN_BYTES} bytes of key material`,
-      { hint: "set CODEGRAPH_CURSOR_KEY to a random value of 32 bytes or more" },
+      { hint: "set SANGKAR_CURSOR_KEY to a random value of 32 bytes or more" },
     );
   }
 }

@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "codegraph-mvp",
+      "name": "sangkar-mcp",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.32.2",
         "drizzle-orm": "0.45.4",

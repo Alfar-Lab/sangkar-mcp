@@ -39,7 +39,7 @@ const DEFAULT_BUDGET_TOKENS = 1_200;
 const MAX_BUDGET_TOKENS = 32_000;
 
 /** The data dir's name inside a repository, per DATABASE.md §3.0. */
-const DATA_DIR_NAME = ".codegraph";
+const DATA_DIR_NAME = ".sangkar";
 
 /**
  * Value of a `--<name> value` or `--<name>=value` flag, or `undefined` when the flag is absent.
@@ -62,7 +62,7 @@ export function flagValue(argv: readonly string[], name: string): string | undef
 }
 
 /**
- * The working tree that owns `cwd`: the nearest directory holding a `.codegraph` data dir, else
+ * The working tree that owns `cwd`: the nearest directory holding a `.sangkar` data dir, else
  * the nearest directory holding a `.git` (a directory, or a file in a linked worktree), else
  * `cwd` itself. Pure filesystem lookup — no `git` subprocess, so this works in a bare temp
  * directory and when git is not installed.
@@ -85,8 +85,8 @@ export function detectRepoRoot(cwd: string): string {
 
 /**
  * Resolves the config from the command line and the working directory: `--repo-root` (default
- * autodetected from cwd), `--data-dir` relative to the repo root (default `<repoRoot>/.codegraph`),
- * and `CODEGRAPH_CURSOR_KEY` — the one setting that still comes from the environment.
+ * autodetected from cwd), `--data-dir` relative to the repo root (default `<repoRoot>/.sangkar`),
+ * and `SANGKAR_CURSOR_KEY` — the one setting that still comes from the environment.
  */
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const argv = options.argv ?? [];
@@ -109,11 +109,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
     dataDir,
     repoRoot,
     // An absent or empty variable yields a per-process key, so a cursor minted by one invocation
-    // cannot be verified by another; set CODEGRAPH_CURSOR_KEY to share cursors across processes.
+    // cannot be verified by another; set SANGKAR_CURSOR_KEY to share cursors across processes.
     cursorKey:
-      env.CODEGRAPH_CURSOR_KEY === undefined || env.CODEGRAPH_CURSOR_KEY === ""
+      env.SANGKAR_CURSOR_KEY === undefined || env.SANGKAR_CURSOR_KEY === ""
         ? randomBytes(32).toString("hex")
-        : env.CODEGRAPH_CURSOR_KEY,
+        : env.SANGKAR_CURSOR_KEY,
     budgets: { defaultTokens: DEFAULT_BUDGET_TOKENS, maxTokens: MAX_BUDGET_TOKENS },
   };
 }

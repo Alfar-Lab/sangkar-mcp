@@ -277,7 +277,7 @@ Additional rules:
 | `class_types`, `function_types`, `import_types`, `call_types` | four per-language node-type lists — this is the node-vs-edge decision, expressed as data |
 | shebang sniff | extension-less files only (scripts, git hooks) |
 | a handful of hand-written readers | for formats a tree-sitter walk cannot serve: notebooks, YAML paths, JSON paths, HTML inline scripts, templates |
-| `.codegraph/languages.toml` | user-defined languages; **built-ins always win**; capped count; validated |
+| `.sangkar/languages.toml` | user-defined languages; **built-ins always win**; capped count; validated |
 
 Node-vs-edge stays a table lookup, for the same reason both parents did it that way: it is the maintainable form of "what becomes a node."
 

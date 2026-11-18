@@ -36,7 +36,7 @@ const NOW = new Date("2026-01-04T12:00:00Z");
 const dirs: string[] = [];
 
 function tempDir(): string {
-  const dir = mkdtempSync(join(tmpdir(), "codegraph-index-tool-"));
+  const dir = mkdtempSync(join(tmpdir(), "sangkar-index-tool-"));
   dirs.push(dir);
   return dir;
 }
@@ -170,7 +170,7 @@ describe("workerInvocation", () => {
     expect(invocation.cmd.at(-1)).toBe("full");
     expect(invocation.cmd).toContain("worker");
     expect(invocation.cmd[0]).toBe(process.execPath);
-    expect(invocation.cmd.some((part) => part.endsWith(join("bin", "codegraph.ts")))).toBe(true);
+    expect(invocation.cmd.some((part) => part.endsWith(join("bin", "sangkar.ts")))).toBe(true);
     // The two paths the child acts on come from the config, never from this process's cwd, and
     // they travel as ordered argv flags rather than as environment variables.
     const argv = invocation.cmd;
@@ -184,8 +184,8 @@ describe("workerInvocation", () => {
     ]);
     expect(argv.indexOf("--repo-root")).toBe(argv.indexOf("worker") + 1);
     expect(argv.indexOf("--data-dir")).toBe(argv.indexOf("--repo-root") + 2);
-    expect(invocation.env.CODEGRAPH_REPO_ROOT).toBeUndefined();
-    expect(invocation.env.CODEGRAPH_DATA_DIR).toBeUndefined();
+    expect(invocation.env.SANGKAR_REPO_ROOT).toBeUndefined();
+    expect(invocation.env.SANGKAR_DATA_DIR).toBeUndefined();
   });
 
   test("force is passed through, and absent when not requested", () => {

@@ -21,7 +21,7 @@ export type LangId =
 
 /**
  * One language row as declared. Arrays are readonly views because a row is reference data, but the
- * shape stays a plain object so a user's `.codegraph/languages.toml` (GRAPH-MODEL.md) can produce
+ * shape stays a plain object so a user's `.sangkar/languages.toml` (GRAPH-MODEL.md) can produce
  * the same values; `registry.ts` serves the resolved `LangRow` the parser consumes.
  */
 export interface LangSpec {

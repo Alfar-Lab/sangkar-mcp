@@ -2,7 +2,7 @@
  * `index`: spawn the worker and report what it published (`TOOLS-SPEC.md` §8).
  *
  * The tool never indexes. The writer lives in exactly one process (`TECH-SPEC.md` §8), so this
- * handler spawns `bin/codegraph.ts worker` and reads that child's stderr; a WASM parser that runs
+ * handler spawns `bin/sangkar.ts worker` and reads that child's stderr; a WASM parser that runs
  * out of memory kills the worker, not the MCP session that answered the call. That is also why
  * this file imports no indexer module and no database module: a tool may reach only `#shared/*`,
  * and the repair path is the last place to discover a boundary leak.
@@ -46,7 +46,7 @@ import { type IndexArgs, type IndexMode, input } from "./manifest";
 const APP_ROOT = join(import.meta.dir, "..", "..", "..");
 
 /** The CLI entry the worker mode lives behind, relative to {@link APP_ROOT}. */
-const CLI_ENTRY = join("bin", "codegraph.ts");
+const CLI_ENTRY = join("bin", "sangkar.ts");
 
 /** A child's last line is the only diagnosis there is; cap it so a stack trace cannot bloat. */
 const MAX_ERROR_LINE_CHARS = 400;
@@ -125,8 +125,8 @@ function resolveArgs(args: IndexArgs): WorkerArgs {
 /**
  * The child command, and the only place the two paths it acts on are decided.
  *
- * `[execPath, "run", bin/codegraph.ts, "worker", …]` is the source-tree form. In a compiled binary
- * (`bun build --compile`, `app/package.json`'s `build`) there is no `bin/codegraph.ts` on disk and
+ * `[execPath, "run", bin/sangkar.ts, "worker", …]` is the source-tree form. In a compiled binary
+ * (`bun build --compile`, `app/package.json`'s `build`) there is no `bin/sangkar.ts` on disk and
  * `execPath` *is* the server, so the same mode is addressed as `[execPath, "worker", …]`; the
  * entry's existence is what distinguishes the two, and that is a file check rather than a guess
  * about the build.
@@ -428,7 +428,7 @@ function published(
       ctx,
       snapshot,
       new AppError("internal", "the index worker exited 0 without publishing a report", {
-        hint: "run `cgraph index` and read its stderr: the worker's last line is the report",
+        hint: "run `sangkar index` and read its stderr: the worker's last line is the report",
       }),
     );
   }
@@ -591,7 +591,7 @@ export async function handle(
         new AppError(
           "internal",
           `the index worker failed (exit ${report.exitCode}): ${lastErrorLine(report)}`,
-          { hint: "run `cgraph index` and read its stderr for the full run" },
+          { hint: "run `sangkar index` and read its stderr for the full run" },
         ),
       );
   }

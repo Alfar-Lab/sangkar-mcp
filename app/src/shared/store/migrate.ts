@@ -254,7 +254,7 @@ export function migrate(db: Database, options: MigrateOptions = {}): MigrateResu
       "schema_too_new",
       `database schema_version ${fromVersion} is newer than this build (${version})`,
       {
-        hint: "upgrade codegraph, or point --data-dir at a fresh directory; this build will not downgrade the graph",
+        hint: "upgrade sangkar, or point --data-dir at a fresh directory; this build will not downgrade the graph",
       },
     );
   }

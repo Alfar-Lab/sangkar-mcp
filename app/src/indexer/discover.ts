@@ -18,7 +18,7 @@ import type { LangId } from "./lang/types";
 export const ALWAYS_EXCLUDED: ReadonlySet<string> = new Set([
   ".git",
   "node_modules",
-  ".codegraph",
+  ".sangkar",
   "dist",
   "vendor",
 ]);
@@ -32,7 +32,7 @@ const BINARY_PROBE_BYTES = 8192;
 const HASH_CHUNK_BYTES = 1024 * 1024;
 
 /** The two control files, read relative to the repository root only, plus the caller's extras. */
-const CONTROL_FILES: readonly string[] = [".gitignore", ".codegraphignore"];
+const CONTROL_FILES: readonly string[] = [".gitignore", ".sangkarignore"];
 
 /** Why a path the walk saw is not part of the graph. The set is closed on purpose. */
 export type SkipReason = "ignored" | "binary" | "size_cap" | "unsupported_ext";

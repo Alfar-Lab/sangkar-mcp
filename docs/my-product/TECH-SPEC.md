@@ -44,7 +44,7 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 ├── biome.json                  # style only, not the boundary
 ├── drizzle.config.ts           # drizzle-kit: dialect sqlite, schema + out paths (§5.4.4)
 ├── bin/
-│   └── codegraph.ts            # single CLI entry: cgraph <tool|mcp|worker|index>
+│   └── sangkar.ts            # single CLI entry: sangkar <tool|mcp|worker|index>
 ├── src/
 │   ├── index.ts                # composition root: builds the server, registers tools
 │   ├── shared/                 # LAYER 1 — kernel + engine (the ONLY cross-module import target)
@@ -79,12 +79,12 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 │   │   ├── expand/
 │   │   └── index/
 │   └── indexer/                # LAYER 3 — the writer; never imported by tools
-│       ├── worker.ts           # entry for `bin/codegraph.ts worker`
+│       ├── worker.ts           # entry for `bin/sangkar.ts worker`
 │       ├── discover.ts
 │       ├── lang/
 │       │   ├── registry.ts     # extension -> language
 │       │   ├── types.ts        # class/function/import/call node types per language
-│       │   └── custom.ts       # .codegraph/languages.toml
+│       │   └── custom.ts       # .sangkar/languages.toml
 │       ├── extract.ts
 │       ├── resolver.ts
 │       ├── publish.ts
@@ -395,17 +395,17 @@ need to be resolvable.)
 
 ```mermaid
 flowchart LR
-    A["agent (MCP client)"] -->|stdio| B["bin/codegraph.ts mcp<br/>server process"]
-    B -->|"readonly connection"| DB[(".codegraph/graph.db")]
+    A["agent (MCP client)"] -->|stdio| B["bin/sangkar.ts mcp<br/>server process"]
+    B -->|"readonly connection"| DB[(".sangkar/graph.db")]
     B -->|"spawn on change / index tool"| C["index worker process"]
     C -->|"stage -> seal -> rename"| DB
-    C -->|"write.lock"| L[(".codegraph/write.lock")]
+    C -->|"write.lock"| L[(".sangkar/write.lock")]
     B -.->|"poll git HEAD + mtimes<br/>no DB writes"| B
 ```
 
 | Decision | Choice | Reason |
 |---|---|---|
-| Indexing in-process? | **No** — spawned child (`bin/codegraph.ts worker`) | a WASM parser OOM or a panic kills the worker, not the MCP session. CBM ships a whole supervisor (restart caps, quarantine journal) for exactly this reason |
+| Indexing in-process? | **No** — spawned child (`bin/sangkar.ts worker`) | a WASM parser OOM or a panic kills the worker, not the MCP session. CBM ships a whole supervisor (restart caps, quarantine journal) for exactly this reason |
 | Worker pool size | `min(cpus, 8)` parser threads inside the worker | CRG's default; matches the measured full-build time on the reference corpus |
 | Server ↔ worker | stdin/stdout JSON lines, or exit code + stage file | the worker's only output contract is "did the stage publish" |
 | Write lock | **create-exclusive file** (`wx`) containing PID + start time, mtime heartbeat | **Bun has no `flock`**; SQLite's own lock protects the DB, this only prevents duplicate work (CRG used `flock`; not available here) |
@@ -434,7 +434,7 @@ from CRG's mechanism: an extension map plus four node-type lists per language
 language is a data change, not a code change.
 
 v1 language set (12): python, typescript, tsx, javascript, go, java, rust, c, cpp, csharp, php, ruby —
-plus `.codegraph/languages.toml` for user additions (`GRAPH-MODEL.md` rules: built-ins win, capped count).
+plus `.sangkar/languages.toml` for user additions (`GRAPH-MODEL.md` rules: built-ins win, capped count).
 
 ### 9.1 Parser spike acceptance criteria (before any tool code)
 
@@ -551,13 +551,13 @@ protect, and the only ones with an external ground truth to compare against.
 ```json
 {
   "scripts": {
-    "mcp":        "bun run bin/codegraph.ts",
-    "index":      "bun run bin/codegraph.ts index",
-    "dev":        "bun --watch run bin/codegraph.ts",
+    "mcp":        "bun run bin/sangkar.ts",
+    "index":      "bun run bin/sangkar.ts index",
+    "dev":        "bun --watch run bin/sangkar.ts",
     "test":       "bun test",
     "typecheck":  "tsc --noEmit",
     "lint":       "biome check src tests",
-    "build":      "bun build --compile bin/codegraph.ts --outfile dist/codegraph",
+    "build":      "bun build --compile bin/sangkar.ts --outfile dist/sangkar",
     "db:generate": "drizzle-kit generate",
     "db:drift":    "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
     "db:parity":   "bun test tests/schema-parity.test.ts"

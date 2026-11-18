@@ -1,6 +1,6 @@
 node_modules/
 dist/
-.codegraph/
+.sangkar/
 *.db
 *.db-wal
 *.db-shm

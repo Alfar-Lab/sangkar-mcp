@@ -56,7 +56,7 @@ afterEach(async () => {
 
 /** A migrated graph in a temp directory: the shipped migrations through the one runner. */
 async function tempGraph(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "codegraph-persist-"));
+  const dir = await mkdtemp(join(tmpdir(), "sangkar-persist-"));
   dirs.push(dir);
   const livePath = join(dir, "graph.db");
   const handle = new Database(livePath, { create: true });

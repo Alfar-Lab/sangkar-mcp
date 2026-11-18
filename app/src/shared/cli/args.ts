@@ -3,7 +3,7 @@
  * MCP surface advertises.
  *
  * `parseArgs`, `matchesType`, `matchesItem` and `expectationOf` are moved verbatim from
- * `src/index.ts`, where they validate a protocol call. Keeping one copy is the point: a `cgraph
+ * `src/index.ts`, where they validate a protocol call. Keeping one copy is the point: a `sangkar
  * <tool>` invocation and a tool call must accept and refuse exactly the same arguments, and a
  * second, laxer schema on the CLI side is the drift this module exists to prevent. What is new
  * here is only the argv reading — `splitGlobals` takes the flags no tool declares, and
@@ -41,7 +41,7 @@ export const GLOBAL_VALUE_FLAGS = ["repo-root", "data-dir"] as const;
 
 /** What a refusal from {@link splitGlobals} points at, since no tool is known yet. */
 const GLOBAL_USAGE =
-  "cgraph [--repo-root <path>] [--data-dir <path>] [--json] [--help] <tool> [arguments]";
+  "sangkar [--repo-root <path>] [--data-dir <path>] [--json] [--help] <tool> [arguments]";
 
 /**
  * A command line the schema cannot accept, carrying the usage block the caller prints. Separate
@@ -125,7 +125,7 @@ export function splitGlobals(argv: readonly string[]): {
 
 /**
  * The one field a bare token may bind: the single required string argument of the tool. `trace`,
- * `search` and `expand` each declare exactly one, which is what makes `cgraph search pom.xml` the
+ * `search` and `expand` each declare exactly one, which is what makes `sangkar search pom.xml` the
  * obvious spelling; a literal whose required field is an enum, or which has two required fields,
  * gets no positional so nothing is guessed.
  */
@@ -329,8 +329,8 @@ export function usageOf(tool: string, input: InputLiteral): string {
   const positional = positionalFieldOf(input);
   const header =
     positional === undefined
-      ? `cgraph ${tool} [options]`
-      : `cgraph ${tool} [<${positional}>] [options]`;
+      ? `sangkar ${tool} [options]`
+      : `sangkar ${tool} [<${positional}>] [options]`;
   const fields = Object.entries(input).map(([name, field]) => {
     const marks = field.required === true ? " (required)" : "";
     const description = field.description === undefined ? "" : `  ${field.description}`;

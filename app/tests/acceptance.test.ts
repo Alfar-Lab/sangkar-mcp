@@ -82,7 +82,7 @@ import {
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
-const CLI_ENTRY = join(APP_ROOT, "bin", "codegraph.ts");
+const CLI_ENTRY = join(APP_ROOT, "bin", "sangkar.ts");
 
 /** `DESIGN.md` §14 / `TECH-SPEC.md` §14: the reference corpus, indexed but never written. */
 const CORPUS = resolve(APP_ROOT, "..", "code-review-graph");
@@ -356,7 +356,7 @@ function inspect(conn: Conn, reader: GraphReader): Measured {
 }
 
 beforeAll(async () => {
-  const root = await mkdtemp(join(tmpdir(), "codegraph-acceptance-"));
+  const root = await mkdtemp(join(tmpdir(), "sangkar-acceptance-"));
   dirs.push(root);
   const dataDir = join(root, "data");
   await mkdir(dataDir, { recursive: true });
@@ -373,7 +373,7 @@ beforeAll(async () => {
   const reader = makeReader(conn);
   const config: AppConfig = loadConfig({
     argv: ["--repo-root", CORPUS, "--data-dir", dataDir],
-    env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+    env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
   });
   const ctx: ToolContext = {
     reader,
@@ -1172,8 +1172,8 @@ async function listTools(): Promise<Surface> {
     cwd: APP_ROOT,
     env: {
       ...process.env,
-      CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      CODEGRAPH_NO_WATCH: "1",
+      SANGKAR_CURSOR_KEY: CURSOR_KEY,
+      SANGKAR_NO_WATCH: "1",
     },
     stdin: "pipe",
     stdout: "pipe",

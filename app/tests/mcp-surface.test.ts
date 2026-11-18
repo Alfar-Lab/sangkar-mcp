@@ -10,7 +10,7 @@ import { TOOL_NAMES } from "#shared/instructions";
  * `tools/list` survive the SDK's own framing, that one surface publishes all seven tools, and that
  * nothing but JSON-RPC reaches stdout.
  *
- * Every run gets its own tree and data dir, `CODEGRAPH_NO_WATCH=1` (a watcher would spawn a worker
+ * Every run gets its own tree and data dir, `SANGKAR_NO_WATCH=1` (a watcher would spawn a worker
  * over an empty fixture and make the run's timing depend on git) and a cursor key of the required
  * length. No database is published, deliberately: `tools/list` must answer before the first index,
  * because that is the state a client connects in.
@@ -21,7 +21,7 @@ import { TOOL_NAMES } from "#shared/instructions";
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
-const CLI_ENTRY = join(APP_ROOT, "bin", "codegraph.ts");
+const CLI_ENTRY = join(APP_ROOT, "bin", "sangkar.ts");
 
 /** Generous for two handshakes, short enough that a hang is a failure rather than a wait. */
 const HARD_TIMEOUT_MS = 30_000;
@@ -101,7 +101,7 @@ function parseLines(stream: string): { json: unknown[]; nonJson: string[] } {
  * temp tree is removed there too, so a failed assertion cannot leave a process or a directory behind.
  */
 async function session(): Promise<Session> {
-  const root = await mkdtemp(join(tmpdir(), "codegraph-mcp-surface-"));
+  const root = await mkdtemp(join(tmpdir(), "sangkar-mcp-surface-"));
   const repoRoot = join(root, "repo");
   const dataDir = join(root, "data");
   await mkdir(repoRoot, { recursive: true });
@@ -123,8 +123,8 @@ async function session(): Promise<Session> {
       ...process.env,
       // The roots are on the command line, not in the child's environment, so the session is rooted
       // by the flags it states and nothing an inherited variable says can decide what this proves.
-      CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      CODEGRAPH_NO_WATCH: "1",
+      SANGKAR_CURSOR_KEY: CURSOR_KEY,
+      SANGKAR_NO_WATCH: "1",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -187,7 +187,7 @@ describe("MCP surface: seven tools, one clean stdout", () => {
       const initialized = run.responses[0]?.result as
         | { protocolVersion?: string; serverInfo?: { name?: string } }
         | undefined;
-      expect(initialized?.serverInfo?.name).toBe("codegraph");
+      expect(initialized?.serverInfo?.name).toBe("sangkar");
       expect(initialized?.protocolVersion).toBe(PROTOCOL_VERSION);
 
       // One surface, seven names, each published once: `index` is registered like every other tool,

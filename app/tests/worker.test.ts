@@ -48,7 +48,7 @@ afterEach(async () => {
 
 /** A temp working tree plus its data dir; nothing here is under version control. */
 async function tempRepo(files: Record<string, string> = {}): Promise<TempRepo> {
-  const repoRoot = await mkdtemp(join(tmpdir(), "codegraph-worker-"));
+  const repoRoot = await mkdtemp(join(tmpdir(), "sangkar-worker-"));
   dirs.push(repoRoot);
   const sources: Record<string, string> = {
     [CALLER]: CALLER_SOURCE,
@@ -60,7 +60,7 @@ async function tempRepo(files: Record<string, string> = {}): Promise<TempRepo> {
     await mkdir(dirname(absolute), { recursive: true });
     await writeFile(absolute, content, "utf8");
   }
-  const dataDir = join(repoRoot, ".codegraph");
+  const dataDir = join(repoRoot, ".sangkar");
   return { repoRoot, dataDir, livePath: join(dataDir, "graph.db") };
 }
 

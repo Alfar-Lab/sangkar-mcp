@@ -343,7 +343,7 @@ function helperNode(nodes: readonly NodeRow[]): NodeRow {
 function makeContext(reader: GraphReader, repoRootPath: string): ToolContext {
   const config: AppConfig = loadConfig({
     argv: ["--repo-root", repoRootPath],
-    env: { CODEGRAPH_CURSOR_KEY: KEY },
+    env: { SANGKAR_CURSOR_KEY: KEY },
   });
   const cursor: CursorFacade = createCursors({ key: KEY });
   return { reader, cursor, log, now: () => new Date("2026-01-03T00:05:00Z"), config };
@@ -412,7 +412,7 @@ describe("expand: inference", () => {
   let ctx: ToolContext;
 
   beforeAll(() => {
-    repoRoot = mkdtempSync(join(tmpdir(), "codegraph-expand-"));
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-"));
     dirs.push(repoRoot);
     mkdirSync(join(repoRoot, "src"), { recursive: true });
     aSha = sha256Of(A_SOURCE);
@@ -538,7 +538,7 @@ describe("expand: source and its drift check", () => {
   let ctx: ToolContext;
 
   beforeAll(() => {
-    repoRoot = mkdtempSync(join(tmpdir(), "codegraph-expand-source-"));
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-source-"));
     dirs.push(repoRoot);
     mkdirSync(join(repoRoot, "src"), { recursive: true });
     aSha = sha256Of(A_SOURCE);
@@ -659,7 +659,7 @@ describe("expand: refusals", () => {
   let ctx: ToolContext;
 
   beforeAll(() => {
-    repoRoot = mkdtempSync(join(tmpdir(), "codegraph-expand-refusals-"));
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-refusals-"));
     dirs.push(repoRoot);
     aSha = sha256Of(A_SOURCE);
     driftedIndexedSha = sha256Of("function drifted() {\n  return 1;\n}\n");
@@ -743,7 +743,7 @@ describe("expand: budget", () => {
   let ctx: ToolContext;
 
   beforeAll(() => {
-    repoRoot = mkdtempSync(join(tmpdir(), "codegraph-expand-budget-"));
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-budget-"));
     dirs.push(repoRoot);
     aSha = sha256Of(A_SOURCE);
     driftedIndexedSha = sha256Of("function drifted() {\n  return 1;\n}\n");

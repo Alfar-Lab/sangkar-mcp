@@ -35,8 +35,8 @@ import { input, manifest, STATUS_RETRY_AFTER_MS } from "../src/tools/status/mani
  * repo root the config reports.
  */
 
-const DATA_DIR = mkdtempSync(join(tmpdir(), "codegraph-status-data-"));
-const REPO_DIR = mkdtempSync(join(tmpdir(), "codegraph-status-repo-"));
+const DATA_DIR = mkdtempSync(join(tmpdir(), "sangkar-status-data-"));
+const REPO_DIR = mkdtempSync(join(tmpdir(), "sangkar-status-repo-"));
 const DB_PATH = join(DATA_DIR, "graph.db");
 const DB_BYTES = 2048;
 
@@ -58,7 +58,7 @@ const BASE_COMMIT = "bbdda4b9";
 
 const CONFIG = loadConfig({
   argv: ["--repo-root", REPO_DIR, "--data-dir", DATA_DIR],
-  env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+  env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
 });
 
 /** The nine fields every response carries, whatever its status (TOOLS-SPEC.md §1.1). */
@@ -235,7 +235,7 @@ function fakeReader(fixture: Fixture): GraphReader {
     allFiles: () => [...files],
     censusByLanguage: () => census,
     metaFor: () => ({
-      projectName: "codegraph",
+      projectName: "sangkar",
       projectRoot: REPO_DIR,
       generation,
       indexedAt: generation === null ? null : PUBLISHED_AT,
@@ -351,7 +351,7 @@ describe("status: complete coverage", () => {
     expect(env.totals).toEqual({ total_relation: "eq", paths_total: 1 });
 
     expect(payload.project).toEqual({
-      name: "codegraph",
+      name: "sangkar",
       root: REPO_DIR,
       commit: BASE_COMMIT,
       // Derived from `ctx.config.dataDir`: the reader deliberately exposes no database path.

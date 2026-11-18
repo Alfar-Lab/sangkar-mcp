@@ -18,7 +18,7 @@ import { runWorker } from "../src/indexer/worker";
  *
  * The corpus is a nested git checkout that the *root* repository ignores, so a `git status` in the
  * app's own repository proves nothing about it; the assertion runs git inside the corpus, where an
- * untracked `.codegraph/` or a rewritten fixture would show up.
+ * untracked `.sangkar/` or a rewritten fixture would show up.
  */
 
 const CORPUS = resolve(import.meta.dir, "..", "..", "code-review-graph");
@@ -62,7 +62,7 @@ afterAll(async () => {
 });
 
 beforeAll(async () => {
-  const dataDir = await mkdtemp(join(tmpdir(), "codegraph-integration-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "sangkar-integration-"));
   dirs.push(dataDir);
   const livePath = join(dataDir, "graph.db");
 
@@ -84,7 +84,7 @@ beforeAll(async () => {
       "SELECT path, reason FROM not_indexed ORDER BY path",
     ),
     corpusStatus: corpusStatus(),
-    corpusDataDir: existsSync(join(CORPUS, ".codegraph")),
+    corpusDataDir: existsSync(join(CORPUS, ".sangkar")),
   };
 
   // One stderr JSON line, so the progress log quotes real output rather than a passing assertion.

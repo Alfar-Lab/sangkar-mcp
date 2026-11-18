@@ -32,7 +32,7 @@ import { runWorker, WORKER_EXIT } from "../src/indexer/worker";
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
-const CLI_ENTRY = join(APP_ROOT, "bin", "codegraph.ts");
+const CLI_ENTRY = join(APP_ROOT, "bin", "sangkar.ts");
 
 /** `#shared/cursor` refuses anything under 32 bytes, so the fixture has to be realistic. */
 const CURSOR_KEY = "tools-smoke-test-cursor-key-0123456789";
@@ -249,10 +249,10 @@ async function openSession(options: {
     cwd: APP_ROOT,
     env: {
       ...process.env,
-      CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
+      SANGKAR_CURSOR_KEY: CURSOR_KEY,
       // The tree and the data dir are this process's own flags; these two are stated, not
       // inherited, so no harness setting can decide what this test proves.
-      CODEGRAPH_NO_WATCH: "1",
+      SANGKAR_NO_WATCH: "1",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -494,7 +494,7 @@ function publishedGeneration(): string {
 }
 
 beforeAll(async () => {
-  workspace = await mkdtemp(join(tmpdir(), "codegraph-tools-smoke-"));
+  workspace = await mkdtemp(join(tmpdir(), "sangkar-tools-smoke-"));
   const repoRoot = join(workspace, "repo");
   dataDir = join(workspace, "data");
   await mkdir(join(repoRoot, "src"), { recursive: true });
@@ -553,7 +553,7 @@ describe("the seven tools over MCP against a published generation", () => {
     const surface = server();
 
     expect({ server: surface.serverName, version: surface.protocolVersion }).toEqual({
-      server: "codegraph",
+      server: "sangkar",
       version: PROTOCOL_VERSION,
     });
     expect(surface.tools).toHaveLength(7);

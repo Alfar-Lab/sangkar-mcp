@@ -242,7 +242,7 @@ function fakeReader(options: FakeOptions = {}): GraphReader {
 
 const fakeConfig: AppConfig = loadConfig({
   argv: ["--repo-root", "/tmp/fake"],
-  env: { CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
+  env: { SANGKAR_CURSOR_KEY: "k".repeat(32) },
 });
 
 function fakeContext(options: FakeOptions = {}): ToolContext {

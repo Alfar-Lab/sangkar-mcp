@@ -30,7 +30,7 @@ import {
 const dirs: string[] = [];
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "codegraph-publish-"));
+  const dir = await mkdtemp(join(tmpdir(), "sangkar-publish-"));
   dirs.push(dir);
   return dir;
 }

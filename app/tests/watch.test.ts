@@ -76,7 +76,7 @@ interface Fixture {
 
 /** A temp working tree, plus the data dir the product would use — outside the tree by default. */
 async function fixture(files: Record<string, string> = {}): Promise<Fixture> {
-  const repoRoot = await mkdtemp(join(tmpdir(), "codegraph-watch-"));
+  const repoRoot = await mkdtemp(join(tmpdir(), "sangkar-watch-"));
   dirs.push(repoRoot);
   const sources: Record<string, string> = { "app.py": "def run():\n    return 1\n", ...files };
   for (const [path, content] of Object.entries(sources)) {
@@ -84,7 +84,7 @@ async function fixture(files: Record<string, string> = {}): Promise<Fixture> {
     await mkdir(dirname(absolute), { recursive: true });
     await writeFile(absolute, content, "utf8");
   }
-  return { repoRoot, dataDir: join(repoRoot, ".codegraph") };
+  return { repoRoot, dataDir: join(repoRoot, ".sangkar") };
 }
 
 interface Recorded {
@@ -187,9 +187,9 @@ describe("startWatch", () => {
     // The change was read through mtimes, because a plain temp directory is not a checkout.
     expect(handle.stats().detector).toBe("mtime");
     expect(call.target).toEqual({ repoRoot: repo.repoRoot, dataDir: repo.dataDir });
-    // The child is the CLI's worker mode: `bun run bin/codegraph.ts worker`.
+    // The child is the CLI's worker mode: `bun run bin/sangkar.ts worker`.
     expect(call.cmd[1]).toBe("run");
-    expect(call.cmd[2]?.endsWith("bin/codegraph.ts")).toBe(true);
+    expect(call.cmd[2]?.endsWith("bin/sangkar.ts")).toBe(true);
     expect(call.cmd[3]).toBe("worker");
 
     // The successful run adopts the observed state as the baseline, so nothing repeats.
@@ -379,6 +379,6 @@ describe("startWatch", () => {
     await sleep(150);
     expect(stub.calls.length).toBe(2);
     // The data dir keeps the checkout clean, so a worker run cannot feed itself back to the loop.
-    expect(resolve(repo.dataDir)).toBe(join(repo.repoRoot, ".codegraph"));
+    expect(resolve(repo.dataDir)).toBe(join(repo.repoRoot, ".sangkar"));
   });
 });

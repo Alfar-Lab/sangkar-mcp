@@ -32,7 +32,7 @@ import {
  * changed file.
  */
 
-const ROOT = mkdtempSync(join(tmpdir(), "codegraph-summary-"));
+const ROOT = mkdtempSync(join(tmpdir(), "sangkar-summary-"));
 const FIXTURE_PATH = "src/a.ts";
 const FIXTURE_BYTES = "export function alpha(): number {\n  return 1;\n}\n";
 
@@ -211,7 +211,7 @@ function contextWith(reader: GraphReader): ToolContext {
     now: () => new Date("2026-01-03T00:00:05Z"),
     config: loadConfig({
       argv: ["--repo-root", ROOT],
-      env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+      env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }

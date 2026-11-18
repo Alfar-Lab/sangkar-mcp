@@ -1,6 +1,6 @@
-# codegraph
+# sangkar
 
-A read-only MCP server over one repository's call graph, and the `cgraph` command that serves the
+A read-only MCP server over one repository's call graph, and the `sangkar` command that serves the
 same seven tools from a shell. It indexes the tree into a SQLite database and answers what changed,
 who calls what, what a change reaches, and what the index could not cover. The repository is bound
 at startup, so no tool takes a project argument.
@@ -13,26 +13,26 @@ cannot run it.
 ```sh
 cd app
 bun install
-bun link            # puts `cgraph` on PATH
+bun link            # puts `sangkar` on PATH
 ```
 
-`bun link` is the only global step: it registers `bin/codegraph.ts` as `cgraph` and touches nothing
+`bun link` is the only global step: it registers `bin/sangkar.ts` as `sangkar` and touches nothing
 else. Skip it and invoke the entry point directly, which is the same program:
 
 ```sh
-bun run bin/codegraph.ts status
+bun run bin/sangkar.ts status
 ```
 
 Installing creates no database and writes nothing outside `app/node_modules`.
 
 ## First run
 
-`cgraph index` is the bootstrap: the one command that builds the graph by itself, with no client
+`sangkar index` is the bootstrap: the one command that builds the graph by itself, with no client
 attached and no file change needed to start it.
 
 ```sh
 cd /path/to/repo
-cgraph index        # index the tree into <repo>/.codegraph/graph.db
+sangkar index        # index the tree into <repo>/.sangkar/graph.db
 ```
 
 It is the same work as the MCP `index` tool, with identical arguments. Until it has published once
@@ -42,32 +42,32 @@ and exits 0, because "no index yet" is the fact it exists to report. Once the gr
 answers:
 
 ```sh
-cgraph status
+sangkar status
 ```
 
 The repository is found by walking up from the current directory: the nearest ancestor holding
-`.codegraph`, else the nearest holding `.git`, else the current directory itself. `--repo-root`
+`.sangkar`, else the nearest holding `.git`, else the current directory itself. `--repo-root`
 states it explicitly, which is what a script should do:
 
 ```sh
-cgraph status --repo-root /path/to/repo
+sangkar status --repo-root /path/to/repo
 ```
 
 ## CLI usage
 
 ```sh
-cgraph <tool> [arguments] [global flags] — the name comes first
+sangkar <tool> [arguments] [global flags] — the name comes first
 ```
 
 | Example | What it does |
 |---|---|
-| `cgraph status` | The five human lines described below. |
-| `cgraph status --json` | The same answer as the envelope. |
-| `cgraph search 'handleRequest'` | Symbols matching a keyword. |
-| `cgraph trace 'db.write' --depth 1 --direction out` | Callees of one symbol, one hop. |
-| `cgraph impact` | What the working-tree diff reaches. |
-| `cgraph index --mode fast --force` | Force a fast re-index. |
-| `cgraph trace --help` | `trace`'s own usage, exit 0. |
+| `sangkar status` | The five human lines described below. |
+| `sangkar status --json` | The same answer as the envelope. |
+| `sangkar search 'handleRequest'` | Symbols matching a keyword. |
+| `sangkar trace 'db.write' --depth 1 --direction out` | Callees of one symbol, one hop. |
+| `sangkar impact` | What the working-tree diff reaches. |
+| `sangkar index --mode fast --force` | Force a fast re-index. |
+| `sangkar trace --help` | `trace`'s own usage, exit 0. |
 
 Output:
 
@@ -81,14 +81,14 @@ Output:
   `--help` are globals in the same sense. The name comes first — a global written before it is read
   as the tool name and refused with exit 2.
 - `--help` exits 0 with that tool's usage block, or, on a verb, the verb's own usage line:
-  `cgraph mcp --help`, `cgraph index --help`, `cgraph worker --help`. It is answered before any
+  `sangkar mcp --help`, `sangkar index --help`, `sangkar worker --help`. It is answered before any
   argument is checked, so it works with a required argument still missing.
-- `cgraph index` streams progress as JSON log lines on stderr and exits 0 once it publishes.
+- `sangkar index` streams progress as JSON log lines on stderr and exits 0 once it publishes.
   Nothing else reaches stdout.
 
 Exit codes, from the envelope's status: `0` for `ok`, `ambiguous` and `not_found` — a negative
 answer is still an answer — `1` for `error` and `bootstrapping`, and `2` for a usage refusal
-(unknown tool, unknown option, missing value, bad type). `cgraph index` has two of its own, because
+(unknown tool, unknown option, missing value, bad type). `sangkar index` has two of its own, because
 it is the worker rather than a tool call: `2` when nothing changed and there was nothing to publish,
 and `75` when another indexer holds the lock.
 
@@ -97,7 +97,7 @@ and `75` when another indexer holds the lock.
 The command a client registers as its stdio server:
 
 ```sh
-cgraph mcp --repo-root /path/to/repo
+sangkar mcp --repo-root /path/to/repo
 ```
 
 `--data-dir /path/to/dir` is the optional second flag. stdout carries the MCP protocol and nothing
@@ -116,7 +116,7 @@ else; diagnostics are JSON lines on stderr, one record per event.
 | `index` | Force a full or fast re-index, or repair a graph the watcher could not fix. Not for normal use. |
 
 Registered names are exactly these seven, in this order: no `_tool` suffix, no aliases, and no
-eighth name. MCP and the `cgraph` command publish the same surface; the instructions tell an agent
+eighth name. MCP and the `sangkar` command publish the same surface; the instructions tell an agent
 to call `index` only when `status` reports a broken graph.
 
 Six of the seven take an optional `budget` in tokens, defaulted per tool (`status` 800, `summary`
@@ -125,20 +125,20 @@ repair call has no payload worth paging. Above 32000 the call is refused with `b
 is a budget below the smallest size an answer can take, with a hint naming that floor — one refusal
 instead of a payload several times what you asked for.
 
-## `.codegraph`
+## `.sangkar`
 
 One directory per working tree, beside the code it describes:
 
 ```
-<repo>/.codegraph/graph.db          the graph
-<repo>/.codegraph/graph.db-wal      WAL sidecars, never committed
-<repo>/.codegraph/graph.db-shm
-<repo>/.codegraph/write.lock        single-writer flock, outside the database
-<repo>/.codegraph/.gitignore        a single `*`, written on first index
+<repo>/.sangkar/graph.db          the graph
+<repo>/.sangkar/graph.db-wal      WAL sidecars, never committed
+<repo>/.sangkar/graph.db-shm
+<repo>/.sangkar/write.lock        single-writer flock, outside the database
+<repo>/.sangkar/.gitignore        a single `*`, written on first index
 ```
 
 The data dir carries its own `.gitignore` holding one `*`, so git ignores everything inside without
-the repository's tracked `.gitignore` being edited. `.codegraph` is excluded from discovery the way
+the repository's tracked `.gitignore` being edited. `.sangkar` is excluded from discovery the way
 `.git` is — otherwise each index would index the previous database. One database belongs to one
 working tree, including a linked `git worktree`; the database answering the session is always
 reported at `status.payload.project.db_path`.
@@ -149,7 +149,7 @@ reported at `status.payload.project.db_path`.
 because the checkout is not always somewhere you can write:
 
 - **read-only mounts.** A source tree mounted read-only, an image layer, or a CI checkout cannot hold
-  `.codegraph/` at all. Indexing into a writable directory leaves the tree byte-for-byte untouched.
+  `.sangkar/` at all. Indexing into a writable directory leaves the tree byte-for-byte untouched.
 - **network filesystems.** SQLite needs working locks and a local filesystem for WAL; NFS, SMB, most
   FUSE mounts and synced folders do not provide that, and a half-checkpointed `graph.db-wal` is a
   corrupt graph. Keep the database on local disk and serve the tree over the mount.
@@ -163,8 +163,8 @@ Two settings remain, and both are read from the environment rather than a flag:
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `CODEGRAPH_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; when unset the process generates its own key, so cursors do not survive across invocations — set it to share cursors between processes |
-| `CODEGRAPH_NO_WATCH` | unset | any value stops the watcher; set by tests |
+| `SANGKAR_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; when unset the process generates its own key, so cursors do not survive across invocations — set it to share cursors between processes |
+| `SANGKAR_NO_WATCH` | unset | any value stops the watcher; set by tests |
 
 ## Distribution
 
@@ -188,14 +188,14 @@ Two facts about the standalone artifact today:
   `schema_too_new`. The working build command is:
 
   ```sh
-  bun build --compile bin/codegraph.ts \
+  bun build --compile bin/sangkar.ts \
     --asset "$PWD/src/shared/store/migrations" \
-    --outfile dist/codegraph
+    --outfile dist/sangkar
   ```
 
-  `bun run build` passes exactly this flag, so `dist/codegraph` can read and serve an index.
-  `dist/codegraph mcp --repo-root /path/to/repo` is the same command line the Bun install answers,
-  with the binary in place of `cgraph`, and `dist/codegraph status --repo-root /path/to/repo`
+  `bun run build` passes exactly this flag, so `dist/sangkar` can read and serve an index.
+  `dist/sangkar mcp --repo-root /path/to/repo` is the same command line the Bun install answers,
+  with the binary in place of `sangkar`, and `dist/sangkar status --repo-root /path/to/repo`
   answers from it too. `tests/binary-smoke.test.ts` builds and drives that artifact, which is the
   evidence the flag is required rather than merely tidy.
 - **Grammar WASM is not embedded.** Grammars load lazily from `web-tree-sitter` and

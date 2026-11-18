@@ -78,15 +78,15 @@ interface Build {
  * failure this test would otherwise spend its assertions discovering.
  */
 async function compile(): Promise<Build> {
-  const root = await mkdtemp(join(tmpdir(), "codegraph-binary-smoke-"));
-  const binary = join(root, "codegraph");
+  const root = await mkdtemp(join(tmpdir(), "sangkar-binary-smoke-"));
+  const binary = join(root, "sangkar");
   const started = performance.now();
   const proc = Bun.spawn({
     cmd: [
       process.execPath,
       "build",
       "--compile",
-      "bin/codegraph.ts",
+      "bin/sangkar.ts",
       "--asset",
       MIGRATIONS_DIR,
       "--outfile",
@@ -128,7 +128,7 @@ const build = await compile();
 
 interface Fixture {
   readonly repoRoot: string;
-  /** The data dir the server picks by default: `<repo>/.codegraph`. */
+  /** The data dir the server picks by default: `<repo>/.sangkar`. */
   readonly dataDir: string;
   /** What the worker published; the binary has to name it back. */
   readonly generation: string;
@@ -142,7 +142,7 @@ async function fixture(root: string): Promise<Fixture> {
   await writeFile(join(repoRoot, WIDGET), WIDGET_SOURCE, "utf8");
   await writeFile(join(repoRoot, CALLER), CALLER_SOURCE, "utf8");
 
-  const dataDir = join(repoRoot, ".codegraph");
+  const dataDir = join(repoRoot, ".sangkar");
   const code = await runWorker({ repoRoot, dataDir, force: false, mode: "full" });
   if (code !== 0) {
     throw new Error(`the worker exited ${code} over ${repoRoot}`);
@@ -216,8 +216,8 @@ async function session(fixture: Fixture): Promise<Session> {
     cwd: build.root,
     env: {
       ...process.env,
-      CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      CODEGRAPH_NO_WATCH: "1",
+      SANGKAR_CURSOR_KEY: CURSOR_KEY,
+      SANGKAR_NO_WATCH: "1",
     },
     stdin: "pipe",
     stdout: "pipe",
@@ -344,7 +344,7 @@ if (build.timedOut) {
         const initialized = run.responses[0]?.result as
           | { protocolVersion?: string; serverInfo?: { name?: string } }
           | undefined;
-        expect(initialized?.serverInfo?.name).toBe("codegraph");
+        expect(initialized?.serverInfo?.name).toBe("sangkar");
         expect(initialized?.protocolVersion).toBe(PROTOCOL_VERSION);
 
         // stdout is the protocol: two JSON objects, nothing else.

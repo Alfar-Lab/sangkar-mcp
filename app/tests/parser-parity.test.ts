@@ -153,7 +153,7 @@ afterAll(async () => {
 
 beforeAll(async () => {
   // The corpus is a read-only input: every byte the worker writes belongs in the temp data dir.
-  const dataDir = await mkdtemp(join(tmpdir(), "codegraph-parity-"));
+  const dataDir = await mkdtemp(join(tmpdir(), "sangkar-parity-"));
   dirs.push(dataDir);
   const livePath = join(dataDir, "graph.db");
 

@@ -334,7 +334,7 @@ function seed(writer: Conn): void {
 }
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), "codegraph-read-files-"));
+  const dir = mkdtempSync(join(tmpdir(), "sangkar-read-files-"));
   dirs.push(dir);
   const path = join(dir, "graph.db");
   const writer = openWriter(path);
@@ -553,7 +553,7 @@ describe("read/context", () => {
 
   const fakeConfig: AppConfig = loadConfig({
     argv: ["--repo-root", "/tmp/fake"],
-    env: { CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
+    env: { SANGKAR_CURSOR_KEY: "k".repeat(32) },
   });
 
   const fakeContext: ToolContext = {

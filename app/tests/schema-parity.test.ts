@@ -134,7 +134,7 @@ interface IndexShape {
 const tempDirs: string[] = [];
 
 function openTempDb(): Database {
-  const dir = mkdtempSync(join(tmpdir(), "codegraph-schema-"));
+  const dir = mkdtempSync(join(tmpdir(), "sangkar-schema-"));
   tempDirs.push(dir);
   return new Database(join(dir, "graph.db"));
 }

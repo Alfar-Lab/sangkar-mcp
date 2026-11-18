@@ -33,7 +33,7 @@ import type {
  * the end, so a reason that stops being reachable fails a test instead of quietly disappearing.
  */
 
-const ROOT = mkdtempSync(join(tmpdir(), "codegraph-freshness-"));
+const ROOT = mkdtempSync(join(tmpdir(), "sangkar-freshness-"));
 
 afterAll(() => {
   rmSync(ROOT, { recursive: true, force: true });
@@ -136,7 +136,7 @@ function fakeReader(fixture: Fixture): GraphReader {
     allFiles: () => [...rows],
     censusByLanguage: () => [],
     metaFor: (): GraphMeta => ({
-      projectName: "codegraph",
+      projectName: "sangkar",
       projectRoot: fixture.projectRoot === undefined ? fixture.root : fixture.projectRoot,
       generation,
       indexedAt: fixture.indexedAt === undefined ? STALE_PUBLISH : fixture.indexedAt,

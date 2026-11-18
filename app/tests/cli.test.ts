@@ -7,7 +7,7 @@ import { ENVELOPE_STATUSES, type Envelope } from "#shared/envelope";
 import { TOOL_NAMES } from "#shared/instructions";
 
 /**
- * `cgraph <tool>` end to end (`TECH-SPEC.md` §11): the shipped command is spawned as a child
+ * `sangkar <tool>` end to end (`TECH-SPEC.md` §11): the shipped command is spawned as a child
  * process, so what is proven is the executable path a user actually runs — the shebang entry, the
  * lazy import of the root, the argv grammar, autodetect and the exit code — instead of a handler
  * called with an injected context.
@@ -15,23 +15,23 @@ import { TOOL_NAMES } from "#shared/instructions";
  * Four properties justify the shape of the file:
  *
  * - **The bootstrap is the CLI's own.** A fresh tree has no store for a tool call to answer from, so
- *   `cgraph index --mode full` must create `repo/.codegraph/graph.db`; indexing through the imported
+ *   `sangkar index --mode full` must create `repo/.sangkar/graph.db`; indexing through the imported
  *   `runWorker` would prove the worker, not the command under test.
- * - **No setting is inherited.** `cleanEnv()` deletes every `CODEGRAPH_*` key, so nothing can pass
+ * - **No setting is inherited.** `cleanEnv()` deletes every `SANGKAR_*` key, so nothing can pass
  *   because this machine happened to export one: the tree is found by autodetect, the data dir by
- *   the `.codegraph` convention, and nothing is configured out of band.
+ *   the `.sangkar` convention, and nothing is configured out of band.
  * - **stdout belongs to the payload.** A tool answer is exactly one JSON document closed by one
  *   newline, or the five human `status` lines; a usage refusal writes nothing to stdout at all.
  *   Diagnostics are stderr.
  * - **The fixture is a temp tree with no `.git`.** Autodetect therefore has to fall back to the
- *   `.codegraph` directory the index creates — the property the nested-directory case exists for.
+ *   `.sangkar` directory the index creates — the property the nested-directory case exists for.
  *
  * Every spawn gets a 120 s budget: the first index loads tree-sitter grammars and writes a real
  * database, and a wedge should fail as a timeout rather than hang the suite.
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
-const CLI_ENTRY = join(APP_ROOT, "bin", "codegraph.ts");
+const CLI_ENTRY = join(APP_ROOT, "bin", "sangkar.ts");
 
 /** Generous for a cold index and three handshakes; short enough that a wedge is a failure. */
 const RUN_TIMEOUT_MS = 120_000;
@@ -77,7 +77,7 @@ interface Run {
 function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
-    if (key.startsWith("CODEGRAPH_") || value === undefined) {
+    if (key.startsWith("SANGKAR_") || value === undefined) {
       continue;
     }
     env[key] = value;
@@ -141,10 +141,10 @@ let repo = "";
 let elsewhere = "";
 let bootstrap: Run | null = null;
 
-const dbPath = (): string => join(repo, ".codegraph", "graph.db");
+const dbPath = (): string => join(repo, ".sangkar", "graph.db");
 
 beforeAll(async () => {
-  root = await mkdtemp(join(tmpdir(), "codegraph-cli-"));
+  root = await mkdtemp(join(tmpdir(), "sangkar-cli-"));
   repo = join(root, "repo");
   elsewhere = join(root, "elsewhere");
   await mkdir(elsewhere, { recursive: true });
@@ -161,7 +161,7 @@ afterAll(async () => {
   await rm(root, { recursive: true, force: true });
 });
 
-describe("cgraph CLI", () => {
+describe("sangkar CLI", () => {
   test(
     "index bootstraps a fresh tree and creates the first database",
     () => {
@@ -169,7 +169,7 @@ describe("cgraph CLI", () => {
       if (run === null) {
         throw new Error("the bootstrap run never started");
       }
-      expectExit(run, 0, "cgraph index");
+      expectExit(run, 0, "sangkar index");
       expect(run.stdout).toBe("");
       expect(existsSync(join(repo, ".git"))).toBe(false);
       expect(existsSync(dbPath())).toBe(true);
@@ -192,7 +192,7 @@ describe("cgraph CLI", () => {
     "status prints the five human lines and no JSON",
     async () => {
       const run = await spawnCli(["status"], repo);
-      expectExit(run, 0, "cgraph status");
+      expectExit(run, 0, "sangkar status");
       const lines = run.stdout.replace(/\n+$/, "").split("\n");
       expect(lines).toHaveLength(5);
       expect(lines[0]).toMatch(/^(ok|ambiguous|not_found|error|bootstrapping): /);
@@ -261,7 +261,7 @@ describe("cgraph CLI", () => {
     "a global flag before the tool name is a usage error",
     async () => {
       const run = await spawnCli(["--repo-root", repo, "status"], elsewhere);
-      expectExit(run, 2, "cgraph --repo-root X status");
+      expectExit(run, 2, "sangkar --repo-root X status");
       expect(run.stdout).toBe("");
       expect(run.stderr.length).toBeGreaterThan(0);
     },
@@ -272,7 +272,7 @@ describe("cgraph CLI", () => {
     "an unknown tool name exits 2 with nothing on stdout",
     async () => {
       const run = await spawnCli(["nonsense"], repo);
-      expectExit(run, 2, "cgraph nonsense");
+      expectExit(run, 2, "sangkar nonsense");
       expect(run.stdout).toBe("");
       expect(run.stderr).toContain("nonsense");
     },
@@ -283,7 +283,7 @@ describe("cgraph CLI", () => {
     "trace without its positional exits 2 and names the required argument",
     async () => {
       const run = await spawnCli(["trace"], repo);
-      expectExit(run, 2, "cgraph trace");
+      expectExit(run, 2, "sangkar trace");
       expect(run.stdout).toBe("");
       expect(run.stderr).toContain("trace is missing the required argument");
       expect(run.stderr).toContain("query");
@@ -295,7 +295,7 @@ describe("cgraph CLI", () => {
     "a bare positional for a tool that takes none exits 2",
     async () => {
       const run = await spawnCli(["status", "extra-token"], repo);
-      expectExit(run, 2, "cgraph status extra-token");
+      expectExit(run, 2, "sangkar status extra-token");
       expect(run.stdout).toBe("");
       expect(run.stderr).toContain("extra-token");
     },
@@ -306,7 +306,7 @@ describe("cgraph CLI", () => {
     "--help lists the verbs, the seven tool names and the global flags",
     async () => {
       const run = await spawnCli(["--help"], root);
-      expectExit(run, 0, "cgraph --help");
+      expectExit(run, 0, "sangkar --help");
       for (const name of TOOL_NAMES) {
         expect(run.stdout).toContain(name);
       }
@@ -322,7 +322,7 @@ describe("cgraph CLI", () => {
     "trace --help prints its own usage and creates nothing",
     async () => {
       const run = await spawnCli(["trace", "--help"], elsewhere);
-      expectExit(run, 0, "cgraph trace --help");
+      expectExit(run, 0, "sangkar trace --help");
       expect(run.stdout).toContain("query");
       expect(run.stdout).toContain("depth");
     },
@@ -334,7 +334,7 @@ describe("cgraph CLI", () => {
     async () => {
       const dataDir = join(root, "help-data");
       const run = await spawnCli(["index", "--help", "--data-dir", dataDir], elsewhere);
-      expectExit(run, 0, "cgraph index --help");
+      expectExit(run, 0, "sangkar index --help");
       expect(run.stdout).toContain("--mode");
       expect(existsSync(dataDir)).toBe(false);
     },

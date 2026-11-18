@@ -41,8 +41,8 @@ function spec(summary: string): EnvelopeSpec {
 /** The payload `status` produces, field for field, so the wording can be compared as text. */
 const STATUS_PAYLOAD = {
   project: {
-    name: "codegraph-mcp",
-    root: "/src/codegraph-mcp",
+    name: "sangkar-mcp",
+    root: "/src/sangkar-mcp",
     commit: "ce28fe2",
     db_path: "/data/graph.db",
   },
@@ -108,7 +108,7 @@ describe("statusLines: the runStatus wording", () => {
     expect(statusLines(statusEnvelope())).toBe(
       [
         `ok: ${SUMMARY}`,
-        `project  codegraph-mcp (/src/codegraph-mcp)`,
+        `project  sangkar-mcp (/src/sangkar-mcp)`,
         `database /data/graph.db`,
         `graph    530 nodes, 1188 edges, 1234567 bytes`,
         `health   idle, 0 consecutive failures`,

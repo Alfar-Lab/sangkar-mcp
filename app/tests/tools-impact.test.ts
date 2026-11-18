@@ -257,7 +257,7 @@ function contextOf(reader: GraphReader, repoRoot: string): ToolContext {
     now: () => CHECKED_AT,
     config: loadConfig({
       argv: ["--repo-root", repoRoot],
-      env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+      env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }
@@ -329,7 +329,7 @@ function git(root: string, ...args: readonly string[]): void {
 }
 
 function gitRepo(): string {
-  const root = tempDir("codegraph-impact-git-");
+  const root = tempDir("sangkar-impact-git-");
   write(root, "src/a.ts", TS_A);
   write(root, "README.md", README);
   git(root, "init", "-q", "-b", "main");

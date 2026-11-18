@@ -11,7 +11,7 @@ export {};
 const RESERVED = ["mcp", "worker", "index"] as const;
 type Reserved = (typeof RESERVED)[number];
 
-const USAGE = `cgraph <name> [arguments] [global flags] — the name comes first.
+const USAGE = `sangkar <name> [arguments] [global flags] — the name comes first.
 
 verbs
   mcp     MCP server on stdio (default): the tool surface a client talks to
@@ -33,19 +33,19 @@ global flags (on either side of the name)
   --json              print the envelope instead of human lines
 
 examples
-  cgraph trace 'handleRequest' --depth 1
-  cgraph mcp --repo-root /path/to/repo
+  sangkar trace 'handleRequest' --depth 1
+  sangkar mcp --repo-root /path/to/repo
 
-cgraph index is how the first index is created; until then every tool answers bootstrapping.
+sangkar index is how the first index is created; until then every tool answers bootstrapping.
 `;
 
 const WORKER_FLAGS = "[--mode full|fast] [--force] [--repo-root <path>] [--data-dir <path>]";
 
 /** One verb's own flags; `--help` on a verb prints this and exits without running anything. */
 const VERB_USAGE: Readonly<Record<Reserved, string>> = {
-  mcp: "usage: cgraph mcp [--repo-root <path>] [--data-dir <path>]",
-  worker: `usage: cgraph worker ${WORKER_FLAGS}`,
-  index: `usage: cgraph index ${WORKER_FLAGS}`,
+  mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>]",
+  worker: `usage: sangkar worker ${WORKER_FLAGS}`,
+  index: `usage: sangkar index ${WORKER_FLAGS}`,
 };
 
 function isReserved(value: string): value is Reserved {
@@ -60,7 +60,7 @@ if (requested === "--help" || requested === "-h" || requested === "help") {
   process.exit(0);
 }
 
-// Answered before anything runs: `cgraph index --help` must not start an index run.
+// Answered before anything runs: `sangkar index --help` must not start an index run.
 if (isReserved(requested) && (argv.includes("--help") || argv.includes("-h"))) {
   process.stdout.write(`${VERB_USAGE[requested]}\n`);
   process.exit(0);

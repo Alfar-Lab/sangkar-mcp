@@ -247,7 +247,7 @@ function seed(writer: Conn): void {
 }
 
 beforeAll(() => {
-  const dir = mkdtempSync(join(tmpdir(), "codegraph-read-"));
+  const dir = mkdtempSync(join(tmpdir(), "sangkar-read-"));
   dirs.push(dir);
   const path = join(dir, "graph.db");
   const writer = openWriter(path);

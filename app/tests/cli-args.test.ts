@@ -18,7 +18,7 @@ import { input as summaryInput } from "../src/tools/summary/manifest";
 import { input as traceInput } from "../src/tools/trace/manifest";
 
 /**
- * The CLI parser is one contract with two callers — a future `cgraph <tool>` command and the MCP
+ * The CLI parser is one contract with two callers — a future `sangkar <tool>` command and the MCP
  * surface — so these tests read the real manifests rather than a fixture. A field added to a tool
  * without teaching the parser about it fails here.
  */
@@ -273,7 +273,7 @@ describe("cli args: usage", () => {
     for (const [tool, input] of MANIFESTS) {
       const usage = usageOf(tool, input);
       const lines = usage.split("\n");
-      expect(lines[0]?.startsWith(`cgraph ${tool}`)).toBe(true);
+      expect(lines[0]?.startsWith(`sangkar ${tool}`)).toBe(true);
       expect(lines.length).toBe(Object.keys(input).length + 2);
       expect(lines.at(-1)).toBe("global options: --repo-root <path>, --data-dir <path>, --json");
       for (const name of Object.keys(input)) {
@@ -283,11 +283,11 @@ describe("cli args: usage", () => {
   });
 
   test("the header names the positional the command accepts", () => {
-    expect(usageOf("trace", traceInput).split("\n")[0]).toBe("cgraph trace [<query>] [options]");
+    expect(usageOf("trace", traceInput).split("\n")[0]).toBe("sangkar trace [<query>] [options]");
     expect(usageOf("expand", expandInput).split("\n")[0]).toBe(
-      "cgraph expand [<target>] [options]",
+      "sangkar expand [<target>] [options]",
     );
-    expect(usageOf("status", statusInput).split("\n")[0]).toBe("cgraph status [options]");
+    expect(usageOf("status", statusInput).split("\n")[0]).toBe("sangkar status [options]");
   });
 
   test("a required field is marked and a description is reproduced", () => {

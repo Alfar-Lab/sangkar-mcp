@@ -99,7 +99,7 @@ const DB_FILE = "graph.db";
  * not import `app/package.json` — `tests/boundary.test.ts` confines its imports to `#shared/*`, the
  * indexer and the tool modules — and a second copy of the version is cheaper than a boundary hole.
  */
-const SERVER_NAME = "codegraph";
+const SERVER_NAME = "sangkar";
 const SERVER_VERSION = "0.1.0";
 
 /**
@@ -265,7 +265,7 @@ function guardRoot(recorded: string | null, repoRoot: string, dbPath: string): R
       "wrong_project_db",
       `the graph at ${dbPath} belongs to ${recorded}, not ${repoRoot}`,
       {
-        hint: "point --data-dir at this tree's own .codegraph directory",
+        hint: "point --data-dir at this tree's own .sangkar directory",
       },
     ),
   };
@@ -282,7 +282,7 @@ function refusalOf(error: unknown): AppError {
     return error;
   }
   return new AppError("internal", `the graph could not be opened: ${messageOf(error)}`, {
-    hint: "run `cgraph index` to rebuild it",
+    hint: "run `sangkar index` to rebuild it",
   });
 }
 
@@ -323,7 +323,7 @@ function openStore(config: AppConfig): Store {
         "schema_too_new",
         `the graph at ${dbPath} is schema v${found}; this build ships v${shipped}`,
         {
-          hint: "upgrade the server, or move the data dir aside and re-index with `cgraph index`",
+          hint: "upgrade the server, or move the data dir aside and re-index with `sangkar index`",
         },
       );
       conn.close();
@@ -587,13 +587,13 @@ function pendingCalls(): { begin(): void; end(): void; settled(): Promise<void> 
 }
 
 /**
- * `CODEGRAPH_NO_WATCH` is read here rather than in `#shared/config` because it is not a tool setting:
+ * `SANGKAR_NO_WATCH` is read here rather than in `#shared/config` because it is not a tool setting:
  * it decides whether *this process* owns a poller, which is the root's business alone. Unset (or
  * empty) means watch; any other value disables the watcher, so a test harness and a supervised
  * deployment both have a switch that cannot be mistaken for a preference.
  */
 function watcherDisabled(env: Record<string, string | undefined>): boolean {
-  const raw = env.CODEGRAPH_NO_WATCH;
+  const raw = env.SANGKAR_NO_WATCH;
   return raw !== undefined && raw !== "";
 }
 
@@ -690,7 +690,7 @@ async function runTool(name: string, argv: readonly string[], config: AppConfig)
   if (tool === undefined) {
     // Unreachable through `main`, which resolves the name first; kept so this function's contract
     // does not depend on its caller having done the lookup.
-    process.stderr.write(`cgraph: unknown tool "${name}"\n`);
+    process.stderr.write(`sangkar: unknown tool "${name}"\n`);
     return EXIT_USAGE;
   }
 
@@ -772,7 +772,7 @@ async function runTool(name: string, argv: readonly string[], config: AppConfig)
 }
 
 /**
- * The one entry `bin/codegraph.ts` calls. Every mode resolves the same config first, so the tree and
+ * The one entry `bin/sangkar.ts` calls. Every mode resolves the same config first, so the tree and
  * the data dir are decided in exactly one place, and a start-up failure is a logged exit 2 rather
  * than an exception the CLI would print to stdout.
  *
@@ -794,7 +794,7 @@ export async function main(mode: string, argv: string[]): Promise<number> {
     }
     const tool = TOOLS.find((candidate) => candidate.name === mode);
     if (tool === undefined) {
-      process.stderr.write(`cgraph: unknown tool "${mode}"\n`);
+      process.stderr.write(`sangkar: unknown tool "${mode}"\n`);
       return EXIT_USAGE;
     }
     return await runTool(tool.name, argv.slice(1), config);

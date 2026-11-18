@@ -107,7 +107,7 @@ function leftovers(dir: string): string[] {
  * re-derive it.
  */
 async function publishGraph(): Promise<Run> {
-  const dir = await mkdtemp(join(tmpdir(), "codegraph-smoke-"));
+  const dir = await mkdtemp(join(tmpdir(), "sangkar-smoke-"));
   const livePath = join(dir, "graph.db");
   const { first, second } = buildLive(livePath);
 

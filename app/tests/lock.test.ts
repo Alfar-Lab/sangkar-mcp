@@ -32,7 +32,7 @@ const dirs: string[] = [];
 const handles: Conn[] = [];
 
 async function tempDir(): Promise<string> {
-  const dir = await mkdtemp(join(tmpdir(), "codegraph-lock-"));
+  const dir = await mkdtemp(join(tmpdir(), "sangkar-lock-"));
   dirs.push(dir);
   return dir;
 }

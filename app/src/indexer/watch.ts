@@ -9,7 +9,7 @@
  * Why the worker is a child and never an import: the writer is one process (TECH-SPEC §8). A
  * parser panic in a WASM grammar has to kill a child, not the MCP session, and the write lock is
  * only meaningful if a second process can contend for it. So this module reads the tree and spawns
- * `bin/codegraph.ts worker`; it never opens `graph.db`, never takes the lock and never imports the
+ * `bin/sangkar.ts worker`; it never opens `graph.db`, never takes the lock and never imports the
  * writer module.
  *
  * What the signature contains, and why it is not the same everywhere: in a git checkout it is HEAD
@@ -54,7 +54,7 @@ const GIT_TIMEOUT_MS = 10_000;
 const KILL_GRACE_MS = 5_000;
 
 /** The CLI's own dispatch is the process boundary: `bun run <bin> worker`. */
-const BIN_PATH = resolve(import.meta.dir, "../../bin/codegraph.ts");
+const BIN_PATH = resolve(import.meta.dir, "../../bin/sangkar.ts");
 
 /** `WORKER_EXIT` in `./worker`, restated: 75 is `EX_TEMPFAIL`, "another indexer holds the lock". */
 const EXIT_PUBLISHED = 0;
@@ -99,7 +99,7 @@ export interface WatchOptions {
   readonly intervalMs?: number;
   /** Quiet window after a change before polling again; defaults to {@link DEFAULT_DEBOUNCE_MS}. */
   readonly debounceMs?: number;
-  /** Injected by tests; the default spawns `bin/codegraph.ts worker`. */
+  /** Injected by tests; the default spawns `bin/sangkar.ts worker`. */
   readonly spawn?: SpawnWorker;
   /** Called once per spawn, before the child's exit is awaited. */
   readonly onSpawn?: (notice: SpawnNotice) => void;
@@ -338,7 +338,7 @@ function spawnCliWorker(cmd: readonly string[], target: SpawnTarget): WatchChild
     cmd: [...cmd, "--repo-root", target.repoRoot, "--data-dir", target.dataDir],
     cwd: target.repoRoot,
     // The rest of the parent environment is inherited only for `PATH`: the child shells out to
-    // `git`, and no `CODEGRAPH_*` setting travels this way any more.
+    // `git`, and no `SANGKAR_*` setting travels this way any more.
     env: { ...process.env },
     stdin: "ignore",
     // stdout carries the MCP protocol (§11): a child that inherited it could corrupt the session.

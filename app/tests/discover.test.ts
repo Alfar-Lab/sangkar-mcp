@@ -16,7 +16,7 @@ import { ALWAYS_EXCLUDED, discover, SIZE_CAP_BYTES } from "../src/indexer/discov
 
 const dirs: string[] = [];
 
-async function tempRepo(prefix = "codegraph-discover-"): Promise<string> {
+async function tempRepo(prefix = "sangkar-discover-"): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), prefix));
   dirs.push(dir);
   return dir;
@@ -33,7 +33,7 @@ const BINARY_BYTES = Buffer.from([0x63, 0x6f, 0x64, 0x65, 0x00, 0x01, 0x02, 0x00
 
 async function seedFixture(repoRoot: string): Promise<void> {
   await writeFile(join(repoRoot, ".gitignore"), "ignored.ts\nbuild/\n");
-  await writeFile(join(repoRoot, ".codegraphignore"), "generated/\n");
+  await writeFile(join(repoRoot, ".sangkarignore"), "generated/\n");
 
   await writeFile(join(repoRoot, "keep.ts"), "export const kept = 1;\n");
   await writeFile(join(repoRoot, "ignored.ts"), "export const hidden = 2;\n");

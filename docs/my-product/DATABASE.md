@@ -19,7 +19,7 @@ Six decisions, each traceable to a measurement or a design contract.
 | **Whole-file generation, published by rename** | per-row `generation` column | the DB file *is* the generation, atomically swapped. Stamping 14 k nodes and 130 k edges with an epoch doubles write volume to express a fact the file boundary already states |
 | **`unresolved` in its own table** | CRG's dangling edge + `UNRESOLVED` tier; CBM's candidate sidecar | absence semantics (`DESIGN.md` §6) needs four distinct outcomes. A dangling edge cannot answer "I did not look there" |
 | **No `folder` table** | materialised directory tree | a BINARY index on `file.path` serves prefix ranges (`path >= 'a/b/' AND path < 'a/b0'`). A folder table would need maintenance on every publish for one query shape |
-| **Database inside the project (`.codegraph/`)**, not a shared cache | one cache dir keyed by project name + a registry | the file beside the code *is* the project identity, so no registry and no `project` argument exist. CBM spent **12.4 % of its calls on `list_projects`** re-discovering a path slug, and a deleted repo leaves an orphan in a cache. Costs and mitigations in §3.0 |
+| **Database inside the project (`.sangkar/`)**, not a shared cache | one cache dir keyed by project name + a registry | the file beside the code *is* the project identity, so no registry and no `project` argument exist. CBM spent **12.4 % of its calls on `list_projects`** re-discovering a path slug, and a deleted repo leaves an orphan in a cache. Costs and mitigations in §3.0 |
 | **Denormalised `node_metrics`** | degree computed from `edges` per query | `search` returns `degree{in,out}` for every hit; `summary(repo)` needs hotspots; risk needs `is_entry` and `tested_depth`. N+1 scans of a 130 k-edge table per hit is the alternative |
 | **No source text in the DB** | CRG/CBM both keep source-adjacent text | `expand(what="source")` reads the file from disk, and `file.sha256` already tells us whether the copy is current. Measured demand for source-in-payload was ~0 |
 
@@ -143,27 +143,27 @@ erDiagram
 One database file per project, **inside the project directory**:
 
 ```
-<repo-root>/.codegraph/graph.db        <- default
-<repo-root>/.codegraph/graph.db-wal    <- WAL sidecars, never committed
-<repo-root>/.codegraph/graph.db-shm
-<repo-root>/.codegraph/write.lock      <- single-writer flock, outside the DB
-<repo-root>/.codegraph/.gitignore      <- a single `*`, written on first index
+<repo-root>/.sangkar/graph.db        <- default
+<repo-root>/.sangkar/graph.db-wal    <- WAL sidecars, never committed
+<repo-root>/.sangkar/graph.db-shm
+<repo-root>/.sangkar/write.lock      <- single-writer flock, outside the DB
+<repo-root>/.sangkar/.gitignore      <- a single `*`, written on first index
 ```
 
-Resolution order: `<root>/.codegraph/` → `--data-dir <path>`. A relative `--data-dir` resolves against
+Resolution order: `<root>/.sangkar/` → `--data-dir <path>`. A relative `--data-dir` resolves against
 the repo root, which is `--repo-root` when given and otherwise the nearest ancestor of the working
-directory holding `.codegraph/`, then the nearest holding `.git`, then the working directory itself.
+directory holding `.sangkar/`, then the nearest holding `.git`, then the working directory itself.
 
 Rules:
 
-1. **Never modify a tracked file to make the directory ignored.** `.codegraph/.gitignore` containing one
+1. **Never modify a tracked file to make the directory ignored.** `.sangkar/.gitignore` containing one
    `*` makes git ignore everything inside without touching the repo's own `.gitignore`. (CRG converges on
    exactly this: one `*` line inside its own data-directory `.gitignore`, never an edit to the tracked one.)
-2. **`.codegraph/` is excluded from discovery**, alongside `.git`. Forgetting this means indexing your own
+2. **`.sangkar/` is excluded from discovery**, alongside `.git`. Forgetting this means indexing your own
    database, which grows every run.
 3. **Refuse to run on a filesystem where WAL cannot work** (NFS, SMB, most FUSE, synced folders). Detect
    at startup and fail with a message that names `--data-dir`, rather than corrupting a `-wal` file.
-4. **One database per working tree.** A linked `git worktree` gets its own `.codegraph/`, because its
+4. **One database per working tree.** A linked `git worktree` gets its own `.sangkar/`, because its
    files really are different; the answering database is always reported in
    `status.payload.project.db_path`.
 
@@ -611,11 +611,11 @@ neighbourhood**; recompute `reachable_count` only on full publish (it is a cold-
    cache dir would bring back CBM's `project` parameter and its 18 `list_projects` calls.
 5. **`node_metrics.reachable_count` scope.** Only entry points get it. If `summary(area)` wants per-area
    reachability later, this becomes an area-keyed table — not a per-node column.
-6. **Linked worktrees.** Each worktree now gets its own `.codegraph/` (§3.0 rule 4), so N worktrees cost
+6. **Linked worktrees.** Each worktree now gets its own `.sangkar/` (§3.0 rule 4), so N worktrees cost
    N × ~24 MB and `reachable_count` is computed N times. Acceptable for 1–3 worktrees; if it bites, the
    alternatives are a shared DB in `$(git rev-parse --git-common-dir)` with a branch-scoped generation
    table, or a cache-dir override for worktrees only. Do not optimise before it is measured.
-7. **`.codegraph/` directory name.** Fixed for now. Renaming later means a one-time migration that finds
+7. **`.sangkar/` directory name.** Fixed for now. Renaming later means a one-time migration that finds
    the old directory — cheap now, awkward after release.
 8. **Database size inside the tree.** ~24 MB estimated, versus CRG's measured 198 MB in the same place.
    If a real index exceeds ~2 % of repository size, `status.health` should say so rather than leaving it to

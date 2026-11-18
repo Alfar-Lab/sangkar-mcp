@@ -8,7 +8,7 @@ import { CURSOR_KEY_MIN_BYTES } from "#shared/cursor";
 /**
  * Configuration is decided by the command line and the working directory, so every case here is a
  * `mkdtemp` tree with the markers the autodetect walk looks for. Nothing points at this
- * repository's own `.codegraph`, and the environment variables that used to carry the repo root,
+ * repository's own `.sangkar`, and the environment variables that used to carry the repo root,
  * the data dir and the profile are asserted to be inert.
  */
 
@@ -23,7 +23,7 @@ function tempDir(prefix: string): string {
 /** A tree the autodetect walk stops at, marked the way the product marks it. */
 function repoWithDataDir(prefix: string): string {
   const root = tempDir(prefix);
-  mkdirSync(join(root, ".codegraph"), { recursive: true });
+  mkdirSync(join(root, ".sangkar"), { recursive: true });
   return root;
 }
 
@@ -69,38 +69,38 @@ describe("flagValue", () => {
 });
 
 describe("detectRepoRoot", () => {
-  test("finds the nearest .codegraph from a nested subdirectory", () => {
-    const root = repoWithDataDir("cgraph-detect-data-");
+  test("finds the nearest .sangkar from a nested subdirectory", () => {
+    const root = repoWithDataDir("sangkar-detect-data-");
     const deep = nested(root, "src", "shared", "store");
     expect(detectRepoRoot(deep)).toBe(root);
   });
 
-  test("falls back to .git when no .codegraph exists, and prefers .codegraph over .git", () => {
-    const gitRepo = repoWithGitDir("cgraph-detect-git-");
+  test("falls back to .git when no .sangkar exists, and prefers .sangkar over .git", () => {
+    const gitRepo = repoWithGitDir("sangkar-detect-git-");
     expect(detectRepoRoot(nested(gitRepo, "src"))).toBe(gitRepo);
 
-    const both = tempDir("cgraph-detect-both-");
+    const both = tempDir("sangkar-detect-both-");
     mkdirSync(join(both, ".git"), { recursive: true });
-    mkdirSync(join(both, ".codegraph"), { recursive: true });
+    mkdirSync(join(both, ".sangkar"), { recursive: true });
     expect(detectRepoRoot(nested(both, "src"))).toBe(both);
   });
 
   test("accepts .git as a file, as a linked worktree has", () => {
-    const worktree = tempDir("cgraph-detect-worktree-");
+    const worktree = tempDir("sangkar-detect-worktree-");
     writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
     expect(detectRepoRoot(nested(worktree, "src"))).toBe(worktree);
   });
 
   test("returns the directory itself when nothing matches", () => {
-    const bare = tempDir("cgraph-detect-bare-");
+    const bare = tempDir("sangkar-detect-bare-");
     expect(detectRepoRoot(bare)).toBe(resolve(bare));
   });
 });
 
 describe("loadConfig", () => {
   test("--repo-root wins over the autodetected tree", () => {
-    const autodetected = repoWithDataDir("cgraph-config-auto-");
-    const chosen = tempDir("cgraph-config-chosen-");
+    const autodetected = repoWithDataDir("sangkar-config-auto-");
+    const chosen = tempDir("sangkar-config-chosen-");
     const nestedDir = nested(autodetected, "src");
 
     // Sanity: without the flag the walk would land on `autodetected`.
@@ -108,11 +108,11 @@ describe("loadConfig", () => {
 
     const config = loadConfig({ argv: ["status", "--repo-root", chosen], cwd: nestedDir });
     expect(config.repoRoot).toBe(chosen);
-    expect(config.dataDir).toBe(join(chosen, ".codegraph"));
+    expect(config.dataDir).toBe(join(chosen, ".sangkar"));
   });
 
   test("--repo-root=value works and a relative value resolves against cwd", () => {
-    const parent = tempDir("cgraph-config-parent-");
+    const parent = tempDir("sangkar-config-parent-");
     const child = nested(parent, "child");
     const config = loadConfig({ argv: [`--repo-root=${child}`], cwd: parent });
     expect(config.repoRoot).toBe(child);
@@ -122,7 +122,7 @@ describe("loadConfig", () => {
   });
 
   test("a flag placed after another token is still applied", () => {
-    const chosen = tempDir("cgraph-config-trailing-");
+    const chosen = tempDir("sangkar-config-trailing-");
     const bare = loadConfig({
       argv: ["index", "some-token", "--repo-root", chosen],
       cwd: tmpdir(),
@@ -137,21 +137,21 @@ describe("loadConfig", () => {
   });
 
   test("autodetects the tree from a nested cwd and puts the data dir inside it", () => {
-    const root = repoWithDataDir("cgraph-config-nested-");
+    const root = repoWithDataDir("sangkar-config-nested-");
     const config = loadConfig({ argv: [], cwd: nested(root, "app", "src") });
     expect(config.repoRoot).toBe(root);
-    expect(config.dataDir).toBe(join(root, ".codegraph"));
+    expect(config.dataDir).toBe(join(root, ".sangkar"));
   });
 
   test("falls back to cwd in a bare directory", () => {
-    const bare = tempDir("cgraph-config-bare-");
+    const bare = tempDir("sangkar-config-bare-");
     const config = loadConfig({ env: {}, cwd: bare });
     expect(config.repoRoot).toBe(resolve(bare));
-    expect(config.dataDir).toBe(join(resolve(bare), ".codegraph"));
+    expect(config.dataDir).toBe(join(resolve(bare), ".sangkar"));
   });
 
   test("--data-dir resolves against the repo root", () => {
-    const root = tempDir("cgraph-config-data-");
+    const root = tempDir("sangkar-config-data-");
     const relative = loadConfig({
       argv: ["--repo-root", root, "--data-dir", "var/graph"],
       cwd: tmpdir(),
@@ -159,7 +159,7 @@ describe("loadConfig", () => {
     expect(relative.repoRoot).toBe(root);
     expect(relative.dataDir).toBe(join(root, "var", "graph"));
 
-    const absolute = join(tempDir("cgraph-config-absdata-"), "elsewhere");
+    const absolute = join(tempDir("sangkar-config-absdata-"), "elsewhere");
     const inline = loadConfig({
       argv: [`--repo-root=${root}`, `--data-dir=${absolute}`],
       cwd: tmpdir(),
@@ -167,30 +167,30 @@ describe("loadConfig", () => {
     expect(inline.dataDir).toBe(absolute);
   });
 
-  test("ignores CODEGRAPH_REPO_ROOT, CODEGRAPH_DATA_DIR and CODEGRAPH_PROFILE", () => {
-    const bare = tempDir("cgraph-config-envignored-");
+  test("ignores SANGKAR_REPO_ROOT, SANGKAR_DATA_DIR and SANGKAR_PROFILE", () => {
+    const bare = tempDir("sangkar-config-envignored-");
     const env = {
-      CODEGRAPH_REPO_ROOT: "/should/not/be/used",
-      CODEGRAPH_DATA_DIR: "/should/not/be/used/either",
-      CODEGRAPH_PROFILE: "admin",
-      CODEGRAPH_CURSOR_KEY: "k".repeat(32),
+      SANGKAR_REPO_ROOT: "/should/not/be/used",
+      SANGKAR_DATA_DIR: "/should/not/be/used/either",
+      SANGKAR_PROFILE: "admin",
+      SANGKAR_CURSOR_KEY: "k".repeat(32),
     };
 
     const config = loadConfig({ argv: [], env, cwd: bare });
     expect(config.repoRoot).toBe(resolve(bare));
-    expect(config.dataDir).toBe(join(resolve(bare), ".codegraph"));
+    expect(config.dataDir).toBe(join(resolve(bare), ".sangkar"));
     expect(config).not.toHaveProperty("profile");
     expect(config.cursorKey).toBe("k".repeat(32));
 
     // The tree comes from the flag even while the stale variables are set.
-    const flagged = tempDir("cgraph-config-envignored-flag-");
+    const flagged = tempDir("sangkar-config-envignored-flag-");
     const overridden = loadConfig({ argv: ["--repo-root", flagged], env, cwd: bare });
     expect(overridden.repoRoot).toBe(flagged);
-    expect(overridden.dataDir).toBe(join(flagged, ".codegraph"));
+    expect(overridden.dataDir).toBe(join(flagged, ".sangkar"));
   });
 
   test("keeps the fallback budgets and supplies a key when unset", () => {
-    const bare = tempDir("cgraph-config-budget-");
+    const bare = tempDir("sangkar-config-budget-");
     const config = loadConfig({ argv: [], env: {}, cwd: bare });
     expect(config.budgets.defaultTokens).toBe(1_200);
     expect(config.budgets.maxTokens).toBe(32_000);
@@ -200,23 +200,23 @@ describe("loadConfig", () => {
 
 describe("loadConfig cursor key", () => {
   test("generates a key long enough for the cursor module when the variable is absent", () => {
-    const bare = tempDir("cgraph-config-key-absent-");
+    const bare = tempDir("sangkar-config-key-absent-");
     const config = loadConfig({ argv: [], env: {}, cwd: bare });
     expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
   });
 
   test("generates a different key per call, so the fallback is random rather than constant", () => {
-    const bare = tempDir("cgraph-config-key-random-");
+    const bare = tempDir("sangkar-config-key-random-");
     const first = loadConfig({ argv: [], env: {}, cwd: bare });
     const second = loadConfig({ argv: [], env: {}, cwd: bare });
     expect(first.cursorKey).not.toBe(second.cursorKey);
   });
 
   test("returns an explicit variable verbatim, including one too short for cursors", () => {
-    const bare = tempDir("cgraph-config-key-explicit-");
+    const bare = tempDir("sangkar-config-key-explicit-");
     const long = loadConfig({
       argv: [],
-      env: { CODEGRAPH_CURSOR_KEY: "k".repeat(CURSOR_KEY_MIN_BYTES) },
+      env: { SANGKAR_CURSOR_KEY: "k".repeat(CURSOR_KEY_MIN_BYTES) },
       cwd: bare,
     });
     expect(long.cursorKey).toBe("k".repeat(CURSOR_KEY_MIN_BYTES));
@@ -225,15 +225,15 @@ describe("loadConfig cursor key", () => {
     // reports what the environment supplied.
     const short = loadConfig({
       argv: [],
-      env: { CODEGRAPH_CURSOR_KEY: "short" },
+      env: { SANGKAR_CURSOR_KEY: "short" },
       cwd: bare,
     });
     expect(short.cursorKey).toBe("short");
   });
 
   test("treats an empty variable as absent and generates a key", () => {
-    const bare = tempDir("cgraph-config-key-empty-");
-    const config = loadConfig({ argv: [], env: { CODEGRAPH_CURSOR_KEY: "" }, cwd: bare });
+    const bare = tempDir("sangkar-config-key-empty-");
+    const config = loadConfig({ argv: [], env: { SANGKAR_CURSOR_KEY: "" }, cwd: bare });
     expect(config.cursorKey).not.toBe("");
     expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
   });
