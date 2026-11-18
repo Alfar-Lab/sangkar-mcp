@@ -2,6 +2,9 @@
   "name": "codegraph-mvp",
   "type": "module",
   "private": true,
+  "bin": {
+    "cgraph": "./bin/codegraph.ts"
+  },
   "imports": {
     "#shared/*": "./src/shared/*"
   },

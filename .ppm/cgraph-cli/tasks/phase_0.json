@@ -25,8 +25,17 @@
         "verify": "cd app && $HOME/.bun/bin/bun test tests/cli-args.test.ts && $HOME/.bun/bin/bun run typecheck"
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T09:27:52Z",
+          "detail": "Created app/src/shared/cli/args.ts (9 exports exactly: InputField, InputLiteral, ToolArgs, GLOBAL_VALUE_FLAGS, CliUsageError, splitGlobals, parseArgs, parseCliArgs, usageOf; parseArgs/matchesType/matchesItem/expectationOf moved verbatim from src/index.ts:283-357, AppError kept for both refusals; only #shared/errors imported, no node builtins needed, no console.log) and app/tests/cli-args.test.ts (24 tests, imports all seven manifests relatively). Contract notes: usageOf header is `cgraph <tool> [<name>] [options]` per the literal contract string; splitGlobals errors carry a module-private global usage line; `--name=` with an empty value is refused as \"needs a value\" (Number(\"\") === 0 would otherwise slip through); a `--query` flag already set makes a later positional an \"unexpected positional argument\". Verify from app/: `$HOME/.bun/bin/bun test tests/cli-args.test.ts` -> 24 pass, 0 fail, 119 expect() calls; `$HOME/.bun/bin/bun run typecheck` -> exit 0, no output. Also ran `bun test tests/boundary.test.ts` -> 11 pass, 0 fail (shared-isolation intact) and `bunx biome check src/shared/cli/args.ts tests/cli-args.test.ts` -> clean after formatting those two files only. app/src/index.ts untouched."
+        },
+        {
+          "time": "2026-11-18T09:28:45Z",
+          "detail": "Orchestrator verification: `bun test tests/cli-args.test.ts` 24 pass / 0 fail; `bun run typecheck` exit 0; `bun run lint` exit 0 (91 files); `bun test tests/boundary.test.ts` 11 pass (shared layer still isolated — args.ts imports only #shared/errors). Diff scope: only new app/src/shared/cli/args.ts and app/tests/cli-args.test.ts; app/src/index.ts untouched (git diff empty). Exports match the contract exactly; helpers nameOf/inlineValueOf/GLOBAL_USAGE stay module-private."
+        }
+      ]
     },
     {
       "id": "TASK-002",
@@ -50,8 +59,17 @@
         "verify": "cd app && $HOME/.bun/bin/bun test tests/cli-render.test.ts && $HOME/.bun/bin/bun run typecheck\nDone when: both commands pass and the four status lines match the current wording character for character (compare against app/src/index.ts runStatus)."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T09:25:38Z",
+          "detail": "Created app/src/shared/cli/render.ts (EXIT_FAILURE=1, EXIT_USAGE=2, renderEnvelope, statusLines, exitCodeOf; only `import type { Envelope }` from #shared/envelope, payload narrowed structurally from unknown) and app/tests/cli-render.test.ts (12 tests). Verify from app/: `$HOME/.bun/bin/bun test tests/cli-render.test.ts` -> 12 pass, 0 fail, 26 expect() calls, exit 0; `$HOME/.bun/bin/bun run typecheck` (tsc --noEmit) -> exit 0. Wording checked character for character: regex-normalised format literals from src/index.ts runStatus (lines 796-803) are string-identical to render.ts statusLines (project two spaces, database one, graph four, health three; first line `${envelope.status}: ${envelope.summary}`); trailing newline present, five lines with a payload, one without. Scoped biome check on both files clean (pre-existing unrelated format error in concurrently created src/shared/cli/args.ts, not touched). Note: app/package.json gained a \"bin.cgraph\" entry at 16:21:28, before any file of mine was written - not mine, left untouched."
+        },
+        {
+          "time": "2026-11-18T09:28:45Z",
+          "detail": "Orchestrator verification: `bun test tests/cli-render.test.ts` 12 pass / 0 fail; combined run of both phase_0 test files 36 pass / 0 fail; `bun run typecheck` exit 0; `bun run lint` exit 0 (the earlier args.ts format complaint the worker saw was fixed by TASK-001 before this check). Diff scope: only new app/src/shared/cli/render.ts and app/tests/cli-render.test.ts; render.ts imports only `type Envelope` from #shared/envelope, no tool/indexer/fs import. Accepted non-blocking deviation: a payload missing db_path or a numeric field renders `unknown` rather than `undefined`; runStatus never hit that path because its payload was typed."
+        }
+      ]
     },
     {
       "id": "TASK-003",
@@ -72,8 +90,17 @@
         "verify": "cd app && $HOME/.bun/bin/bun -e 'const p=JSON.parse(await Bun.file(\"package.json\").text()); console.log(p.bin.cgraph, Object.keys(p.scripts).length)'\nDone when: it prints `./bin/codegraph.ts 12` (all twelve existing scripts kept), `git diff --stat` shows only app/package.json, and `head -1 bin/codegraph.ts` still prints the bun shebang."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T09:21:48Z",
+          "detail": "Added top-level \"bin\": {\"cgraph\": \"./bin/codegraph.ts\"} to app/package.json between \"private\" and \"imports\" (only file modified; +3 lines, no other hunks). Verify from app/: `$HOME/.bun/bin/bun -e 'const p=JSON.parse(await Bun.file(\"package.json\").text()); console.log(p.bin.cgraph, Object.keys(p.scripts).length)'` -> \"./bin/codegraph.ts 12\" (exit 0). `head -1 bin/codegraph.ts` -> \"#!/usr/bin/env bun\". Key order now name,type,private,bin,imports,scripts,dependencies,devDependencies; all 12 scripts (mcp,index,status,dev,test,typecheck,lint,build,db:generate,db:drift,db:parity,acceptance) and all 4+4 dependency versions unchanged. Repo root `git status --porcelain` -> \" M app/package.json\" plus pre-existing \" M .ppm/cgraph-cli/tasks/phase_0.json\" (unrelated to this task, already dirty at intake); no untracked files. No bun link, no installs, no lockfile touch."
+        },
+        {
+          "time": "2026-11-18T09:22:08Z",
+          "detail": "Orchestrator verification: `cd app && bun -e '...p.bin.cgraph...'` printed \"./bin/codegraph.ts 12\", exit 0. `head -1 bin/codegraph.ts` still \"#!/usr/bin/env bun\". git diff for app/package.json is a single +3 hunk inserting the bin block after `private`; no other tracked file touched (only .ppm task file, which the plan manager owns)."
+        }
+      ]
     },
     {
       "id": "TASK-004",
@@ -97,8 +124,17 @@
         "TASK-002",
         "TASK-003"
       ],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T09:30:56Z",
+          "detail": "Read-only gate. typecheck (tsc --noEmit) exit 0; lint (biome check src tests bin) exit 0, 91 files clean. bun test tests/cli-args.test.ts tests/cli-render.test.ts: 36 pass, 0 fail (145 expect calls). Full bun test: 531 pass, 1 fail, 532 tests / 38 files. The single failure is pre-existing and unrelated to phase_0: tests/tools-impact.test.ts \"(fail) impact manifest > carries the spec's description verbatim and the five documented arguments\" — error: ENOENT no such file or directory, open '.../codegraph-mcp/docs/TOOLS-SPEC.md' at specDescription (tests/tools-impact.test.ts:354). The doc only exists at docs/my-product/TOOLS-SPEC.md; tools-impact.test.ts imports nothing from #shared/cli and phase_0 touched no docs. Not a phase_0 regression, reported as baseline. Diff scope: git status --short shows M app/package.json, M .ppm/cgraph-cli/tasks/phase_0.json (expected plan-manager rewrite), ?? app/src/shared/cli/, ?? app/tests/cli-args.test.ts, ?? app/tests/cli-render.test.ts — no path outside phase_0 ownership. Exports verified: args.ts = InputField, InputLiteral, ToolArgs, GLOBAL_VALUE_FLAGS, CliUsageError, splitGlobals, parseArgs, parseCliArgs, usageOf; render.ts = EXIT_FAILURE, EXIT_USAGE, renderEnvelope, statusLines, exitCodeOf — exactly the contracted names, no extras. Imports: #shared/errors, #shared/envelope only (no tools/** or indexer/**). No console.* in app/src/shared/cli/**. package.json adds bin {cgraph: ./bin/codegraph.ts}. VERDICT: PASS (with the documented pre-existing baseline failure)."
+        },
+        {
+          "time": "2026-11-18T09:31:36Z",
+          "detail": "Orchestrator verification of the gate (read-only, no edits made): `bun run typecheck` exit 0; `bun run lint` exit 0 (91 files, no fixes); new files 36 pass / 0 fail; full `bun test` on the gate run 531 pass / 1 fail across 38 files. The single failure is pre-existing baseline, not a phase_0 regression: tests/tools-impact.test.ts \"impact manifest > carries the spec's description verbatim…\" hits ENOENT docs/TOOLS-SPEC.md (the docs live in docs/my-product/ after 4a42eb0). Reproduced scoped: 11 pass / 1 fail. Proven baseline by `git show 1f7e0c6:app/tests/tools-impact.test.ts` line 354 containing the identical path, and the file is untouched by phase_0 (git diff empty for it). Diff scope check: only app/package.json modified (+3 bin block) plus the four new phase_0 files; app/src/index.ts and every existing test unchanged. Verdict: phase_0 requirements met; the TOOLS-SPEC.md path is a follow-up for the docs phase, recorded here so the final plan gate can close it."
+        }
+      ]
     }
   ]
 }
