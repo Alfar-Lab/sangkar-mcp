@@ -14,8 +14,11 @@ cannot run it.
 bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
 ```
 
-`0.1.0-beta.0` publishes under the `beta` tag, so the version qualifier is required: an untagged
-install resolves `latest`, which a prerelease does not set. It resolves once a non-prerelease ships.
+`0.1.0-beta.0` publishes under the `beta` tag. Pin it explicitly — `latest` on the registry is a
+moving target: when npm first claimed this name it created a `0.0.0-stage` holding version that took
+`latest`, and the real version took it over on publish, so an untagged install happens to get the
+prerelease today. That is a property of the registry's staged-publish flow, not of this package, and
+it stops being true as soon as a non-prerelease ships. `sangkar-mcp@beta` is the stable address.
 
 The package ships TypeScript, so the `sangkar` binary runs under Bun through its shebang; the Bun
 prerequisite is not optional. Installing creates no database and writes nothing outside Bun's global
@@ -244,3 +247,9 @@ bun run typecheck                   # tsc --noEmit, strict
 bun run lint                        # biome check src tests bin
 bun test tests/binary-smoke.test.ts  # builds the standalone artifact and drives one tools/call
 ```
+
+## License
+
+MIT — see [LICENSE](LICENSE). The grant covers the package as published, including the migration
+SQL it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm` and the MCP SDK keep their own
+licenses.
