@@ -2,13 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { AGENT_TOOL_NAMES, TOOL_NAMES } from "#shared/instructions";
+import { TOOL_NAMES } from "#shared/instructions";
 
 /**
  * The composition root's protocol surface (`TECH-SPEC.md` §11), checked by speaking to a real server
  * process instead of importing its registry: the point of this test is that `initialize` and
- * `tools/list` survive the SDK's own framing, that the profile from `CODEGRAPH_PROFILE` decides
- * which names are published, and that nothing but JSON-RPC reaches stdout.
+ * `tools/list` survive the SDK's own framing, that one surface publishes all seven tools, and that
+ * nothing but JSON-RPC reaches stdout.
  *
  * Every run gets its own tree and data dir, `CODEGRAPH_NO_WATCH=1` (a watcher would spawn a worker
  * over an empty fixture and make the run's timing depend on git) and a cursor key of the required
@@ -100,7 +100,7 @@ function parseLines(stream: string): { json: unknown[]; nonJson: string[] } {
  * One server session over stdio. The child is killed in `finally` whether or not it exited, and its
  * temp tree is removed there too, so a failed assertion cannot leave a process or a directory behind.
  */
-async function session(profile: "" | "admin"): Promise<Session> {
+async function session(): Promise<Session> {
   const root = await mkdtemp(join(tmpdir(), "codegraph-mcp-surface-"));
   const repoRoot = join(root, "repo");
   const dataDir = join(root, "data");
@@ -108,16 +108,22 @@ async function session(profile: "" | "admin"): Promise<Session> {
   await mkdir(dataDir, { recursive: true });
 
   const proc = Bun.spawn({
-    cmd: [process.execPath, "run", CLI_ENTRY, "mcp"],
+    cmd: [
+      process.execPath,
+      "run",
+      CLI_ENTRY,
+      "mcp",
+      "--repo-root",
+      repoRoot,
+      "--data-dir",
+      dataDir,
+    ],
     cwd: APP_ROOT,
     env: {
       ...process.env,
-      CODEGRAPH_REPO_ROOT: repoRoot,
-      CODEGRAPH_DATA_DIR: dataDir,
+      // The roots are on the command line, not in the child's environment, so the session is rooted
+      // by the flags it states and nothing an inherited variable says can decide what this proves.
       CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      // Every setting is stated, not inherited: a harness with CODEGRAPH_PROFILE set must not
-      // decide what this test proves.
-      CODEGRAPH_PROFILE: profile,
       CODEGRAPH_NO_WATCH: "1",
     },
     stdin: "pipe",
@@ -166,11 +172,11 @@ function toolsOf(session: Session): readonly ToolDescriptor[] {
   return result?.tools ?? [];
 }
 
-describe("MCP surface: seven tools, two profiles, one clean stdout", () => {
+describe("MCP surface: seven tools, one clean stdout", () => {
   test(
-    "the agent profile publishes six tools over two JSON-RPC responses",
+    "tools/list publishes exactly the seven names, and the manifests' schema is what is published",
     async () => {
-      const run = await session("");
+      const run = await session();
       const names = toolNames(run);
 
       // The handshake, then the list. A third response would mean a notification was answered.
@@ -184,9 +190,12 @@ describe("MCP surface: seven tools, two profiles, one clean stdout", () => {
       expect(initialized?.serverInfo?.name).toBe("codegraph");
       expect(initialized?.protocolVersion).toBe(PROTOCOL_VERSION);
 
-      expect(names).toHaveLength(AGENT_TOOL_NAMES.length);
-      expect(names).toEqual([...AGENT_TOOL_NAMES].sort());
-      expect(names).not.toContain("index");
+      // One surface, seven names, each published once: `index` is registered like every other tool,
+      // and the instructions rather than a registration filter are what keep it in reserve.
+      expect(names).toHaveLength(7);
+      expect(names).toEqual([...TOOL_NAMES].sort());
+      expect(new Set(names).size).toBe(names.length);
+      expect(names).toContain("index");
 
       // stdout is the protocol: one JSON object per line, nothing else, and the diagnostics on
       // stderr are all `#shared/log` records.
@@ -198,20 +207,21 @@ describe("MCP surface: seven tools, two profiles, one clean stdout", () => {
 
       // The exit path: stdin closed, the server stopped and returned 0 rather than being killed.
       expect(run.exitCode).toBe(0);
-    },
-    HARD_TIMEOUT_MS,
-  );
 
-  test(
-    "the admin profile adds `index`, and the manifests' schema is what is published",
-    async () => {
-      const run = await session("admin");
-      const names = toolNames(run);
-
-      expect(run.nonJsonLines).toEqual([]);
-      expect(names).toHaveLength(TOOL_NAMES.length);
-      expect(names).toEqual([...TOOL_NAMES].sort());
-      expect(names).toContain("index");
+      // The one admin tool's arguments are both optional, spelled as JSON Schema: `enum` becomes a
+      // string schema carrying its values, and the declared default travels with the property.
+      const index = toolsOf(run).find((tool) => tool.name === "index");
+      expect(index?.inputSchema.type).toBe("object");
+      expect(index?.inputSchema.required).toBeUndefined();
+      expect(index?.inputSchema.properties?.force).toMatchObject({
+        type: "boolean",
+        default: false,
+      });
+      expect(index?.inputSchema.properties?.mode).toMatchObject({
+        type: "string",
+        enum: ["full", "fast"],
+        default: "full",
+      });
 
       const trace = toolsOf(run).find((tool) => tool.name === "trace");
       expect(trace?.inputSchema.type).toBe("object");

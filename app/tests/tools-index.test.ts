@@ -108,7 +108,6 @@ function harness(generation: string | null = GENERATION_LIVE): Harness {
   const config: AppConfig = {
     repoRoot,
     dataDir,
-    profile: "admin",
     cursorKey: "k".repeat(32),
     budgets: { defaultTokens: 1_200, maxTokens: 32_000 },
   };
@@ -145,9 +144,9 @@ function payloadOf(env: Envelope<IndexPayload | null>): IndexPayload {
 }
 
 describe("index manifest", () => {
-  test("is admin-only and carries TOOLS-SPEC.md §8's description verbatim", () => {
+  test("is not profile-gated and carries TOOLS-SPEC.md §8's description verbatim", () => {
     expect(manifest.name).toBe("index");
-    expect(manifest.profile).toBe("admin");
+    expect("profile" in manifest).toBe(false);
     expect(manifest.description).toBe(
       "Admin: force a full or fast index, or repair a broken one. Not for normal use — the server " +
         "keeps the graph current automatically.",
@@ -172,9 +171,21 @@ describe("workerInvocation", () => {
     expect(invocation.cmd).toContain("worker");
     expect(invocation.cmd[0]).toBe(process.execPath);
     expect(invocation.cmd.some((part) => part.endsWith(join("bin", "codegraph.ts")))).toBe(true);
-    // The two paths the child acts on come from the config, never from this process's cwd.
-    expect(invocation.env.CODEGRAPH_REPO_ROOT).toBe(ctx.config.repoRoot);
-    expect(invocation.env.CODEGRAPH_DATA_DIR).toBe(ctx.config.dataDir);
+    // The two paths the child acts on come from the config, never from this process's cwd, and
+    // they travel as ordered argv flags rather than as environment variables.
+    const argv = invocation.cmd;
+    expect(argv.slice(argv.indexOf("--repo-root"), argv.indexOf("--repo-root") + 2)).toEqual([
+      "--repo-root",
+      ctx.config.repoRoot,
+    ]);
+    expect(argv.slice(argv.indexOf("--data-dir"), argv.indexOf("--data-dir") + 2)).toEqual([
+      "--data-dir",
+      ctx.config.dataDir,
+    ]);
+    expect(argv.indexOf("--repo-root")).toBe(argv.indexOf("worker") + 1);
+    expect(argv.indexOf("--data-dir")).toBe(argv.indexOf("--repo-root") + 2);
+    expect(invocation.env.CODEGRAPH_REPO_ROOT).toBeUndefined();
+    expect(invocation.env.CODEGRAPH_DATA_DIR).toBeUndefined();
   });
 
   test("force is passed through, and absent when not requested", () => {

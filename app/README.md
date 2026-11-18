@@ -25,23 +25,24 @@ bun run index     # index the tree into <repo>/.codegraph/graph.db
 bun run mcp       # MCP server on stdio
 ```
 
-Both scripts run from `app/`, and the repository is the process's working directory unless
-`CODEGRAPH_REPO_ROOT` says otherwise, so point it at the tree you want answered about:
+Both scripts run from `app/`. The repository is the working directory's tree — the nearest ancestor
+holding `.codegraph/` (or `.git`), found by walking up from the current directory — and `--repo-root`
+points it somewhere else:
 
 ```sh
-CODEGRAPH_REPO_ROOT=/path/to/repo bun run index
-CODEGRAPH_REPO_ROOT=/path/to/repo bun run mcp
+bun run index --repo-root /path/to/repo
+bun run mcp --repo-root /path/to/repo
 ```
 
 `bun run index` is a full index (`bin/codegraph.ts index`); `bun run mcp` is the default mode and the
 command a client registers as its stdio server. `bun run status` prints the same facts as the tool
 without speaking the protocol, and `bun run dev` runs the server under `bun --watch`.
 
+The tree, the data dir and the output format are flags, legal before or after the name:
+`--repo-root <path>`, `--data-dir <path>` and `--json`. Two settings remain in the environment:
+
 | Variable | Default | Meaning |
 |---|---|---|
-| `CODEGRAPH_REPO_ROOT` | process cwd | tree to index and answer about |
-| `CODEGRAPH_DATA_DIR` | `<repo>/.codegraph` | where `graph.db` lives |
-| `CODEGRAPH_PROFILE` | `agent` | `agent` (six tools) or `admin` (adds `index`) |
 | `CODEGRAPH_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; a response that gets truncated cannot mint a cursor without it |
 | `CODEGRAPH_NO_WATCH` | unset | any value stops the watcher; set by tests |
 
@@ -50,18 +51,19 @@ per event.
 
 ## The seven tools
 
-| Tool | Profile | What it answers |
-|---|---|---|
-| `status` | agent | The generation being served, how stale the tree is, per-path coverage and the language census. Call it before saying something does not exist. |
-| `summary` | agent | The situation in a few hundred tokens: the working-tree diff (default), the whole repo, or one area, with risk, blast radius and test gaps. |
-| `trace` | agent | Callers, callees, implementers, importers and tests for one query, grouped by edge and tier; several matches come back as candidates, not a guess. |
-| `search` | agent | Symbols by keyword (BM25) with file:line and in/out degree — locations and shape, not source. |
-| `impact` | agent | What a change set reaches: dependents, affected entry points, the tests that cover them, and a risk score; defaults to the working-tree diff. |
-| `expand` | agent | More detail for one item from an earlier answer — `members`, `edges`, short `source`, or `coverage`. |
-| `index` | admin | Force a full or fast re-index, or repair a graph the watcher could not fix. Not for normal use. |
+| Tool | What it answers |
+|---|---|
+| `status` | The generation being served, how stale the tree is, per-path coverage and the language census. Call it before saying something does not exist. |
+| `summary` | The situation in a few hundred tokens: the working-tree diff (default), the whole repo, or one area, with risk, blast radius and test gaps. |
+| `trace` | Callers, callees, implementers, importers and tests for one query, grouped by edge and tier; several matches come back as candidates, not a guess. |
+| `search` | Symbols by keyword (BM25) with file:line and in/out degree — locations and shape, not source. |
+| `impact` | What a change set reaches: dependents, affected entry points, the tests that cover them, and a risk score; defaults to the working-tree diff. |
+| `expand` | More detail for one item from an earlier answer — `members`, `edges`, short `source`, or `coverage`. |
+| `index` | Force a full or fast re-index, or repair a graph the watcher could not fix. Not for normal use. |
 
-Registered names are exactly these seven: no `_tool` suffix, no aliases, and no eighth name in the
-agent profile.
+Registered names are exactly these seven: no `_tool` suffix, no aliases, and no eighth name. MCP and
+the `cgraph` command publish the same surface; the instructions tell an agent to call `index` only
+when `status` reports a broken graph.
 
 Every tool takes an optional `budget` in tokens and defaults it per tool (`status` 800, `summary`
 1200, `trace` 3200, `search` 2000, `impact` 2500, `expand` 2500). Above 32000 the call is refused
@@ -88,7 +90,7 @@ reported at `status.payload.project.db_path`.
 
 ## Moving the data directory
 
-`CODEGRAPH_DATA_DIR` overrides the location; a relative value resolves against the repository root.
+`--data-dir` overrides the location; a relative value resolves against the repository root.
 It exists because the checkout is not always somewhere you can write:
 
 - **read-only mounts.** A source tree mounted read-only, an image layer, or a CI checkout cannot hold

@@ -206,20 +206,17 @@ function parseLines(stream: string): { json: unknown[]; nonJson: string[] } {
 
 /**
  * One session over the binary's stdio: `initialize`, the initialized notification, then `status`.
- * The child runs from the temp dir that holds it — no `node_modules`, no `migrations/` — and every
- * `CODEGRAPH_*` setting is stated rather than inherited, so a harness with a data dir of its own
- * cannot decide what this test proves.
+ * The child runs from the temp dir that holds it — no `node_modules`, no `migrations/` — and the
+ * tree and data dir it serves are argv flags, while the two settings that must not be inherited
+ * from a harness are stated, so nothing outside this test decides what it proves.
  */
 async function session(fixture: Fixture): Promise<Session> {
   const proc = Bun.spawn({
-    cmd: [build.binary, "mcp"],
+    cmd: [build.binary, "mcp", "--repo-root", fixture.repoRoot, "--data-dir", fixture.dataDir],
     cwd: build.root,
     env: {
       ...process.env,
-      CODEGRAPH_REPO_ROOT: fixture.repoRoot,
-      CODEGRAPH_DATA_DIR: fixture.dataDir,
       CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      CODEGRAPH_PROFILE: "agent",
       CODEGRAPH_NO_WATCH: "1",
     },
     stdin: "pipe",

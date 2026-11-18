@@ -57,12 +57,8 @@ const PUBLISHED_AT = "2026-11-17T13:50:15Z";
 const BASE_COMMIT = "bbdda4b9";
 
 const CONFIG = loadConfig({
-  env: {
-    CODEGRAPH_REPO_ROOT: REPO_DIR,
-    CODEGRAPH_DATA_DIR: DATA_DIR,
-    CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-    CODEGRAPH_PROFILE: "agent",
-  },
+  argv: ["--repo-root", REPO_DIR, "--data-dir", DATA_DIR],
+  env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
 });
 
 /** The nine fields every response carries, whatever its status (TOOLS-SPEC.md §1.1). */
@@ -601,7 +597,7 @@ describe("status: budget", () => {
 describe("status: manifest", () => {
   test("describes the tool verbatim and declares exactly two optional arguments", () => {
     expect(manifest.name).toBe("status");
-    expect(manifest.profile).toBe("agent");
+    expect("profile" in manifest).toBe(false);
     expect(manifest.description).toBe(
       "Report whether the graph is current and what it covers. Call this before telling the user " +
         "that something does not exist, and whenever a previous answer looked incomplete. Returns " +

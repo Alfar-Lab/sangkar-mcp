@@ -256,7 +256,8 @@ function contextOf(reader: GraphReader, repoRoot: string): ToolContext {
     log,
     now: () => CHECKED_AT,
     config: loadConfig({
-      env: { CODEGRAPH_REPO_ROOT: repoRoot, CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+      argv: ["--repo-root", repoRoot],
+      env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }
@@ -351,7 +352,10 @@ function gitRepo(): string {
 
 /** The description the model sees, lifted from the spec so the two cannot drift silently. */
 function specDescription(): string {
-  const spec = readFileSync(join(import.meta.dir, "..", "..", "docs", "TOOLS-SPEC.md"), "utf8");
+  const spec = readFileSync(
+    join(import.meta.dir, "..", "..", "docs", "my-product", "TOOLS-SPEC.md"),
+    "utf8",
+  );
   const start = spec.indexOf("## 6. `impact`");
   const end = spec.indexOf("### Parameters", start);
   const quoted = spec
@@ -365,7 +369,7 @@ function specDescription(): string {
 describe("impact manifest", () => {
   test("carries the spec's description verbatim and the five documented arguments", () => {
     expect(manifest.name).toBe("impact");
-    expect(manifest.profile).toBe("agent");
+    expect("profile" in manifest).toBe(false);
     // Widened to `string` so `expect` compares text rather than the literal type.
     const description: string = manifest.description;
     expect(description).toBe(specDescription());

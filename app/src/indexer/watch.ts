@@ -71,9 +71,9 @@ export interface WatchChild {
 
 /** What the child needs to know that the CLI cannot read from its own working directory. */
 export interface SpawnTarget {
-  /** The tree to index; also forwarded as `CODEGRAPH_REPO_ROOT`. */
+  /** The tree to index; also forwarded as `--repo-root`. */
   readonly repoRoot: string;
-  /** Where the graph, the lock and the data dir's `.gitignore` live; also `CODEGRAPH_DATA_DIR`. */
+  /** Where the graph, the lock and the data dir's `.gitignore` live; also forwarded as `--data-dir`. */
   readonly dataDir: string;
 }
 
@@ -330,18 +330,16 @@ async function observe(repoRoot: string, dataDir: string): Promise<Observed> {
   return { key: await readMtimeSignature(repoRoot, dataDir), detector: "mtime" };
 }
 
-/** The default spawn: the CLI's worker mode as a real child, rooted through its own environment. */
+/** The default spawn: the CLI's worker mode as a real child, rooted by its own flags. */
 function spawnCliWorker(cmd: readonly string[], target: SpawnTarget): WatchChild {
   const child = Bun.spawn({
-    cmd: [...cmd],
+    // The roots are arguments, not variables: one visible command line, and no ambient setting a
+    // child could inherit stale. The order is the CLI's parse order (see `#shared/config`).
+    cmd: [...cmd, "--repo-root", target.repoRoot, "--data-dir", target.dataDir],
     cwd: target.repoRoot,
-    // `#shared/config.ts` is the CLI's only environment reader, so this is the documented way to
-    // hand the worker its roots; it keeps the watcher and the worker on one graph.
-    env: {
-      ...process.env,
-      CODEGRAPH_REPO_ROOT: target.repoRoot,
-      CODEGRAPH_DATA_DIR: target.dataDir,
-    },
+    // The rest of the parent environment is inherited only for `PATH`: the child shells out to
+    // `git`, and no `CODEGRAPH_*` setting travels this way any more.
+    env: { ...process.env },
     stdin: "ignore",
     // stdout carries the MCP protocol (§11): a child that inherited it could corrupt the session.
     stdout: "ignore",

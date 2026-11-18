@@ -15,7 +15,6 @@ export const manifest = {
     '`scope="change"` (default) describes the working-tree diff with risk, the top blast radius ' +
     'and test gaps; `scope="repo"` describes the repository; `scope="area"` describes one path. ' +
     "Call this first in any task to decide what to do next.",
-  profile: "agent",
 } as const;
 
 /**

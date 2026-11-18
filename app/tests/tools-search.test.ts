@@ -241,7 +241,8 @@ function fakeReader(options: FakeOptions = {}): GraphReader {
 }
 
 const fakeConfig: AppConfig = loadConfig({
-  env: { CODEGRAPH_REPO_ROOT: "/tmp/fake", CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
+  argv: ["--repo-root", "/tmp/fake"],
+  env: { CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
 });
 
 function fakeContext(options: FakeOptions = {}): ToolContext {
@@ -265,9 +266,9 @@ function resultsOf(
 }
 
 describe("tools/search manifest", () => {
-  test("carries the spec description verbatim and the agent profile", () => {
+  test("carries the spec description verbatim and no profile field", () => {
     expect(manifest.name).toBe("search");
-    expect(manifest.profile).toBe("agent");
+    expect("profile" in manifest).toBe(false);
     expect(manifest.description).toBe(
       "Find symbols or text in the indexed code. Hybrid keyword (BM25) with optional semantic rerank. " +
         "Returns declarations with file:line and their in/out degree — not source. Use when you know " +

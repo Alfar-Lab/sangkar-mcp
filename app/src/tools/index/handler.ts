@@ -131,26 +131,28 @@ function resolveArgs(args: IndexArgs): WorkerArgs {
  * entry's existence is what distinguishes the two, and that is a file check rather than a guess
  * about the build.
  *
- * The tree and the data dir travel as `CODEGRAPH_REPO_ROOT`/`CODEGRAPH_DATA_DIR`, the two settings
- * `loadConfig()` already resolves, so the child can only ever index the repository the server is
- * bound to — never its own cwd. Inheriting the rest of the parent environment is not a config read:
- * the child shells out to `git` and needs `PATH`.
+ * The tree and the data dir travel as `--repo-root`/`--data-dir`, the two settings `loadConfig()`
+ * already resolves, so the child can only ever index the repository the server is bound to — never
+ * its own cwd. Inheriting the rest of the parent environment is not a config read: the child shells
+ * out to `git` and needs `PATH`.
  */
 export function workerInvocation(ctx: ToolContext, args: WorkerArgs): WorkerInvocation {
   const entry = join(APP_ROOT, CLI_ENTRY);
   const prefix = existsSync(entry) ? [process.execPath, "run", entry] : [process.execPath];
-  const cmd = [...prefix, "worker", "--mode", args.mode];
+  const cmd = [
+    ...prefix,
+    "worker",
+    "--repo-root",
+    ctx.config.repoRoot,
+    "--data-dir",
+    ctx.config.dataDir,
+    "--mode",
+    args.mode,
+  ];
   if (args.force) {
     cmd.push("--force");
   }
-  return {
-    cmd,
-    env: {
-      ...process.env,
-      CODEGRAPH_REPO_ROOT: ctx.config.repoRoot,
-      CODEGRAPH_DATA_DIR: ctx.config.dataDir,
-    },
-  };
+  return { cmd, env: { ...process.env } };
 }
 
 function asLevel(value: unknown): LogLevel {
@@ -426,7 +428,7 @@ function published(
       ctx,
       snapshot,
       new AppError("internal", "the index worker exited 0 without publishing a report", {
-        hint: "run `codegraph index` and read its stderr: the worker's last line is the report",
+        hint: "run `cgraph index` and read its stderr: the worker's last line is the report",
       }),
     );
   }
@@ -589,7 +591,7 @@ export async function handle(
         new AppError(
           "internal",
           `the index worker failed (exit ${report.exitCode}): ${lastErrorLine(report)}`,
-          { hint: "run `codegraph index` and read its stderr for the full run" },
+          { hint: "run `cgraph index` and read its stderr for the full run" },
         ),
       );
   }

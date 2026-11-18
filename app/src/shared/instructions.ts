@@ -1,5 +1,5 @@
 /**
- * The one-screen usage guide, as text and as routing (TOOL-USAGE-ANALYSIS.md §4: with six tools
+ * The one-screen usage guide, as text and as routing (TOOL-USAGE-ANALYSIS.md §4: with seven tools
  * and no prompt scaffolding, the instructions layer is the adoption lever, not the tool count).
  *
  * The text lives in this file rather than in a fourth `src/cli` layer so the three-layer layout
@@ -9,38 +9,29 @@
  */
 
 /**
- * The six tools an agent session can call (TOOLS-SPEC.md §10). Every suggestion this module
- * makes is drawn from this list, so `next_tools` can never name a tool the agent profile cannot
- * reach.
+ * The seven tools this server publishes (TOOLS-SPEC.md §10). Every suggestion this module makes
+ * is drawn from this list, so `next_tools` can never name a tool the surface does not have.
+ *
+ * `index` sits last on purpose: measured, it was called 1 081 times and failed 12.9 % of the time
+ * for work the server already does itself (TOOLS-SPEC.md §8), so it is a repair, not a query.
  */
-export const AGENT_TOOL_NAMES = [
+export const TOOL_NAMES = [
   "status",
   "summary",
   "trace",
   "search",
   "impact",
   "expand",
+  "index",
 ] as const;
-export type AgentToolName = (typeof AGENT_TOOL_NAMES)[number];
-
-/**
- * The one admin-only tool. It exists so a broken graph can be repaired, not so an agent can
- * rebuild one: measured, indexing was called 1 081 times and failed 12.9 % of the time, for work
- * the server already does itself (TOOLS-SPEC.md §8).
- */
-export const ADMIN_TOOL_NAMES = ["index"] as const;
-
-/** All seven registered tools: the routing table is total over these and empty over the rest. */
-export const TOOL_NAMES = [...AGENT_TOOL_NAMES, ...ADMIN_TOOL_NAMES] as const;
 export type ToolName = (typeof TOOL_NAMES)[number];
 
 /**
  * Where each tool sends the agent next. Keys are exactly the seven tool names, so a tool added
- * without a route is a type error rather than a silent empty `next_tools`; values are agent
- * tools only, including for `index`, whose suggestion must still be callable from the profile
- * that cannot call `index`.
+ * without a route is a type error rather than a silent empty `next_tools`; the values are the
+ * tools worth calling next, including for `index`, whose only suggestion is `status`.
  */
-const NEXT_TOOLS: Readonly<Record<ToolName, readonly AgentToolName[]>> = {
+const NEXT_TOOLS: Readonly<Record<ToolName, readonly ToolName[]>> = {
   status: ["summary", "search"],
   summary: ["impact", "trace", "expand"],
   trace: ["expand"],
@@ -71,7 +62,7 @@ export function nextToolsFor(tool: string): string[] {
  * look up, judge blast radius, then fetch detail — the order an agent needs them in one task.
  * The anti-patterns come last because each one names a call the reader would otherwise make.
  */
-export const INSTRUCTIONS_TEXT = `# Using the graph: five rules, six tools, one bound repository
+export const INSTRUCTIONS_TEXT = `# Using the graph: five rules, seven tools, one bound repository
 
 The server already knows which repository this is: it was bound at startup, so nothing here
 selects a project or builds an index. Every answer carries \`read_status\` (which generation
@@ -118,9 +109,6 @@ detail from the kind — \`members\` for a file or class, \`edges\` for a functi
 
 ## Do not
 
-- **Do not call \`index\`.** It is not in the agent profile; the server keeps the graph current on
-  its own. If the graph looks wrong, call \`status\`, report what it did not cover, and carry on.
-  A rebuild is a repair, not a query.
 - **Do not read \`total_relation: gte\` as none.** \`gte\` means lower bound: coverage is incomplete,
   call sites are unresolved, the generation is stale, or the list was cut. Say at least N, and
   call \`status\` with the paths you care about before claiming nothing exists.
@@ -129,10 +117,12 @@ detail from the kind — \`members\` for a file or class, \`edges\` for a functi
 - **Do not pass a project argument.** There is none: the repository is bound at startup, so a
   name or a path never needs a project to disambiguate it.
 
-The agent profile has exactly six tools: \`status\`, \`summary\`, \`trace\`, \`search\`, \`impact\`,
-\`expand\`. \`status\` says what is indexed, \`summary\`, \`trace\` and \`search\` answer questions about
-the code, \`impact\` says what a change reaches, and \`expand\` answers a follow-up about one item.
-\`next_tools\` on every response names the tools worth calling next, always from this list.`;
+The surface is seven tools: \`status\`, \`summary\`, \`trace\`, \`search\`, \`impact\`, \`expand\` and
+\`index\`. \`status\` says what is indexed, \`summary\`, \`trace\` and \`search\` answer questions about
+the code, \`impact\` says what a change reaches, \`expand\` answers a follow-up about one item, and
+\`index\` rebuilds the graph: call it only when \`status\` says the graph is broken, and never as a
+query — a rebuild is a repair. \`next_tools\` on every response names the tools worth calling
+next, always from this list.`;
 
 /**
  * MCP servers publish tools, not prompt text, so the guide reaches the agent through the client:

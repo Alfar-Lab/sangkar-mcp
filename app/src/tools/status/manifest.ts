@@ -25,7 +25,6 @@ export const manifest = {
     "that something does not exist, and whenever a previous answer looked incomplete. Returns " +
     "the index generation, how stale the working tree is, per-path coverage, and the language " +
     "census. Cheap — call it freely.",
-  profile: "agent",
 } as const;
 
 /**

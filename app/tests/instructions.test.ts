@@ -1,8 +1,6 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { join } from "node:path";
 import {
-  ADMIN_TOOL_NAMES,
-  AGENT_TOOL_NAMES,
   INSTRUCTIONS_TEXT,
   nextToolsFor,
   printInstructions,
@@ -22,25 +20,26 @@ function namesTool(text: string, tool: string): boolean {
 }
 
 describe("instructions: the guide names the surface", () => {
-  test("the agent profile is described as exactly six tools and names all six", () => {
-    const start = INSTRUCTIONS_TEXT.indexOf("The agent profile has exactly six tools");
+  test("the closing paragraph names all seven tools", () => {
+    const start = INSTRUCTIONS_TEXT.indexOf("The surface is seven tools");
     expect(start).toBeGreaterThan(-1);
-    const profile = INSTRUCTIONS_TEXT.slice(start);
+    const closing = INSTRUCTIONS_TEXT.slice(start);
 
-    const missing = AGENT_TOOL_NAMES.filter((tool) => !namesTool(profile, tool));
+    const missing = TOOL_NAMES.filter((tool) => !namesTool(closing, tool));
     expect(missing).toEqual([]);
   });
 
-  test("the admin-only tool appears only as something not to call", () => {
-    for (const tool of ADMIN_TOOL_NAMES) {
-      expect(namesTool(INSTRUCTIONS_TEXT, tool)).toBe(true);
-      expect(/do not call `index`/i.test(INSTRUCTIONS_TEXT)).toBe(true);
-    }
+  test("index is described as a repair, never as a query", () => {
+    expect(namesTool(INSTRUCTIONS_TEXT, "index")).toBe(true);
+    // The paragraph is wrapped, so the wording is checked with newlines collapsed.
+    const prose = INSTRUCTIONS_TEXT.replace(/\s+/gu, " ");
+    expect(prose).toContain("only when `status` says the graph is broken");
+    expect(prose).toContain("never as a query");
+    expect(prose).toContain("a rebuild is a repair");
   });
 
-  test("the four anti-patterns are each stated", () => {
+  test("the three anti-patterns are each stated", () => {
     const antiPatterns: readonly (readonly [string, RegExp])[] = [
-      ["do not call index", /do not call `index`/i],
       ["do not read total_relation gte as none", /do not read `total_relation: gte` as none/i],
       ["do not use trace to read source", /do not use `trace` to read source/i],
       ["do not pass a project argument", /do not pass a project argument/i],
@@ -49,6 +48,7 @@ describe("instructions: the guide names the surface", () => {
       .filter(([, pattern]) => !pattern.test(INSTRUCTIONS_TEXT))
       .map(([name]) => name);
     expect(unstated).toEqual([]);
+    expect(INSTRUCTIONS_TEXT.match(/^- \*\*Do not/gmu) ?? []).toHaveLength(3);
   });
 
   test("the rules appear in the order an agent needs them", () => {
@@ -68,19 +68,19 @@ describe("instructions: the guide names the surface", () => {
   });
 });
 
-describe("instructions: nextToolsFor routes within the agent profile", () => {
-  test("all seven tools suggest only agent tool names, and never themselves", () => {
-    const agentNames = new Set<string>(AGENT_TOOL_NAMES);
+describe("instructions: nextToolsFor routes within the surface", () => {
+  test("all seven tools suggest only names in TOOL_NAMES, and never themselves", () => {
+    const surfaceNames = new Set<string>(TOOL_NAMES);
     for (const tool of TOOL_NAMES) {
       const next = nextToolsFor(tool);
       expect(next.length).toBeGreaterThan(0);
-      // A name outside the profile would be a promise the agent cannot keep.
-      expect(next.filter((suggestion) => !agentNames.has(suggestion))).toEqual([]);
+      // A name outside the surface would be a promise the tool cannot keep.
+      expect(next.filter((suggestion) => !surfaceNames.has(suggestion))).toEqual([]);
       expect(next).not.toContain(tool);
     }
   });
 
-  test("index routes to the agent profile, which is all it can recommend", () => {
+  test("index routes to status, the follow-up after a repair", () => {
     expect(nextToolsFor("index")).toEqual(["status"]);
   });
 

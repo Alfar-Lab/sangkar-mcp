@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { AGENT_TOOL_NAMES, TOOL_NAMES } from "#shared/instructions";
+import { TOOL_NAMES } from "#shared/instructions";
 import { runWorker, WORKER_EXIT } from "../src/indexer/worker";
 
 /**
@@ -14,8 +14,8 @@ import { runWorker, WORKER_EXIT } from "../src/indexer/worker";
  * hand-written `GraphReader`. Those prove what each tool does with a reader's answers; none of them
  * proves that the composition root publishes the surface, parses the arguments and wires the store
  * the way a client actually meets it. So this file is deliberately end to end: the worker indexes a
- * two-file TypeScript fixture into a temp data dir, and two spawned servers — the agent profile and
- * the admin profile — are driven over stdio exactly as a client drives them.
+ * two-file TypeScript fixture into a temp data dir, and a spawned server — rooted at that fixture
+ * by its own flags — is driven over stdio exactly as a client drives them.
  *
  * The fixture is chosen so each tool has something true to say rather than an empty list:
  * `src/report.ts` declares a class with two methods and two functions, one of which calls the other
@@ -39,7 +39,7 @@ const CURSOR_KEY = "tools-smoke-test-cursor-key-0123456789";
 
 const PROTOCOL_VERSION = "2024-11-05";
 
-/** Generous for two spawns, one fixture index and eight calls; short enough that a hang is a failure. */
+/** Generous for one spawn, one fixture index and eight calls; short enough that a hang is a failure. */
 const HARD_TIMEOUT_MS = 60_000;
 
 /** `bun test`'s 5 s default would fail on the worker run, not on an assertion. */
@@ -132,7 +132,6 @@ interface EnvelopeBody {
 
 /** What one server process wrote, collected at {@link Session.finish}. */
 interface SessionReport {
-  readonly profile: string;
   readonly timedOut: boolean;
   readonly exitCode: number;
   /** Requests written to stdin; each one is owed exactly one stdout line. */
@@ -149,7 +148,6 @@ interface SessionReport {
 }
 
 interface Session {
-  readonly profile: "agent" | "admin";
   readonly tools: readonly string[];
   readonly protocolVersion: string;
   readonly serverName: string;
@@ -235,20 +233,25 @@ function envelopeOf(tool: string, text: string): EnvelopeBody {
 async function openSession(options: {
   readonly repoRoot: string;
   readonly dataDir: string;
-  readonly profile: "agent" | "admin";
 }): Promise<Session> {
   const startedAt = Date.now();
   const proc = Bun.spawn({
-    cmd: [process.execPath, "run", CLI_ENTRY, "mcp"],
+    cmd: [
+      process.execPath,
+      "run",
+      CLI_ENTRY,
+      "mcp",
+      "--repo-root",
+      options.repoRoot,
+      "--data-dir",
+      options.dataDir,
+    ],
     cwd: APP_ROOT,
     env: {
       ...process.env,
-      CODEGRAPH_REPO_ROOT: options.repoRoot,
-      CODEGRAPH_DATA_DIR: options.dataDir,
       CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      // Both settings are stated, not inherited: a harness with a profile of its own must not
-      // decide what this test proves.
-      CODEGRAPH_PROFILE: options.profile,
+      // The tree and the data dir are this process's own flags; these two are stated, not
+      // inherited, so no harness setting can decide what this test proves.
       CODEGRAPH_NO_WATCH: "1",
     },
     stdin: "pipe",
@@ -369,7 +372,6 @@ async function openSession(options: {
       clearTimeout(killTimer);
       const stderr = await stderrDrain;
       return {
-        profile: options.profile,
         timedOut,
         exitCode,
         requests,
@@ -425,7 +427,6 @@ async function openSession(options: {
     const serverInfo = asRecord(handshake.serverInfo);
 
     return {
-      profile: options.profile,
       tools,
       protocolVersion: asString(handshake.protocolVersion),
       serverName: asString(serverInfo.name),
@@ -476,21 +477,13 @@ let workspace: string | null = null;
 let dataDir = "";
 let generation: string | null = null;
 let head = "";
-let agentSession: Session | null = null;
-let adminSession: Session | null = null;
+let serverSession: Session | null = null;
 
-function agent(): Session {
-  if (agentSession === null) {
-    throw new Error("the agent session was not opened; read the beforeAll failure first");
+function server(): Session {
+  if (serverSession === null) {
+    throw new Error("the server session was not opened; read the beforeAll failure first");
   }
-  return agentSession;
-}
-
-function admin(): Session {
-  if (adminSession === null) {
-    throw new Error("the admin session was not opened; read the beforeAll failure first");
-  }
-  return adminSession;
+  return serverSession;
 }
 
 function publishedGeneration(): string {
@@ -540,15 +533,13 @@ beforeAll(async () => {
   // Drift the tree *after* the publish: `summary {scope: "change"}` needs a diff to describe.
   await writeFile(join(repoRoot, REPORT_PATH), `${REPORT_SOURCE}\n// drift after the publish\n`);
 
-  agentSession = await openSession({ repoRoot, dataDir, profile: "agent" });
-  adminSession = await openSession({ repoRoot, dataDir, profile: "admin" });
+  serverSession = await openSession({ repoRoot, dataDir });
 }, TEST_TIMEOUT_MS);
 
 afterAll(async () => {
   try {
-    // Idempotent: the last test already finished both, and this only covers an earlier failure.
-    await agentSession?.finish();
-    await adminSession?.finish();
+    // Idempotent: the last test already finished it, and this only covers an earlier failure.
+    await serverSession?.finish();
   } finally {
     if (workspace !== null) {
       await rm(workspace, { recursive: true, force: true });
@@ -558,27 +549,20 @@ afterAll(async () => {
 });
 
 describe("the seven tools over MCP against a published generation", () => {
-  test("the agent profile publishes six tools and the admin profile seven", () => {
-    const agentTools = agent();
-    const adminTools = admin();
+  test("the server publishes the seven tools on its one surface", () => {
+    const surface = server();
 
-    expect({ server: agentTools.serverName, version: agentTools.protocolVersion }).toEqual({
+    expect({ server: surface.serverName, version: surface.protocolVersion }).toEqual({
       server: "codegraph",
       version: PROTOCOL_VERSION,
     });
-    expect(agentTools.tools).toHaveLength(6);
-    expect(agentTools.tools).toEqual([...AGENT_TOOL_NAMES].sort());
-    expect(agentTools.tools).not.toContain("index");
-
-    expect(adminTools.tools).toHaveLength(7);
-    expect(adminTools.tools).toEqual([...TOOL_NAMES].sort());
-    expect(adminTools.tools).toContain("index");
-    // The extra name is the only difference between the profiles.
-    expect(adminTools.tools.filter((name) => !agentTools.tools.includes(name))).toEqual(["index"]);
+    expect(surface.tools).toHaveLength(7);
+    expect(surface.tools).toEqual([...TOOL_NAMES].sort());
+    expect(surface.tools).toContain("index");
   });
 
   test("status reports the generation the worker published", async () => {
-    const envelope = await agent().call("status", {});
+    const envelope = await server().call("status", {});
     expect(envelope.status).toBe("ok");
     expect(envelope.read_status.generation).toBe(publishedGeneration());
     expect(envelope.read_status.indexed_at).not.toBe("");
@@ -594,7 +578,7 @@ describe("the seven tools over MCP against a published generation", () => {
   });
 
   test("summary scope change returns the base commit and a risk with driver sentences", async () => {
-    const envelope = await agent().call("summary", { scope: "change" });
+    const envelope = await server().call("summary", { scope: "change" });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -618,7 +602,7 @@ describe("the seven tools over MCP against a published generation", () => {
   });
 
   test("trace on a known function returns a resolution block and its call edges", async () => {
-    const envelope = await agent().call("trace", { query: "emitReport" });
+    const envelope = await server().call("trace", { query: "emitReport" });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -650,7 +634,7 @@ describe("the seven tools over MCP against a published generation", () => {
   });
 
   test("search ranks the exact name first", async () => {
-    const envelope = await agent().call("search", { query: "renderReport" });
+    const envelope = await server().call("search", { query: "renderReport" });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -667,7 +651,7 @@ describe("the seven tools over MCP against a published generation", () => {
   });
 
   test("impact on a fixture file reaches the cross-file caller", async () => {
-    const envelope = await agent().call("impact", { paths: [REPORT_PATH] });
+    const envelope = await server().call("impact", { paths: [REPORT_PATH] });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -694,14 +678,14 @@ describe("the seven tools over MCP against a published generation", () => {
   });
 
   test("expand on the class qn from search returns its members", async () => {
-    const found = await agent().call("search", { query: "ReportBuilder", kind: "class" });
+    const found = await server().call("search", { query: "ReportBuilder", kind: "class" });
     expect(found.status).toBe("ok");
     const hits = asArray(asRecord(found.payload).results).map(asRecord);
     expect(hits).toHaveLength(1);
     const classQn = asString(hits[0]?.qn);
     expect(classQn).toBe(CLASS_QN);
 
-    const envelope = await agent().call("expand", { target: classQn });
+    const envelope = await server().call("expand", { target: classQn });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -721,11 +705,10 @@ describe("the seven tools over MCP against a published generation", () => {
     }
   });
 
-  test("the index tool runs a real worker on the admin profile and publishes", async () => {
-    expect(agent().tools).not.toContain("index");
-    expect(admin().tools).toContain("index");
+  test("the index tool runs a real worker and publishes", async () => {
+    expect(server().tools).toContain("index");
 
-    const envelope = await admin().call("index", { force: true, mode: "fast" });
+    const envelope = await server().call("index", { force: true, mode: "fast" });
     expect(envelope.status).toBe("ok");
 
     const payload = asRecord(envelope.payload);
@@ -743,36 +726,15 @@ describe("the seven tools over MCP against a published generation", () => {
     expect(generationRows(dbPath)).toBe(1);
   });
 
-  test("both servers wrote only JSON-RPC to stdout and exited cleanly", async () => {
-    const agentReport = await agent().finish();
-    const adminReport = await admin().finish();
+  test("the server wrote only JSON-RPC to stdout and exited cleanly", async () => {
+    const report = await server().finish();
 
-    for (const report of [agentReport, adminReport]) {
-      expect({ profile: report.profile, timedOut: report.timedOut }).toEqual({
-        profile: report.profile,
-        timedOut: false,
-      });
-      expect({ profile: report.profile, nonJson: report.nonJsonLines }).toEqual({
-        profile: report.profile,
-        nonJson: [],
-      });
-      expect({ profile: report.profile, violations: report.protocolViolations }).toEqual({
-        profile: report.profile,
-        violations: [],
-      });
-      expect({ profile: report.profile, unsolicited: report.unsolicitedResponses }).toEqual({
-        profile: report.profile,
-        unsolicited: 0,
-      });
-      expect({ profile: report.profile, exitCode: report.exitCode }).toEqual({
-        profile: report.profile,
-        exitCode: 0,
-      });
-      // One line per request: nothing was answered twice and nothing was written uninvited.
-      expect({ profile: report.profile, lines: report.stdoutLines }).toEqual({
-        profile: report.profile,
-        lines: report.requests,
-      });
-    }
+    expect(report.timedOut).toBe(false);
+    expect(report.nonJsonLines).toEqual([]);
+    expect(report.protocolViolations).toEqual([]);
+    expect(report.unsolicitedResponses).toBe(0);
+    expect(report.exitCode).toBe(0);
+    // One line per request: nothing was answered twice and nothing was written uninvited.
+    expect(report.stdoutLines).toBe(report.requests);
   });
 });

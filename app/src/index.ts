@@ -1,14 +1,15 @@
 /**
  * The composition root (`TECH-SPEC.md` §7): the one module that knows both halves of the app. It
- * does four things and nothing else — resolve the config and run the open-time guard, register the
- * tools the profile allows, start the watcher, and wire the exit path — so every other module can
- * be tested without a server and without a database.
+ * resolves the config and runs the open-time guard, registers the seven tools, dispatches a CLI
+ * invocation to one of them, starts the watcher, and wires the exit path — so every other module
+ * can be tested without a server and without a database.
  *
  * Two rules shape the file:
  *
- * - **stdout is the MCP protocol.** No `console.log`, no `process.stdout.write` outside an explicit
- *   CLI mode; every diagnostic goes through `#shared/log`, which owns stderr. A stray line here
- *   corrupts the session rather than merely looking untidy.
+ * - **stdout is the MCP protocol, or one CLI rendering.** No `console.log`, and no
+ *   `process.stdout.write` outside {@link runTool} — one envelope, or the human `status` lines, or
+ *   the usage block a refusal asked for; every diagnostic goes through `#shared/log`, which owns
+ *   stderr. A stray line here corrupts the session rather than merely looking untidy.
  * - **the manifest is the only schema.** Each tool's `input` literal is turned into the JSON Schema
  *   `tools/list` publishes and the arguments `tools/call` accepts, so the advertised surface and the
  *   parsed one cannot drift.
@@ -34,7 +35,24 @@ import {
   ListToolsRequestSchema,
   type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
-import { type AppConfig, loadConfig, type Profile } from "#shared/config";
+import {
+  CliUsageError,
+  type InputField,
+  type InputLiteral,
+  parseArgs,
+  parseCliArgs,
+  splitGlobals,
+  type ToolArgs,
+  usageOf,
+} from "#shared/cli/args";
+import {
+  EXIT_FAILURE,
+  EXIT_USAGE,
+  exitCodeOf,
+  renderEnvelope,
+  statusLines,
+} from "#shared/cli/render";
+import { type AppConfig, flagValue, loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import {
   bootstrapping,
@@ -97,27 +115,6 @@ const UNKNOWN_COVERAGE: Coverage = {
   not_indexed: [],
 };
 
-/**
- * One declared argument, exactly the literal a manifest exports (`TECH-SPEC.md` §6). Deliberately
- * loose — `type` is a plain string — because one manifest writes its table without `as const`, so a
- * stricter union would need a cast here to say what the switch below already checks at runtime.
- */
-interface InputField {
-  readonly type: string;
-  readonly required?: boolean;
-  readonly default?: unknown;
-  readonly min?: number;
-  readonly max?: number;
-  readonly values?: readonly string[];
-  readonly items?: { readonly type?: string; readonly values?: readonly string[] };
-  readonly description?: string;
-}
-
-type InputLiteral = Readonly<Record<string, InputField>>;
-
-/** The argument map a validated call hands a handler: declared keys only, defaults applied. */
-type ToolArgs = Readonly<Record<string, unknown>>;
-
 /** The one call signature the registry stores; each tool's own args type is narrowed inside it. */
 type ToolHandler = (
   ctx: ToolContext,
@@ -127,7 +124,6 @@ type ToolHandler = (
 interface RegisteredTool {
   readonly name: string;
   readonly description: string;
-  readonly profile: Profile;
   readonly input: InputLiteral;
   readonly handle: ToolHandler;
 }
@@ -145,8 +141,8 @@ function bind<A>(
 
 /**
  * The registry, in the order `tools/list` reports: the orientation tools first, then the lookups,
- * then the admin repair. `profile` comes from the manifest, so a tool that should not be reachable
- * from an agent session says so once, next to its description.
+ * then the admin repair. All seven are registered unconditionally — one surface for the MCP client
+ * and the CLI alike; what keeps a repair out of the way is the instructions, not a filter.
  */
 const TOOLS: readonly RegisteredTool[] = [
   { ...statusManifest, input: statusInput, handle: bind(statusHandle) },
@@ -160,15 +156,6 @@ const TOOLS: readonly RegisteredTool[] = [
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
-}
-
-/**
- * The tool surface one profile may see (DESIGN.md §4). `agent` gets the six query tools; `admin`
- * adds `index`. The same filter decides what `tools/list` publishes and what `tools/call` accepts,
- * so a profile cannot be widened by calling a name it was not offered.
- */
-function registerableTools(profile: Profile): RegisteredTool[] {
-  return TOOLS.filter((tool) => tool.profile === "agent" || profile === "admin");
 }
 
 function itemSchemaOf(field: InputField): Record<string, unknown> {
@@ -229,89 +216,6 @@ function descriptorOf(tool: RegisteredTool): Tool {
   };
 }
 
-function matchesItem(field: InputField, value: unknown): boolean {
-  if (typeof value !== "string") {
-    return false;
-  }
-  const values = field.items?.values;
-  return values === undefined || values.includes(value);
-}
-
-function matchesType(field: InputField, value: unknown): boolean {
-  switch (field.type) {
-    case "string":
-      return typeof value === "string";
-    case "integer":
-      return typeof value === "number" && Number.isInteger(value);
-    case "boolean":
-      return typeof value === "boolean";
-    case "enum":
-      return typeof value === "string" && (field.values ?? []).includes(value);
-    case "array":
-      return Array.isArray(value) && value.every((item) => matchesItem(field, item));
-    default:
-      // A manifest field with an unknown `type` is a bug in the tool, never in the call.
-      return false;
-  }
-}
-
-/** What the argument should have been, in the one line the agent's retry needs. */
-function expectationOf(name: string, field: InputField): string {
-  switch (field.type) {
-    case "integer": {
-      const floor = field.min ?? Number.MIN_SAFE_INTEGER;
-      const ceiling = field.max ?? Number.MAX_SAFE_INTEGER;
-      return `"${name}" must be an integer between ${floor} and ${ceiling}`;
-    }
-    case "enum":
-      return `"${name}" must be one of: ${(field.values ?? []).join(", ")}`;
-    case "array": {
-      const values = field.items?.values;
-      return values === undefined
-        ? `"${name}" must be an array of strings`
-        : `"${name}" must be an array of: ${values.join(", ")}`;
-    }
-    case "boolean":
-      return `"${name}" must be true or false`;
-    default:
-      return `"${name}" must be a string`;
-  }
-}
-
-/**
- * Arguments against the manifest literal: unknown keys are dropped, declared defaults fill an
- * absent argument, a missing required argument and a wrong type are refused. Refusals carry the
- * closed `internal` code because they are our own schema disagreeing with the client, and the hint
- * names the argument so the retry is a correction rather than a guess.
- */
-function parseArgs(tool: string, input: InputLiteral, raw: unknown): ToolArgs {
-  const source: Record<string, unknown> =
-    typeof raw === "object" && raw !== null && !Array.isArray(raw)
-      ? (raw as Record<string, unknown>)
-      : {};
-  const args: Record<string, unknown> = {};
-  for (const [name, field] of Object.entries(input)) {
-    const value = source[name];
-    if (value === undefined) {
-      if (field.default !== undefined) {
-        args[name] = field.default;
-      } else if (field.required === true) {
-        throw new AppError("internal", `${tool} is missing the required argument "${name}"`, {
-          hint: expectationOf(name, field),
-        });
-      }
-      continue;
-    }
-    if (!matchesType(field, value)) {
-      throw new AppError("internal", `${tool} received an invalid "${name}" argument`, {
-        hint: expectationOf(name, field),
-      });
-    }
-    args[name] = value;
-  }
-  return args;
-}
-
 /** One claim the open-time guard can make about the database it found (`DATABASE.md` §5). */
 type Store =
   | {
@@ -361,7 +265,7 @@ function guardRoot(recorded: string | null, repoRoot: string, dbPath: string): R
       "wrong_project_db",
       `the graph at ${dbPath} belongs to ${recorded}, not ${repoRoot}`,
       {
-        hint: "point CODEGRAPH_DATA_DIR (or --data-dir) at this tree's own .codegraph directory",
+        hint: "point --data-dir at this tree's own .codegraph directory",
       },
     ),
   };
@@ -378,7 +282,7 @@ function refusalOf(error: unknown): AppError {
     return error;
   }
   return new AppError("internal", `the graph could not be opened: ${messageOf(error)}`, {
-    hint: "run `codegraph index` to rebuild it",
+    hint: "run `cgraph index` to rebuild it",
   });
 }
 
@@ -419,7 +323,7 @@ function openStore(config: AppConfig): Store {
         "schema_too_new",
         `the graph at ${dbPath} is schema v${found}; this build ships v${shipped}`,
         {
-          hint: "upgrade the server, or move the data dir aside and re-index with `codegraph index`",
+          hint: "upgrade the server, or move the data dir aside and re-index with `cgraph index`",
         },
       );
       conn.close();
@@ -532,7 +436,7 @@ async function callTool(
 ): Promise<CallToolResult> {
   const tool = tools.get(params.name);
   if (tool === undefined) {
-    const error = new AppError("not_found", `no tool named "${params.name}" in this profile`, {
+    const error = new AppError("not_found", `no tool named "${params.name}" in this surface`, {
       hint: `this server registers: ${[...tools.keys()].join(", ")}`,
     });
     return answer(
@@ -542,7 +446,7 @@ async function callTool(
           store,
           params.name,
           `${params.name} is not registered`,
-          "the tool does not exist in this profile",
+          "the tool does not exist in this surface",
         ),
       ),
     );
@@ -701,8 +605,7 @@ async function runMcp(config: AppConfig): Promise<number> {
     log.error("mcp.refused", { code: store.error.code, reason: store.error.message });
   }
 
-  const tools = registerableTools(config.profile);
-  const byName = new Map(tools.map((tool) => [tool.name, tool]));
+  const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -710,7 +613,7 @@ async function runMcp(config: AppConfig): Promise<number> {
     // guide reaches the agent, since MCP publishes tools and not prompt text.
     { capabilities: { tools: {} }, instructions: INSTRUCTIONS_TEXT },
   );
-  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: tools.map(descriptorOf) }));
+  server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: TOOLS.map(descriptorOf) }));
   const pending = pendingCalls();
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     pending.begin();
@@ -742,7 +645,6 @@ async function runMcp(config: AppConfig): Promise<number> {
 
   await server.connect(new StdioServerTransport());
   log.info("mcp.ready", {
-    profile: config.profile,
     repoRoot: config.repoRoot,
     dataDir: config.dataDir,
     tools: [...byName.keys()],
@@ -754,11 +656,6 @@ async function runMcp(config: AppConfig): Promise<number> {
   await pending.settled();
   await shutdown(lifecycle, "client closed stdin");
   return 0;
-}
-
-function flagValue(argv: readonly string[], name: string): string | undefined {
-  const index = argv.indexOf(`--${name}`);
-  return index === -1 ? undefined : argv[index + 1];
 }
 
 /**
@@ -778,62 +675,135 @@ function workerOptions(argv: readonly string[], config: AppConfig) {
 }
 
 /**
- * `status` as a CLI mode: a few human lines on stdout. This is not a protocol stream — the mode
- * exists so an operator can look without an MCP client — which is why the one stdout write in this
- * file is allowed here and nowhere else.
+ * One tool invocation from the command line: the same manifest, the same store guard and the same
+ * envelope a protocol call gets, written to stdout once. This is not a protocol stream — it exists so
+ * an operator can use a tool without an MCP client — and it is the only place in this file that
+ * writes to stdout.
+ *
+ * `--help` is answered before the arguments are validated, because a usage block is exactly what a
+ * caller asking for help wants even when a required argument is still missing. `splitGlobals` and
+ * `parseCliArgs` share one refusal path because both refuse the argv rather than the call, and both
+ * carry the usage block printed here.
  */
-function runStatus(config: AppConfig): number {
+async function runTool(name: string, argv: readonly string[], config: AppConfig): Promise<number> {
+  const tool = TOOLS.find((candidate) => candidate.name === name);
+  if (tool === undefined) {
+    // Unreachable through `main`, which resolves the name first; kept so this function's contract
+    // does not depend on its caller having done the lookup.
+    process.stderr.write(`cgraph: unknown tool "${name}"\n`);
+    return EXIT_USAGE;
+  }
+
+  let json = false;
+  let args: ToolArgs;
+  try {
+    const globals = splitGlobals(argv);
+    json = globals.json;
+    if (globals.help) {
+      process.stdout.write(`${usageOf(name, tool.input)}\n`);
+      return 0;
+    }
+    args = parseCliArgs(name, tool.input, globals.rest);
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n${error.usage}\n`);
+      return EXIT_USAGE;
+    }
+    throw error;
+  }
+
   const store = openStore(config);
   if (store.kind === "refused") {
-    log.error("status.refused", { code: store.error.code, reason: store.error.message });
-    return 1;
+    process.stderr.write(`${store.error.message}\n`);
+    if (store.error.hint !== undefined) {
+      process.stderr.write(`${store.error.hint}\n`);
+    }
+    return EXIT_FAILURE;
   }
   if (store.kind === "absent") {
-    process.stdout.write(`${store.reason}\n`);
-    return 0;
-  }
-  const envelope = statusHandle({ ...store.context, log: scopedLog("status") }, {});
-  const lines: string[] = [`${envelope.status}: ${envelope.summary}`];
-  const payload = envelope.payload;
-  if (payload !== null) {
-    lines.push(
-      `project  ${payload.project.name ?? "unknown"} (${payload.project.root ?? "unrecorded"})`,
-      `database ${payload.project.db_path}`,
-      `graph    ${payload.graph.nodes} nodes, ${payload.graph.edges} edges, ${payload.graph.size_bytes} bytes`,
-      `health   ${payload.health.indexer ?? "unknown"}, ${payload.health.consecutive_failures} consecutive failures`,
+    // `status` is the one tool that answers an empty tree instead of failing: "no index yet" is its
+    // whole job, and the line an operator reads before the first index run.
+    if (name === "status") {
+      process.stdout.write(`${store.reason}\n`);
+      return 0;
+    }
+    process.stdout.write(
+      renderEnvelope(
+        bootstrapping({
+          ...boundarySpec(store, name, store.reason, "nothing has been indexed yet"),
+          retry_after_ms: STATUS_RETRY_AFTER_MS,
+          hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
+        }),
+      ),
     );
+    return EXIT_FAILURE;
   }
-  process.stdout.write(`${lines.join("\n")}\n`);
-  store.conn.close();
-  return 0;
+
+  // A handler returns its errors, so a throw here is a bug or a boundary refusal — caught, logged
+  // and rendered exactly as `callTool` renders it.
+  const context: ToolContext = { ...store.context, log: scopedLog(name) };
+  let envelope: Envelope<unknown>;
+  try {
+    envelope = route(await tool.handle(context, args), name, store.staleReason);
+  } catch (error) {
+    context.log.error("tool.failed", {
+      code: isAppError(error) ? error.code : "internal",
+      reason: messageOf(error),
+    });
+    process.stdout.write(
+      renderEnvelope(
+        fail(
+          error,
+          boundarySpec(
+            store,
+            name,
+            `${name} could not answer`,
+            "the call failed before the graph answered",
+          ),
+        ),
+      ),
+    );
+    return EXIT_FAILURE;
+  }
+  process.stdout.write(
+    name === "status" && !json ? statusLines(envelope) : renderEnvelope(envelope),
+  );
+  return exitCodeOf(envelope);
 }
 
 /**
  * The one entry `bin/codegraph.ts` calls. Every mode resolves the same config first, so the tree and
  * the data dir are decided in exactly one place, and a start-up failure is a logged exit 2 rather
  * than an exception the CLI would print to stdout.
+ *
+ * The first token is the mode. `mcp`, `worker` and `index` are the verbs this process owns, and
+ * every other name is a tool from the registry: `index` is both on purpose, because the verb is the
+ * bootstrap and the repair path (a fresh tree has no store for a tool call to answer from) while the
+ * tool of the same name is what a client calls. Both read the same `--mode` and `--force`.
  */
 export async function main(mode: string, argv: string[]): Promise<number> {
   try {
-    const config = loadConfig();
+    // `flagValue` scans the whole argv, so a global flag may sit on either side of the tool token.
+    const config = loadConfig({ argv });
     switch (mode) {
       case "mcp":
         return await runMcp(config);
       case "index":
       case "worker":
         return await runWorker(workerOptions(argv, config));
-      case "status":
-        return runStatus(config);
-      default:
-        log.error("unknown mode", { mode });
-        return 2;
     }
+    const tool = TOOLS.find((candidate) => candidate.name === mode);
+    if (tool === undefined) {
+      process.stderr.write(`cgraph: unknown tool "${mode}"\n`);
+      return EXIT_USAGE;
+    }
+    return await runTool(tool.name, argv.slice(1), config);
   } catch (error) {
     log.error("startup failed", {
       mode,
       code: isAppError(error) ? error.code : "internal",
       reason: messageOf(error),
     });
-    return 2;
+    return EXIT_USAGE;
   }
 }

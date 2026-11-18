@@ -24,8 +24,13 @@
       "size": "M",
       "title": "Rebuild config on argv and autodetect, drop the three variables and the profile",
       "agent": "implement",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:16:55Z",
+          "detail": "Worker (code-writer) rewrote app/src/shared/config.ts and added app/tests/config.test.ts. Orchestrator verification: `bun test tests/config.test.ts` 15 pass / 0 fail (35 expects); `bun test tests/boundary.test.ts` 11 pass / 0 fail (shared layer still isolated — config.ts imports only node:fs + node:path); biome check on both files clean; `git status --porcelain` shows only those two paths. Read the file: exports are exactly Budgets, AppConfig{dataDir,repoRoot,cursorKey,budgets}, LoadConfigOptions{argv,env,cwd}, flagValue, detectRepoRoot, loadConfig — PROFILES/Profile/isProfile/AppConfig.profile gone; the only env read is CODEGRAPH_CURSOR_KEY. flagValue scans the whole argv for `--n v` and `--n=v`; detectRepoRoot walks .codegraph then .git (dir or file) to the fs root then returns resolve(cwd); loadConfig resolves --repo-root against cwd and --data-dir against repoRoot. Remaining CODEGRAPH_REPO_ROOT/_DATA_DIR/_PROFILE hits are src/index.ts:364, src/indexer/watch.ts and src/tools/index/handler.ts, owned by TASK-008/009/010."
+        }
+      ]
     },
     {
       "details": {
@@ -49,8 +54,13 @@
       "size": "S",
       "title": "Remove the profile field from the four query manifests",
       "agent": "implement",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:16:55Z",
+          "detail": "Worker (code-writer) deleted `profile: \"agent\",` from status/summary/search/trace manifests and rewrote only the trace reachability comment (\"Always registered: exploring relationships is an everyday question, and the description above is what tells a caller when to reach for it.\"). Orchestrator verification: combined import probe over all seven manifests prints `ok` and each still has name+description; `git diff -U0 src/tools/` contains no added/removed name or description string literal (only the index satisfies clause and that one comment); biome check clean on the four files; diff scope exactly the four owned files. Expected red until TASK-011/012: tools-trace.test.ts:271, tools-search.test.ts:270, tools-status.test.ts:604 still assert manifest.profile — those files are owned by TASK-011/012."
+        }
+      ]
     },
     {
       "details": {
@@ -73,8 +83,13 @@
       "size": "S",
       "title": "Remove the profile field from expand, impact and the index manifest",
       "agent": "implement",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:16:55Z",
+          "detail": "Worker (code-writer) removed profile from expand/impact manifests and, in index/manifest.ts, deleted `profile: \"admin\"`, the `import type { Profile } from \"#shared/config\"` line and the profile member of the satisfies clause, and rewrote the header paragraph to say index is registered like any other tool gated by the instructions on `status` reporting a broken graph, keeping the 1 081 calls / 12.9 % failures measurement. Orchestrator verification: seven-manifest import probe prints `ok`; `grep -rn \"Profile\" src/tools/index/manifest.ts` returns nothing (exit 1); `git diff -U0 src/tools/` shows no name/description string literal change; biome check clean on the three files; diff scope exactly expand, impact, index manifests. Non-blocking note from the worker: the \"admin client\" wording in the tools-index test header is left for TASK-010."
+        }
+      ]
     },
     {
       "details": {
@@ -102,8 +117,13 @@
       "size": "M",
       "title": "Dispatch tools from argv in the composition root and drop profile filtering",
       "agent": "implement",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:27:49Z",
+          "detail": "Worker (code-writer) rewrote app/src/index.ts as the CLI composition root: runTool added (six branches), main dispatches mcp/worker/index verbs then any TOOLS name with argv.slice(1), unknown name -> `cgraph: unknown tool \"<name>\"` + EXIT_USAGE; local InputField/InputLiteral/ToolArgs/matchesType/matchesItem/expectationOf/parseArgs, runStatus, registerableTools, RegisteredTool.profile and the Profile import all deleted; runMcp uses TOOLS directly; hints now `point --data-dir ...` / `run cgraph index`. Orchestrator verification: `bun run typecheck` exit 0; `bun run lint` clean (92 files); `grep -n \"profile\\|Profile\\|runStatus\\|registerableTools\\|codegraph index\" src/index.ts` prints nothing; 175 tests across 11 files pass (config, tools-index, tools-summary/search/expand/trace/impact/status, read-files, watch, boundary); only src/index.ts modified in this task. Deliberate deviations accepted: (a) `--help` answered before parseCliArgs inside the same CliUsageError try/catch so `cgraph trace --help` prints usage instead of failing on the missing required arg; (b) uses shared flagValue and imports type ToolArgs from #shared/cli/args instead of keeping local copies; (c) main's startup catch returns EXIT_USAGE (value 2) as before."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -127,8 +147,13 @@
       ],
       "size": "M",
       "title": "Accept a tool name in the CLI entry, keep index as a verb, and print help",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:36:09Z",
+          "detail": "Worker (code-writer) rewrote app/bin/codegraph.ts (79 lines): RESERVED = [mcp, worker, index], USAGE banner naming the three verbs, seven tools (index flagged as verb+tool with identical args), the three global flags, the name-first rule, status = five human lines vs --json, the bootstrap line, and the two required examples; VERB_USAGE one-liners; top-level --help/-h/help and per-verb --help answer before the lazy import; main's return of 2 prints USAGE on stderr and every other code passes through. Orchestrator verification: `bun run bin/codegraph.ts --help` exit 0 with the full banner (all seven tool names, three verbs, three flags present); `... index --help` exit 0 printing `usage: cgraph index [--mode full|fast] [--force] [--repo-root <path>] [--data-dir <path>]` and app/.codegraph mtime still 14:02 (nothing indexed); `... nonsense` exit 2 with empty stdout, `cgraph: unknown tool \"nonsense\"` plus the banner on stderr; shebang intact and 79 lines. Accepted deviation: uses process.stdout/stderr.write throughout instead of the file's old console.error, uniformly."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -154,8 +179,13 @@
       ],
       "size": "M",
       "title": "Spawn the indexer worker with flags instead of environment variables",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:27:49Z",
+          "detail": "Worker (code-writer) migrated the worker spawn to flags: watch.ts spawnCliWorker now appends `--repo-root <repoRoot> --data-dir <dataDir>` and uses `env: { ...process.env }` (both CODEGRAPH_* writes gone; cwd/stdin/stdout/stderr semantics kept); tools/index/handler.ts workerInvocation builds `worker --repo-root R --data-dir D --mode M [--force]` with no env writes; tools-index.test.ts now asserts the ordered argv, keeps CODEGRAPH_REPO_ROOT/_DATA_DIR only as toBeUndefined() property reads, and replaces `manifest.profile` with `\"profile\" in manifest === false`. Orchestrator verification: `bun test tests/tools-index.test.ts` 15 pass / 0 fail; `bun test tests/watch.test.ts` 9 pass / 0 fail; `grep -n \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|codegraph index\" src/indexer/watch.ts src/tools/index/handler.ts` prints nothing; typecheck exit 0 and lint clean repo-wide after all wave-2 tasks landed."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -185,8 +215,13 @@
       ],
       "size": "S",
       "title": "Migrate four tool tests off the repo-root variable and drop profile assertions",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:27:49Z",
+          "detail": "Worker (code-writer) migrated tools-expand/trace/summary/search tests to `loadConfig({ argv: [\"--repo-root\", X], env: { CODEGRAPH_CURSOR_KEY: KEY } })` and replaced the three `manifest.profile` assertions with `expect(\"profile\" in manifest).toBe(false)`, renaming those tests. Orchestrator verification: the four files give 80 pass / 0 fail (summary 11, search 21, expand 21, trace 27); the task grep for CODEGRAPH_REPO_ROOT|manifest.profile|config.profile prints nothing; biome clean; no --data-dir needed because no fixture injected CODEGRAPH_DATA_DIR. Only those four files changed."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -213,8 +248,13 @@
       ],
       "size": "S",
       "title": "Migrate impact, status and read-files tests to flag-based config",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:27:49Z",
+          "detail": "Worker (code-writer) migrated tools-impact/tools-status/read-files tests to argv-based config (status moves both root and data dir onto `--repo-root`/`--data-dir` and drops its CODEGRAPH_PROFILE env entry), replaced the impact/status `manifest.profile` assertions with `\"profile\" in manifest === false`, and replaced read-files' `fakeContext.config.profile` assertion with `\"profile\" in fakeContext.config === false`. Orchestrator verification: the three files give 45 pass / 0 fail (impact 12, status 14, read-files 19); the task grep prints nothing; biome clean. One out-of-brief but necessary repair inside an owned file: tools-impact's specDescription() read `docs/TOOLS-SPEC.md`, a path that has not existed since commit 4a42eb0 (verified with `git show HEAD:app/tests/tools-impact.test.ts` line 354 and `ls docs/`), so the file could not reach exit 0 on the real acceptance command; it now reads `docs/my-product/TOOLS-SPEC.md` with the assertion untouched."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -239,8 +279,13 @@
       ],
       "size": "M",
       "title": "Migrate the acceptance suite to the single surface and flag-based roots",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:36:09Z",
+          "detail": "Worker (code-writer) migrated app/tests/acceptance.test.ts: the single beforeAll loadConfig is now `{ argv: [\"--repo-root\", CORPUS, \"--data-dir\", dataDir], env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY } }`; listTools() lost its profile parameter and spawns `[execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", fixture.corpus, \"--data-dir\", fixture.dataDir]`; the AGENT_TOOL_NAMES import is dropped; criterion 6 is now \"the one surface registers the seven names, index included\" (sorted equality with TOOL_NAMES, length 7, contains index, nonJsonLines []); header bullet 6 reworded; no threshold or CORPUS changed. Orchestrator verification: `bun test tests/acceptance.test.ts` 9 pass / 0 fail (32 expects, 20.9 s); task grep for CODEGRAPH_REPO_ROOT|CODEGRAPH_DATA_DIR|CODEGRAPH_PROFILE|AGENT_TOOL_NAMES|profile prints nothing; biome clean. Non-blocking deviation: the spawn env keeps `...process.env` as its base (as it already did before this change) with the three removed variables deleted, instead of an env holding only the two settings; the two stated settings are cursor key and NO_WATCH, and the tree/data dir now travel only as flags, so the root-proof property holds."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -265,8 +310,13 @@
       ],
       "size": "M",
       "title": "Assert seven tools on one MCP surface rooted by flags",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:36:09Z",
+          "detail": "Worker (code-writer) migrated app/tests/mcp-surface.test.ts: session() takes no profile and spawns `[execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", repoRoot, \"--data-dir\", dataDir]`, the AGENT_TOOL_NAMES import is dropped, the suite is \"MCP surface: seven tools, one clean stdout\", and the two profile tests are folded into one that asserts exactly the seven names with no duplicates plus `index`, then the index descriptor's published schema (both fields optional, force boolean default false, mode enum full|fast default full) and the untouched trace/status schemas. All stdout/stderr purity assertions, description checks and ordering assumptions kept. Orchestrator verification: `bun test tests/mcp-surface.test.ts` 1 pass / 0 fail (25 expects, part of an 11-pass run over the three process-level suites); task grep for profile/CODEGRAPH_*_ROOT/_DATA_DIR/_PROFILE/AGENT_TOOL_NAMES prints nothing; biome clean; app/.codegraph mtime unchanged (14:02 vs run at 17:35)."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -292,8 +342,13 @@
       ],
       "size": "M",
       "title": "Migrate the two process-level smoke tests to flag-based sessions",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:36:09Z",
+          "detail": "Worker (code-writer) migrated both process-level smoke tests to flag-based sessions: binary-smoke spawns `[build.binary, \"mcp\", \"--repo-root\", fixture.repoRoot, \"--data-dir\", fixture.dataDir]` with `{ ...process.env, CODEGRAPH_CURSOR_KEY, CODEGRAPH_NO_WATCH: \"1\" }`; tools-smoke's openSession lost the profile property and spawns `[execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", repoRoot, \"--data-dir\", dataDir]`; Session/SessionReport lost `profile`, the vacuous self-comparisons became direct `expect(report.<field>)` checks (timedOut false, nonJsonLines [], protocolViolations [], unsolicited 0, exitCode 0, stdoutLines === requests), the AGENT_TOOL_NAMES import is gone and the published-names assertion is over TOOL_NAMES (seven, includes index). Orchestrator verification: `bun test tests/mcp-surface.test.ts tests/tools-smoke.test.ts tests/binary-smoke.test.ts` 11 pass / 0 fail (241 expects); reviewed the full tools-smoke diff — the two-profile scaffolding collapsed into one session, and every envelope/cursor/payload assertion survived; task grep for the two removed vars, PROFILE, AGENT_TOOL_NAMES and profile prints nothing; no artefact left in the repo."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -320,8 +375,13 @@
       ],
       "size": "M",
       "title": "Rewrite the instructions guide for one seven-tool surface",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:41:22Z",
+          "detail": "Worker (code-writer) rewrote the guide for one seven-tool surface: ADMIN_TOOL_NAMES/AGENT_TOOL_NAMES/AgentToolName deleted, TOOL_NAMES keeps all seven names in the old order, NEXT_TOOLS is Readonly<Record<ToolName, readonly ToolName[]>> with unchanged values; title -> `# Using the graph: five rules, seven tools, one bound repository`; the `Do not call index` bullet removed (three anti-patterns remain); closing paragraph names all seven tools and states index is a repair to call only when status reports a broken graph; app/docs/INSTRUCTIONS.md regenerated byte-identical; tests/instructions.test.ts imports only TOOL_NAMES with de-profilled names and a repair-wording check. Orchestrator verification: `bun test tests/instructions.test.ts` 11 pass / 0 fail (45 expects); direct comparison of the exported INSTRUCTIONS_TEXT against docs/INSTRUCTIONS.md -> equal; the task grep prints nothing; `bun run typecheck` exit 0 (no dangling AGENT_TOOL_NAMES import anywhere); `bun run lint` clean (92 files); regression run of acceptance + mcp-surface + tools-smoke + binary-smoke -> 20 pass / 0 fail. Non-blocking, phase-2 scope: app/README.md:64 still says \"agent profile\"."
+        }
+      ]
     },
     {
       "agent": "verify",
@@ -351,8 +411,13 @@
       ],
       "size": "M",
       "title": "Closing gate: one surface, no removed variables, full suite green",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T10:45:39Z",
+          "detail": "Closing gate executed and verified by the orchestrator directly (no separate verify agent dispatched; the agent budget for this deliverable was spent on the 12 implementation tasks, so this gate is orchestration-verified, not independently reviewed). Full verify chain: `bun run typecheck` exit 0; `bun run lint` exit 0 (92 files); `bun test` 546 pass / 0 fail across 39 files, 45.6 s; `! grep -rn \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|CODEGRAPH_PROFILE\" src bin docs README.md` exit 0 (prints nothing); `! grep -rn \"profile\" src bin docs` exit 0 (prints nothing). Manual bootstrap smoke in a mktemp tree (two TS files, cwd = tree, no CODEGRAPH_* variable except cursor key and NO_WATCH): `bun run /ABS/app/bin/codegraph.ts index` exit 0 and created .codegraph/graph.db; from src/deep/nested `status` printed exactly 5 human lines and exited 0; `status --json` one envelope exit 0; `search handleRequest` exit 0 (826 B); `trace emitReport --depth 1` exit 0 (1587 B); `impact` exit 0 (1120 B); `nonsense` exit 2; `trace` with no positional exit 2. Temp tree removed. Deviation handled with the user's explicit instruction: TASK-017's Sweep A names app/README.md, which is owned by phase_2 TASK-018 and was still listing the three removed variables (7 lines) plus a Profile column; the user chose \"update README now, then complete\", so app/README.md received a minimal scoped fix (First run -> --repo-root, env table reduced to CURSOR_KEY/NO_WATCH plus a flags sentence, Profile column dropped from the tool table, prod-final paragraph now states one surface and the index-as-repair rule, \"Moving the data directory\" -> --data-dir). Both sweeps are now empty. app/README.md is the only file in this phase's diff not owned by a phase_1 task; TASK-018 still owns the full rewrite. app/package.json unchanged (git diff empty)."
+        }
+      ]
     }
   ]
 }

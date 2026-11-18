@@ -245,7 +245,8 @@ function makeContext(reader: GraphReader): ToolContext {
     log,
     now: () => NOW,
     config: loadConfig({
-      env: { CODEGRAPH_REPO_ROOT: "/tmp/fixture", CODEGRAPH_CURSOR_KEY: KEY },
+      argv: ["--repo-root", "/tmp/fixture"],
+      env: { CODEGRAPH_CURSOR_KEY: KEY },
     }),
   };
 }
@@ -266,9 +267,9 @@ function allItems(payload: TracePayload): { id: number; hop: number }[] {
 }
 
 describe("manifest", () => {
-  test("name, profile and the verbatim description live in one place", () => {
+  test("name and the verbatim description live in one place, with no profile field", () => {
     expect(manifest.name).toBe("trace");
-    expect(manifest.profile).toBe("agent");
+    expect("profile" in manifest).toBe(false);
     expect(manifest.description).toContain("Show what is connected to one symbol");
     expect(manifest.description).toContain("Does not return source code.");
     expect(manifest.description).toContain('returns `status: "ambiguous"` with candidates');

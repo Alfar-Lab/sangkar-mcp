@@ -1,4 +1,4 @@
-# Using the graph: five rules, six tools, one bound repository
+# Using the graph: five rules, seven tools, one bound repository
 
 The server already knows which repository this is: it was bound at startup, so nothing here
 selects a project or builds an index. Every answer carries `read_status` (which generation
@@ -45,9 +45,6 @@ detail from the kind — `members` for a file or class, `edges` for a function o
 
 ## Do not
 
-- **Do not call `index`.** It is not in the agent profile; the server keeps the graph current on
-  its own. If the graph looks wrong, call `status`, report what it did not cover, and carry on.
-  A rebuild is a repair, not a query.
 - **Do not read `total_relation: gte` as none.** `gte` means lower bound: coverage is incomplete,
   call sites are unresolved, the generation is stale, or the list was cut. Say at least N, and
   call `status` with the paths you care about before claiming nothing exists.
@@ -56,7 +53,9 @@ detail from the kind — `members` for a file or class, `edges` for a function o
 - **Do not pass a project argument.** There is none: the repository is bound at startup, so a
   name or a path never needs a project to disambiguate it.
 
-The agent profile has exactly six tools: `status`, `summary`, `trace`, `search`, `impact`,
-`expand`. `status` says what is indexed, `summary`, `trace` and `search` answer questions about
-the code, `impact` says what a change reaches, and `expand` answers a follow-up about one item.
-`next_tools` on every response names the tools worth calling next, always from this list.
+The surface is seven tools: `status`, `summary`, `trace`, `search`, `impact`, `expand` and
+`index`. `status` says what is indexed, `summary`, `trace` and `search` answer questions about
+the code, `impact` says what a change reaches, `expand` answers a follow-up about one item, and
+`index` rebuilds the graph: call it only when `status` says the graph is broken, and never as a
+query — a rebuild is a repair. `next_tools` on every response names the tools worth calling
+next, always from this list.

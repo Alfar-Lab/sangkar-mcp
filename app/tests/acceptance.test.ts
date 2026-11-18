@@ -12,7 +12,7 @@ import {
   type Envelope,
   type EnvelopeStatus,
 } from "#shared/envelope";
-import { AGENT_TOOL_NAMES, TOOL_NAMES, type ToolName } from "#shared/instructions";
+import { TOOL_NAMES, type ToolName } from "#shared/instructions";
 import { log } from "#shared/log";
 import { prefixBounds } from "#shared/paths";
 import {
@@ -69,7 +69,7 @@ import {
  * 3. a request touching a `not_indexed` path answers `coverage.complete: false` and says why;
  * 4. `trace` p95 < 40 ms, `search` p95 < 60 ms, `summary(change)` p95 < 120 ms over 30 repetitions;
  * 5. all nine envelope fields on every response, `error` only on `error`/`bootstrapping`;
- * 6. the seven tools are the only registered names, the `agent` profile exposes six;
+ * 6. one surface publishes exactly the seven registered names, `index` included;
  * 7. a reader holding an open handle returns unchanged results while a publish renames over the
  *    live file (S4);
  * 8. 1 000 identical point reads built per call versus prepared: the prepared path is >= 5x faster
@@ -372,11 +372,8 @@ beforeAll(async () => {
   const conn = openReader(livePath);
   const reader = makeReader(conn);
   const config: AppConfig = loadConfig({
-    env: {
-      CODEGRAPH_REPO_ROOT: CORPUS,
-      CODEGRAPH_DATA_DIR: dataDir,
-      CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-    },
+    argv: ["--repo-root", CORPUS, "--data-dir", dataDir],
+    env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
   });
   const ctx: ToolContext = {
     reader,
@@ -959,28 +956,23 @@ describe("acceptance: nine criteria on the reference corpus", () => {
     expect(violations).toEqual([]);
   });
 
-  test("criterion 6: seven registered names, the agent profile exposes six", async () => {
-    const admin = await listTools("admin");
-    const agent = await listTools("agent");
+  test("criterion 6: the one surface registers the seven names, index included", async () => {
+    const surface = await listTools();
 
     report("acceptance.criterion6.surface", {
-      admin: admin.names,
-      agent: agent.names,
-      adminStdoutLines: admin.stdoutLines,
-      agentStdoutLines: agent.stdoutLines,
-      nonJsonLines: [...admin.nonJsonLines, ...agent.nonJsonLines],
-      exitCodes: [admin.exitCode, agent.exitCode],
+      names: surface.names,
+      stdoutLines: surface.stdoutLines,
+      nonJsonLines: surface.nonJsonLines,
+      exitCode: surface.exitCode,
     });
 
-    expect([...admin.names].sort()).toEqual([...TOOL_NAMES].sort());
-    expect([...agent.names].sort()).toEqual([...AGENT_TOOL_NAMES].sort());
-    expect(agent.names).not.toContain("index");
-    expect(admin.names.length).toBe(7);
-    expect(agent.names.length).toBe(6);
+    expect([...surface.names].sort()).toEqual([...TOOL_NAMES].sort());
+    expect(surface.names.length).toBe(7);
+    expect(surface.names).toContain("index");
     // Bare verbs, no `_tool` suffix: the name is what the agent reads and types.
-    expect(admin.names.filter((name) => !/^[a-z][a-z0-9_]*$/.test(name))).toEqual([]);
-    expect(admin.names.filter((name) => name.endsWith("_tool"))).toEqual([]);
-    expect([...admin.nonJsonLines, ...agent.nonJsonLines]).toEqual([]);
+    expect(surface.names.filter((name) => !/^[a-z][a-z0-9_]*$/.test(name))).toEqual([]);
+    expect(surface.names.filter((name) => name.endsWith("_tool"))).toEqual([]);
+    expect(surface.nonJsonLines).toEqual([]);
   });
 
   test("criterion 8: 1 000 identical point reads — prepared is at least 5x a per-call builder", async () => {
@@ -1163,17 +1155,24 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-/** The `tools/list` names one profile publishes, read from a real server process over stdio. */
-async function listTools(profile: "agent" | "admin"): Promise<Surface> {
+/** The `tools/list` names the one surface publishes, read from a real server process over stdio. */
+async function listTools(): Promise<Surface> {
   const proc = Bun.spawn({
-    cmd: [process.execPath, "run", CLI_ENTRY, "mcp"],
+    // Rooted by flags only: a session that inherits a root from the environment proves nothing.
+    cmd: [
+      process.execPath,
+      "run",
+      CLI_ENTRY,
+      "mcp",
+      "--repo-root",
+      fixture.corpus,
+      "--data-dir",
+      fixture.dataDir,
+    ],
     cwd: APP_ROOT,
     env: {
       ...process.env,
-      CODEGRAPH_REPO_ROOT: fixture.corpus,
-      CODEGRAPH_DATA_DIR: fixture.dataDir,
       CODEGRAPH_CURSOR_KEY: CURSOR_KEY,
-      CODEGRAPH_PROFILE: profile,
       CODEGRAPH_NO_WATCH: "1",
     },
     stdin: "pipe",

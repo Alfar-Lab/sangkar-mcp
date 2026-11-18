@@ -20,7 +20,6 @@ export const manifest = {
     "Find symbols or text in the indexed code. Hybrid keyword (BM25) with optional semantic rerank. " +
     "Returns declarations with file:line and their in/out degree — not source. Use when you know " +
     "roughly what it is called but not where it lives.",
-  profile: "agent",
 } as const;
 
 /**

@@ -1,25 +1,23 @@
 /**
- * `index`: the one admin-only tool (`TOOLS-SPEC.md` §8, `DESIGN.md` §4).
+ * `index`: the one tool that forces or repairs a reindex (`TOOLS-SPEC.md` §8, `DESIGN.md` §4).
  *
- * The profile is the whole reason this tool is separate: measured, an agent called indexing 1 081
- * times and it failed 12.9 % of the time, for work the server already does itself when the tree
- * changes. Repair is a real need, so the tool exists; the agent profile must not see it. The
- * composition root enforces that by registering a tool only when its `profile` matches, which is
- * why the value here is a literal and not something a handler computes.
+ * It is registered like every other tool. What keeps it out of the way is the instructions, not a
+ * registration filter: they tell an agent to call it only when `status` reports a broken graph.
+ * Measured, an agent called indexing 1 081 times and it failed 12.9 % of the time, for work the
+ * server already does itself when the tree changes — so repair is a real need, but a routine one
+ * it is not.
  *
  * The description is byte for byte `TOOLS-SPEC.md` §8's text (`tests/tools-index.test.ts` asserts
  * it). It is what an admin client reads before calling the one tool in this server that rewrites
  * the entire graph, so paraphrasing it would be a behaviour change, not an edit.
  */
-import type { Profile } from "#shared/config";
 
 export const manifest = {
   name: "index",
   description:
     "Admin: force a full or fast index, or repair a broken one. Not for normal use — the server " +
     "keeps the graph current automatically.",
-  profile: "admin",
-} as const satisfies { name: string; description: string; profile: Profile };
+} as const satisfies { name: string; description: string };
 
 /**
  * The two optional arguments, in the shape `TECH-SPEC.md` §6 fixes for every tool's `input`

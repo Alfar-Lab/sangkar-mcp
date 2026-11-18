@@ -210,7 +210,8 @@ function contextWith(reader: GraphReader): ToolContext {
     log,
     now: () => new Date("2026-01-03T00:00:05Z"),
     config: loadConfig({
-      env: { CODEGRAPH_REPO_ROOT: ROOT, CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
+      argv: ["--repo-root", ROOT],
+      env: { CODEGRAPH_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }

@@ -15,7 +15,6 @@ export const manifest = {
   name: "impact",
   description:
     "Given a change set, list what it can reach: dependents, affected entry points, and the tests that cover it, with a risk score. Defaults to the working-tree diff. Call before editing, or before merging.",
-  profile: "agent",
 } as const;
 
 export const input = {

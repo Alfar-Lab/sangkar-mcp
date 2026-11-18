@@ -342,7 +342,8 @@ function helperNode(nodes: readonly NodeRow[]): NodeRow {
 
 function makeContext(reader: GraphReader, repoRootPath: string): ToolContext {
   const config: AppConfig = loadConfig({
-    env: { CODEGRAPH_REPO_ROOT: repoRootPath, CODEGRAPH_CURSOR_KEY: KEY },
+    argv: ["--repo-root", repoRootPath],
+    env: { CODEGRAPH_CURSOR_KEY: KEY },
   });
   const cursor: CursorFacade = createCursors({ key: KEY });
   return { reader, cursor, log, now: () => new Date("2026-01-03T00:05:00Z"), config };
@@ -390,9 +391,9 @@ function ambiguousOf(env: Envelope<ExpandPayload | null>): AmbiguousPayload {
 }
 
 describe("expand: manifest", () => {
-  test("declares the spec's name, verbatim description and agent profile", () => {
+  test("declares the spec's name and verbatim description, with no profile field", () => {
     expect(manifest.name).toBe("expand");
-    expect(manifest.profile).toBe("agent");
+    expect("profile" in manifest).toBe(false);
     expect(manifest.description).toContain("Fetch more detail for one item from a previous result");
     expect(manifest.description).toContain("says which it chose");
   });

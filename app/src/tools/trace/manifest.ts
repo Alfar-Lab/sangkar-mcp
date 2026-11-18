@@ -48,8 +48,8 @@ export const DESCRIPTION =
 export const manifest = {
   name: "trace",
   description: DESCRIPTION,
-  // `agent`: exploring relationships is an agent's everyday question, unlike `index`.
-  profile: "agent",
+  // Always registered: exploring relationships is an everyday question, and the description above
+  // is what tells a caller when to reach for it.
 } as const;
 
 /**

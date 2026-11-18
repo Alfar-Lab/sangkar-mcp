@@ -17,7 +17,6 @@ export const manifest = {
   description:
     "Fetch more detail for one item from a previous result. Pass the id, qualified name or path " +
     "exactly as it appeared. Infers what to expand from the item's kind and says which it chose.",
-  profile: "agent",
 } as const;
 
 /**

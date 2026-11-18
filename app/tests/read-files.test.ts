@@ -552,7 +552,8 @@ describe("read/context", () => {
   const cursors = createCursors({ key: "fake-cursor-key-material-32-bytes" });
 
   const fakeConfig: AppConfig = loadConfig({
-    env: { CODEGRAPH_REPO_ROOT: "/tmp/fake", CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
+    argv: ["--repo-root", "/tmp/fake"],
+    env: { CODEGRAPH_CURSOR_KEY: "k".repeat(32) },
   });
 
   const fakeContext: ToolContext = {
@@ -577,7 +578,7 @@ describe("read/context", () => {
     expect(handle(fakeContext, { qn: "src/a.ts::alpha" })).toBe("src/a.ts::alpha");
     expect(fakeContext.now().toISOString()).toBe("2026-01-03T00:00:00.000Z");
     expect(fakeContext.config.repoRoot).toBe("/tmp/fake");
-    expect(fakeContext.config.profile).toBe("agent");
+    expect("profile" in fakeContext.config).toBe(false);
   });
 
   test("the cursor pair from #shared/cursor satisfies CursorFacade", () => {
