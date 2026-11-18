@@ -1,0 +1,356 @@
+{
+  "phase": "phase_1",
+  "title": "Env and profile removal, CLI wiring",
+  "tasks": [
+    {
+      "details": {
+        "contract": "app/src/shared/config.ts ends up exporting exactly:\n\nexport const PROFILES?  -> deleted, with the Profile type and isProfile\nexport interface Budgets { defaultTokens: number; maxTokens: number }\nexport interface AppConfig { dataDir: string; repoRoot: string; cursorKey: string; budgets: Budgets }\nexport interface LoadConfigOptions { argv?: readonly string[]; env?: Record<string, string | undefined>; cwd?: string }\nexport function loadConfig(options?: LoadConfigOptions): AppConfig\nexport function detectRepoRoot(cwd: string): string\nexport function flagValue(argv: readonly string[], name: string): string | undefined\n\nDelete PROFILES, Profile, isProfile and AppConfig.profile. Delete every read of CODEGRAPH_REPO_ROOT, CODEGRAPH_DATA_DIR and CODEGRAPH_PROFILE; the only environment read left in this file is CODEGRAPH_CURSOR_KEY (and the injected `env` option stays for tests).\n\nflagValue(argv, name) returns the value of `--<name> value` or `--<name>=value` and undefined when absent; a flag present with no value is resolved as undefined.\n\nResolution: repoRoot = flagValue(argv,'repo-root') resolved against cwd when present, otherwise detectRepoRoot(cwd ?? process.cwd()). dataDir = flagValue(argv,'data-dir') ? resolve(repoRoot, value) : join(repoRoot, '.codegraph').\n\ndetectRepoRoot(cwd) walks from resolve(cwd) upward: at each directory return it when join(dir,'.codegraph') exists, else when join(dir,'.git') exists (a file or a directory — linked worktrees use a file); stop after the filesystem root; return resolve(cwd) when nothing matched. Use node:fs existsSync and node:path only; no git subprocess. Keep the AppError on an unknown cursor-key problem out of this module (the cursor module owns the length check) exactly as today.\n\nThis task temporarily breaks the typecheck for app/src/index.ts and app/src/tools/index/manifest.ts; TASK-008 and TASK-007 repair them in this same phase. Do not edit those files here.",
+        "goal": "Config is decided by argv and by the working directory instead of three environment variables, and the profile concept is gone from the config surface.",
+        "steps": [
+          "Rewrite app/src/shared/config.ts to the exact export list in the contract, deleting the profile and the three environment reads.",
+          "Add flagValue and detectRepoRoot with the documented precedence and walk order.",
+          "Rewrite app/tests/config.test.ts (create it) covering: --repo-root wins over autodetect; --repo-root=/x form; autodetect finds <dir>/.codegraph from a nested subdirectory; .git fallback when no .codegraph exists; cwd fallback in a bare temp directory; --data-dir relative resolves against repoRoot; CODEGRAPH_REPO_ROOT/CODEGRAPH_DATA_DIR/CODEGRAPH_PROFILE set in `env` are ignored; cursorKey still comes from env.CODEGRAPH_CURSOR_KEY.",
+          "Use mkdtemp fixtures in the test and remove them in afterAll; never point a fixture at the repository's own app/.codegraph.",
+          "Confirm no import of tools or indexer was introduced."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/config.test.ts\nDone when: every case in the file passes and `grep -n \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|CODEGRAPH_PROFILE\\|Profile\" src/shared/config.ts` returns nothing (typecheck is expected red until TASK-007 and TASK-008 land in this phase)."
+      },
+      "files": [
+        "app/src/shared/config.ts",
+        "app/tests/config.test.ts"
+      ],
+      "id": "TASK-005",
+      "pre_request": [],
+      "size": "M",
+      "title": "Rebuild config on argv and autodetect, drop the three variables and the profile",
+      "agent": "implement",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "details": {
+        "contract": "In app/src/tools/status/manifest.ts, app/src/tools/summary/manifest.ts, app/src/tools/trace/manifest.ts and app/src/tools/search/manifest.ts remove the `profile: \"agent\",` entry from the exported manifest object. Keep `name` and `description` byte-identical: app/tests/tools-*.test.ts compare those strings to the spec text, so any rewording is a regression.\n\nWhere a header comment or a property comment says the tool is reachable because of a profile, rewrite just that sentence to say the tool is always registered and the instructions explain when to call it. Do not delete the measured rationale paragraphs that explain why a tool exists.\n\nDo not touch app/src/tools/expand/manifest.ts, app/src/tools/impact/manifest.ts or app/src/tools/index/manifest.ts (TASK-007 owns those), and do not touch app/src/index.ts (TASK-008 owns it). Assertions on `manifest.profile` inside app/tests/tools-*.test.ts belong to TASK-011 and TASK-010; leave those files alone.",
+        "goal": "The four agent-profile manifests stop declaring a profile, because there is one surface now.",
+        "steps": [
+          "Edit status, summary, trace and search manifests: delete the `profile` entry.",
+          "Fix only the comments that assert profile-based reachability.",
+          "Confirm each `description` string is unchanged with git diff."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun -e 'for (const t of [\"status\",\"summary\",\"trace\",\"search\"]) { const m = (await import(`./src/tools/${t}/manifest.ts`)).manifest; if (\"profile\" in m) throw new Error(t); } console.log(\"ok\")'\nDone when: it prints ok and `git diff --stat` lists exactly those four manifest files."
+      },
+      "files": [
+        "app/src/tools/status/manifest.ts",
+        "app/src/tools/summary/manifest.ts",
+        "app/src/tools/trace/manifest.ts",
+        "app/src/tools/search/manifest.ts"
+      ],
+      "id": "TASK-006",
+      "pre_request": [],
+      "size": "S",
+      "title": "Remove the profile field from the four query manifests",
+      "agent": "implement",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "details": {
+        "contract": "In app/src/tools/expand/manifest.ts and app/src/tools/impact/manifest.ts remove `profile: \"agent\",` and fix only comments that assert profile-based reachability; keep name and description byte-identical.\n\nIn app/src/tools/index/manifest.ts: remove `profile: \"admin\",`; delete `import type { Profile } from \"#shared/config\";`; change the trailing `as const satisfies { name: string; description: string; profile: Profile }` to `as const satisfies { name: string; description: string }`; keep `export const input` and `IndexArgs` untouched; rewrite the header paragraph that says the agent profile must not see this tool so it says instead that `index` is registered like every other tool and that the instructions tell an agent to call it only when `status` reports a broken graph, keeping the measured fact (1 081 calls, 12.9 % failures) as the reason for that instruction.\n\nDo not edit app/src/index.ts (TASK-008) and do not edit any test file; app/tests/tools-index.test.ts profile assertions belong to TASK-010.",
+        "goal": "expand, impact and index manifests drop the profile field, and index no longer imports the deleted Profile type.",
+        "steps": [
+          "Edit expand and impact manifests: delete the `profile` entry.",
+          "Edit the index manifest: delete the entry, the Profile import and the satisfies clause, and rewrite the profile paragraph.",
+          "Confirm `description` strings are byte-identical with git diff."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun -e 'for (const t of [\"expand\",\"impact\",\"index\"]) { const m = (await import(`./src/tools/${t}/manifest.ts`)).manifest; if (\"profile\" in m) throw new Error(t); } console.log(\"ok\")'\nDone when: it prints ok, `grep -rn \"Profile\" src/tools/index/manifest.ts` returns nothing, and `git diff --stat` lists exactly those three files."
+      },
+      "files": [
+        "app/src/tools/expand/manifest.ts",
+        "app/src/tools/impact/manifest.ts",
+        "app/src/tools/index/manifest.ts"
+      ],
+      "id": "TASK-007",
+      "pre_request": [],
+      "size": "S",
+      "title": "Remove the profile field from expand, impact and the index manifest",
+      "agent": "implement",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "details": {
+        "contract": "app/src/index.ts becomes the CLI composition root for tools. Required shape changes:\n\nImports: `import { type InputLiteral, parseArgs, parseCliArgs, usageOf, CliUsageError } from \"#shared/cli/args\";` and `import { EXIT_FAILURE, EXIT_USAGE, exitCodeOf, renderEnvelope, statusLines } from \"#shared/cli/render\";`. Delete the local InputField, InputLiteral, ToolArgs, matchesType, matchesItem, expectationOf and parseArgs.\n\nRegistry: RegisteredTool loses `readonly profile`; delete registerableTools; runMcp uses the TOOLS array directly (const byName = new Map(TOOLS.map(...))) and its mcp.ready log no longer prints `profile`.\n\nmain(mode, argv): calls loadConfig({ argv }); `mcp` and `worker` dispatch exactly as today; any other mode is looked up in TOOLS and dispatched to the new runTool; an unknown name writes `cgraph: unknown tool \"<name>\"` to stderr and returns EXIT_USAGE without printing usage text (app/bin/codegraph.ts owns the banner).\n\nrunTool(name, argv, config): looks the tool up; builds args with parseCliArgs(name, tool.input, argv) inside try/catch — on CliUsageError write error.message and error.usage to stderr and return EXIT_USAGE; then openStore(config); `refused` writes the error message and hint to stderr and returns EXIT_FAILURE; `absent` prints store.reason to stdout and returns 0 when name === 'status', otherwise prints renderEnvelope of a bootstrapping envelope built with the existing boundarySpec helper and returns EXIT_FAILURE; `ready` calls tool.handle({ ...store.context, log: scopedLog(name) }, args), writes renderEnvelope(route(envelope, name, store.staleReason)) to stdout and returns exitCodeOf(envelope). A handler throwing is caught, logged and returned as EXIT_FAILURE with the failure envelope printed, mirroring callTool.\n\nrunStatus: keep the mode, but build its lines with statusLines(envelope) instead of inline formatting. workerOptions: keep --mode and --force only; repoRoot/dataDir come from the config produced by loadConfig({ argv }). guardRoot's hint becomes \"point --data-dir at this tree's own .codegraph directory\" (no CODEGRAPH_DATA_DIR). The `--data-dir` flag is now real: it is parsed by loadConfig.\n\nDo not change callTool, answer, route, openStore, guardRoot logic, the watcher startup condition or the MCP request handlers beyond the profile removal. No new file may be created here.",
+        "goal": "The composition root dispatches a tool from argv, registers all seven tools unconditionally, and no longer carries a copy of the argument validator.",
+        "steps": [
+          "Replace the local validator block with imports from #shared/cli/args and #shared/cli/render.",
+          "Remove profile from RegisteredTool, delete registerableTools, and make runMcp register TOOLS directly.",
+          "Add runTool(name, argv, config) as specified, reusing openStore, scopedLog, boundarySpec, route and answer.",
+          "Extend main: loadConfig({ argv }), dispatch tool names to runTool, unknown names return EXIT_USAGE.",
+          "Switch runStatus to statusLines, and fix the guardRoot hint text.",
+          "Confirm workerOptions still parses --mode/--force and reads no environment variable."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun run lint\nDone when: both are clean, `git diff --stat` lists only app/src/index.ts, and `$HOME/.bun/bin/bun run bin/codegraph.ts status` over an indexed tree still prints the same four lines as before."
+      },
+      "files": [
+        "app/src/index.ts"
+      ],
+      "id": "TASK-008",
+      "pre_request": [
+        "TASK-005",
+        "TASK-006",
+        "TASK-007"
+      ],
+      "size": "M",
+      "title": "Dispatch tools from argv in the composition root and drop profile filtering",
+      "agent": "implement",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/bin/codegraph.ts keeps its shebang, its lazy `const { main } = await import(\"../src/index\")` import and its `process.exit(await main(requested, argv))` tail. Replace the four-name MODES allow-list with `const RESERVED = [\"mcp\", \"worker\"] as const`, and make the entry accept either a reserved mode or a tool name:\n\nconst argv = process.argv.slice(2);\nconst requested = argv[0] ?? \"mcp\";\n\nWhen `requested` is `--help`, `-h` or `help`, print USAGE to stdout and exit 0 without importing the kernel. Otherwise call main(requested, argv) and, when it returns 2 (the usage exit code), print USAGE to stderr and exit 2. Every other code is passed through unchanged. The bin file must not import #shared/* or the tool registry; the usage banner is a literal that names the modes `mcp` and `worker` and the seven tools `status`, `summary`, `trace`, `search`, `impact`, `expand`, `index`, plus one example line `cgraph trace 'handleRequest' --depth 1` and one `cgraph mcp --repo-root /path/to/repo`.\n\nKeep the file under ~60 lines and keep the comment explaining why the import is lazy.",
+        "goal": "`cgraph <tool> …` reaches the composition root for every tool name, `cgraph --help` prints a real guide, and an unknown name still exits 2.",
+        "steps": [
+          "Rewrite the USAGE constant around the two modes and seven tool names.",
+          "Replace the MODES guard with the help detection plus a pass-through to main.",
+          "Map main's exit code 2 to a stderr USAGE print, leaving other codes untouched.",
+          "Verify the file has no import of the tool registry or of #shared/*."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun run bin/codegraph.ts --help && $HOME/.bun/bin/bun run bin/codegraph.ts nonsense; echo \"exit=$?\"\nDone when: --help exits 0 and lists all seven tools and both modes; the unknown name prints the banner on stderr and exits 2."
+      },
+      "files": [
+        "app/bin/codegraph.ts"
+      ],
+      "id": "TASK-009",
+      "pre_request": [
+        "TASK-008"
+      ],
+      "size": "S",
+      "title": "Accept a tool name in the CLI entry with help and usage text",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/src/indexer/watch.ts: in spawnCliWorker, append `--repo-root`, target.repoRoot, `--data-dir`, target.dataDir to the child command and delete both CODEGRAPH_REPO_ROOT and CODEGRAPH_DATA_DIR entries from the spawned `env` (`env: { ...process.env }` only, so the child still gets PATH for git). Keep `cwd: target.repoRoot`, keep stdin/stdout ignored and stderr inherited, and keep the comment that explains why stdout is discarded.\n\napp/src/tools/index/handler.ts: in workerInvocation, build the command as [...prefix, \"worker\", \"--repo-root\", ctx.config.repoRoot, \"--data-dir\", ctx.config.dataDir, \"--mode\", args.mode] and push \"--force\" when args.force; the returned `env` becomes `{ ...process.env }` with no CODEGRAPH_* writes. Update the doc comment that claims the roots travel as environment variables.\n\napp/tests/watch.test.ts: update the spawn assertion so it checks the two flags are present with the fixture's values and that neither CODEGRAPH_REPO_ROOT nor CODEGRAPH_DATA_DIR appears in the captured env.\n\napp/tests/tools-index.test.ts: replace the two env assertions with the argv assertions (flag then value, in order) and assert the env carries no CODEGRAPH_* key. In the same file delete the `profile: \"admin\"` field from the ToolContext/config fixture and replace `expect(manifest.profile).toBe(\"admin\")` with an assertion that the manifest declares no profile (`expect(\"profile\" in manifest).toBe(false)`), keeping the verbatim description assertion untouched.\n\nDo not change the spawn semantics (no detached process, no change to stderr streaming) and do not edit app/src/index.ts.",
+        "goal": "The writer process is rooted by command-line flags instead of inherited environment variables, and the two tests that pinned the old channel are migrated in the same task.",
+        "steps": [
+          "Edit watch.ts: append the two flags to cmd and strip the two env keys.",
+          "Edit tools/index/handler.ts: build the flag form of the worker command and drop the env writes, updating the comment.",
+          "Migrate app/tests/watch.test.ts spawn assertion to flags and assert no CODEGRAPH_* env key.",
+          "Migrate app/tests/tools-index.test.ts env assertions to flags, drop the profile field from its fixture and replace the profile assertion.",
+          "Run both files."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/watch.test.ts tests/tools-index.test.ts\nDone when: both files pass, and `grep -rn \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\" src/indexer/watch.ts src/tools/index/handler.ts tests/watch.test.ts tests/tools-index.test.ts` returns nothing."
+      },
+      "files": [
+        "app/src/indexer/watch.ts",
+        "app/src/tools/index/handler.ts",
+        "app/tests/watch.test.ts",
+        "app/tests/tools-index.test.ts"
+      ],
+      "id": "TASK-010",
+      "pre_request": [
+        "TASK-008"
+      ],
+      "size": "M",
+      "title": "Spawn the indexer worker with flags instead of environment variables",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Every `loadConfig({ env: { CODEGRAPH_REPO_ROOT: X, CODEGRAPH_CURSOR_KEY: KEY } })` call in these files becomes `loadConfig({ argv: [\"--repo-root\", X], env: { CODEGRAPH_CURSOR_KEY: KEY } })`. Keep whatever the test already asserts about the resulting config; only the injection channel changes, because the flag path is the production path now.\n\napp/tests/tools-expand.test.ts: also replace `expect(manifest.profile).toBe(\"agent\")` (the test named for name, description and profile) with an assertion that the manifest declares no profile, and rename that test so it no longer claims a profile.\n\napp/tests/tools-trace.test.ts: same treatment for its `name, profile and the verbatim description` test.\n\napp/tests/tools-summary.test.ts and app/tests/tools-search.test.ts: only the loadConfig call site changes.\n\nDo not touch app/tests/tools-impact.test.ts, tools-status.test.ts or read-files.test.ts (TASK-012), and do not touch app/src/**.",
+        "goal": "Four tool tests build their config through the real --repo-root flag instead of a removed environment variable.",
+        "steps": [
+          "Rewrite the loadConfig call in tools-summary.test.ts and tools-search.test.ts to the argv form.",
+          "Rewrite it in tools-expand.test.ts and replace its profile assertion.",
+          "Rewrite it in tools-trace.test.ts and replace its profile assertion.",
+          "Confirm each rewritten test still points at its own mkdtemp fixture and not at the repository's app/.codegraph."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/tools-summary.test.ts tests/tools-search.test.ts tests/tools-expand.test.ts tests/tools-trace.test.ts\nDone when: all four files pass and `grep -rn \"CODEGRAPH_REPO_ROOT\" tests/tools-*.test.ts` reports only files owned by other tasks."
+      },
+      "files": [
+        "app/tests/tools-expand.test.ts",
+        "app/tests/tools-trace.test.ts",
+        "app/tests/tools-summary.test.ts",
+        "app/tests/tools-search.test.ts"
+      ],
+      "id": "TASK-011",
+      "pre_request": [
+        "TASK-005"
+      ],
+      "size": "S",
+      "title": "Migrate four tool tests off the repo-root variable and drop profile assertions",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/tests/tools-impact.test.ts, app/tests/tools-status.test.ts and app/tests/read-files.test.ts each build an AppConfig through loadConfig. Replace every `env: { CODEGRAPH_REPO_ROOT: X, CODEGRAPH_CURSOR_KEY: KEY }` with `argv: [\"--repo-root\", X]` plus `env: { CODEGRAPH_CURSOR_KEY: KEY }`. tools-status.test.ts also passes CODEGRAPH_DATA_DIR in some configurations: where a test needs a data dir outside the repo root, pass `argv: [\"--repo-root\", X, \"--data-dir\", D]` instead of the environment.\n\nKeep every other assertion in these files unchanged; the payload expectations, budgets and fixtures stay as they are. Do not touch app/src/** and do not touch the tool tests owned by TASK-011.",
+        "goal": "Three more tests build config from flags, including the one that needs a data dir outside the repository.",
+        "steps": [
+          "Rewrite the loadConfig call in app/tests/tools-impact.test.ts.",
+          "Rewrite the loadConfig call in app/tests/tools-status.test.ts, moving any data dir onto --data-dir.",
+          "Rewrite the loadConfig call in app/tests/read-files.test.ts.",
+          "Confirm each fixture path still points into a mkdtemp directory."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/tools-impact.test.ts tests/tools-status.test.ts tests/read-files.test.ts\nDone when: all three pass, and none of the three files still mentions CODEGRAPH_REPO_ROOT or CODEGRAPH_DATA_DIR."
+      },
+      "files": [
+        "app/tests/tools-impact.test.ts",
+        "app/tests/tools-status.test.ts",
+        "app/tests/read-files.test.ts"
+      ],
+      "id": "TASK-012",
+      "pre_request": [
+        "TASK-005"
+      ],
+      "size": "S",
+      "title": "Migrate impact, status and read-files tests to flag-based config",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/tests/acceptance.test.ts has four sites to migrate.\n\n1. Its main beforeAll `loadConfig({ env: { CODEGRAPH_REPO_ROOT: CORPUS, CODEGRAPH_DATA_DIR: dataDir, CODEGRAPH_CURSOR_KEY } })` becomes `loadConfig({ argv: [\"--repo-root\", CORPUS, \"--data-dir\", dataDir], env: { CODEGRAPH_CURSOR_KEY } })`.\n2. The second `loadConfig` site near the unpublished/unmigrated fixture gets the same treatment, using its own root and data dir.\n3. `listTools(profile: \"agent\" | \"admin\")` loses the parameter: one surface, so the function becomes `listTools()` and its spawned command is `[execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", repoRoot, \"--data-dir\", dataDir]`; its env keeps only `CODEGRAPH_CURSOR_KEY` and `CODEGRAPH_NO_WATCH: \"1\"`. Delete the CODEGRAPH_REPO_ROOT, CODEGRAPH_DATA_DIR and CODEGRAPH_PROFILE entries.\n4. Criterion 6 changes: the header comment bullet at ~line 72 and the test at ~line 962 (`criterion 6: seven registered names, the agent profile exposes six`) become a single-surface assertion — the seven names exactly once, in registry order, and `index` included. Keep the surrounding criteria and every measured threshold untouched.\n\nIf a call site of listTools passes a profile, drop the argument. Do not weaken any other assertion in the file, and do not change the CORPUS constant.",
+        "goal": "The acceptance suite drives one MCP surface rooted by flags, and its criterion 6 states the surface that now exists.",
+        "steps": [
+          "Rewrite the two loadConfig call sites to the argv form.",
+          "Remove the profile parameter from listTools and add the two flags to the spawned command.",
+          "Strip the three removed variables from that spawn's env, keeping CURSOR_KEY and NO_WATCH.",
+          "Rewrite the criterion-6 comment bullet and its test to assert seven names on one surface including index.",
+          "Run the file."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/acceptance.test.ts\nDone when: the file passes, `grep -n \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|CODEGRAPH_PROFILE\\|profile\" tests/acceptance.test.ts` returns nothing, and no threshold or budget assertion changed."
+      },
+      "files": [
+        "app/tests/acceptance.test.ts"
+      ],
+      "id": "TASK-013",
+      "pre_request": [
+        "TASK-008",
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "Migrate the acceptance suite to the single surface and flag-based roots",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/tests/mcp-surface.test.ts:\n\n- `session(profile: \"\" | \"admin\")` loses the parameter; the spawned command becomes `[process.execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", repoRoot, \"--data-dir\", dataDir]`, and the child env keeps only `CODEGRAPH_CURSOR_KEY` and `CODEGRAPH_NO_WATCH: \"1\"`.\n- The suite name `MCP surface: seven tools, two profiles, one clean stdout` becomes `MCP surface: seven tools, one clean stdout`.\n- The test that asserts the agent profile publishes six tools becomes: `tools/list` publishes exactly the seven names in registry order (status, summary, trace, search, impact, expand, index) with no duplicates.\n- The test that asserted the admin profile adds `index` is folded into that one test: it asserts the `index` descriptor's published `inputSchema` matches the manifest literal (both optional fields, `force` boolean, `mode` enum with full/fast) — move those schema assertions into the single-surface test rather than deleting them.\n- Keep every stdout/stderr purity assertion, the description checks and the ordering assumptions exactly as they are.\n\nEach run still gets its own mkdtemp repo root and data dir; never point a session at the repository's own .codegraph. Do not touch app/src/**.",
+        "goal": "The MCP surface test proves seven tools on one surface and roots each session with flags instead of environment variables.",
+        "steps": [
+          "Rewrite session() to take no profile and pass --repo-root/--data-dir.",
+          "Strip the three removed variables from the spawn env, keeping cursor key and NO_WATCH.",
+          "Replace the two profile tests with one seven-name test, folding the published-schema assertions for index into it.",
+          "Rename the suite and update any comment that refers to profiles.",
+          "Run the file."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/mcp-surface.test.ts\nDone when: it passes, the seven names are asserted exactly once, and `grep -n \"profile\\|CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|CODEGRAPH_PROFILE\" tests/mcp-surface.test.ts` returns nothing."
+      },
+      "files": [
+        "app/tests/mcp-surface.test.ts"
+      ],
+      "id": "TASK-014",
+      "pre_request": [
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "Assert seven tools on one MCP surface rooted by flags",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/tests/binary-smoke.test.ts: the compiled-binary session spawns `[build.binary, \"mcp\"]` with `CODEGRAPH_REPO_ROOT`, `CODEGRAPH_DATA_DIR`, `CODEGRAPH_CURSOR_KEY`, `CODEGRAPH_PROFILE`, `CODEGRAPH_NO_WATCH`. Change the command to `[build.binary, \"mcp\", \"--repo-root\", fixture.repoRoot, \"--data-dir\", fixture.dataDir]` and the env to `{ ...process.env, CODEGRAPH_CURSOR_KEY: CURSOR_KEY, CODEGRAPH_NO_WATCH: \"1\" }`. Keep cwd, the request sequence, the hard timeout and every assertion about the binary's stdout/stderr untouched; this test exists to prove the migrations are embedded, not to test the CLI.\n\napp/tests/tools-smoke.test.ts: `openSession({ repoRoot, dataDir, profile })` loses the profile field; its command becomes `[execPath, \"run\", CLI_ENTRY, \"mcp\", \"--repo-root\", repoRoot, \"--data-dir\", dataDir]`; its env keeps only `CODEGRAPH_CURSOR_KEY` and `CODEGRAPH_NO_WATCH: \"1\"`. Any caller that passes `profile: \"admin\"` drops that property, and any test that depended on admin-only visibility of `index` is rewritten to call `index`'s schema/registration assertion on the single surface instead — do not delete the call itself, only the gating assumption. Keep every envelope/cursor/payload assertion unchanged.",
+        "goal": "Both process-level smoke tests spawn the server with flags, leaving the removed variables in neither the command nor the environment.",
+        "steps": [
+          "Migrate the binary-smoke spawn command and env.",
+          "Migrate tools-smoke's openSession signature, command and env.",
+          "Drop profile arguments at the call sites and rewrite the admin-only assumption into a single-surface one.",
+          "Run tools-smoke; run binary-smoke as well if time allows (it builds the artifact)."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/tools-smoke.test.ts && $HOME/.bun/bin/bun test tests/binary-smoke.test.ts\nDone when: both pass and neither file mentions CODEGRAPH_REPO_ROOT, CODEGRAPH_DATA_DIR or CODEGRAPH_PROFILE."
+      },
+      "files": [
+        "app/tests/binary-smoke.test.ts",
+        "app/tests/tools-smoke.test.ts"
+      ],
+      "id": "TASK-015",
+      "pre_request": [
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "Migrate the two process-level smoke tests to flag-based sessions",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "app/src/shared/instructions.ts, its byte-identical copy app/docs/INSTRUCTIONS.md and app/tests/instructions.test.ts move from two surfaces to one.\n\nConstants: delete `ADMIN_TOOL_NAMES` and `AGENT_TOOL_NAMES`; keep `TOOL_NAMES` with all seven names in today's order and keep `export type ToolName`. `NEXT_TOOLS` becomes `Readonly<Record<ToolName, readonly ToolName[]>>` with the same values as today (status: summary/search; summary: impact/trace/expand; trace: expand; search: trace/expand; impact: trace/expand; expand: trace; index: status). `nextToolsFor` keeps returning a fresh array and an empty array for an unknown name.\n\nText: the title line becomes `# Using the graph: five rules, seven tools, one bound repository`. Delete the first `## Do not` bullet (\"Do not call `index`.\") so three anti-patterns remain, and close the guide with a paragraph naming all seven tools and stating, in these words or equally explicit: call `index` only when `status` says the graph is broken, and never as a query — a rebuild is a repair. Keep every other sentence, heading and example unchanged, including the five numbered sections.\n\nDoc copy: app/docs/INSTRUCTIONS.md must remain byte-identical to INSTRUCTIONS_TEXT; apply the same edits there.\n\nTests: replace AGENT_TOOL_NAMES/ADMIN_TOOL_NAMES usage with TOOL_NAMES; the test that checked \"the agent profile is described as exactly six tools\" becomes a check that the guide names all seven; the test that required the string `do not call \\`index\\`` becomes a check for the repair rule wording; the anti-pattern list drops the index entry and keeps three; the routing test asserts every suggestion is in TOOL_NAMES and never the tool itself. Keep the heading-order test passing (no new heading was added).",
+        "goal": "The one-screen guide describes seven tools and turns the old hard exclusion of index into an instruction about when it is appropriate.",
+        "steps": [
+          "Edit the constants and NEXT_TOOLS types in instructions.ts.",
+          "Rewrite the title line, delete the index anti-pattern bullet and add the closing seven-tool paragraph.",
+          "Mirror the same edits into app/docs/INSTRUCTIONS.md.",
+          "Update tests/instructions.test.ts to the new exports and wording, keeping the byte-identity test between constant and doc.",
+          "Run the file."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun test tests/instructions.test.ts && $HOME/.bun/bin/bun run typecheck\nDone when: the file passes, the doc copy test still compares the two copies, and `grep -rn \"AGENT_TOOL_NAMES\\|ADMIN_TOOL_NAMES\" src tests` returns nothing."
+      },
+      "files": [
+        "app/src/shared/instructions.ts",
+        "app/docs/INSTRUCTIONS.md",
+        "app/tests/instructions.test.ts"
+      ],
+      "id": "TASK-016",
+      "pre_request": [
+        "TASK-008"
+      ],
+      "size": "M",
+      "title": "Rewrite the instructions guide for one seven-tool surface",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "Read-only gate over the integrated phase_1 result. Do not edit source or tests; report defects with file and line instead. The phase's owned paths are app/src/shared/config.ts, app/src/shared/instructions.ts, app/src/index.ts, app/bin/codegraph.ts, app/src/indexer/watch.ts, app/src/tools/*/manifest.ts, app/src/tools/index/handler.ts, app/docs/INSTRUCTIONS.md and the migrated files under app/tests/. app/package.json was already owned by phase_0 and must not have changed again.\n\nChecks: typecheck, lint, the whole suite (binary-smoke includes a compiled build), then two greps: (a) no CODEGRAPH_REPO_ROOT, CODEGRAPH_DATA_DIR or CODEGRAPH_PROFILE anywhere under app/src, app/bin or app/tests; (b) no `profile` in app/src. Then a manual smoke: build a throwaway indexed tree in a temp dir (mktemp -d, two small source files, `$HOME/.bun/bin/bun run bin/codegraph.ts index` with cwd inside it), and run status, search, trace, impact and status --json from a nested subdirectory with no CODEGRAPH_* variable set. Report the exact commands and their exit codes.",
+        "goal": "Prove the breaking phase left one surface, zero removed variables and a working CLI, before phase_2 documents it.",
+        "steps": [
+          "Run typecheck and lint.",
+          "Run the full test suite and record pass/fail counts and any file that failed.",
+          "Run the two greps and report their output verbatim.",
+          "Run the manual CLI smoke from a nested directory and report each command with its exit code.",
+          "List any file in the diff that no phase_1 task owns."
+        ],
+        "verify": "cd app && $HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun run lint && $HOME/.bun/bin/bun test\nthen: grep -rn \"CODEGRAPH_REPO_ROOT\\|CODEGRAPH_DATA_DIR\\|CODEGRAPH_PROFILE\" src bin tests (expect no output) and grep -rn \"profile\" src (expect no output)\nDone when: typecheck and lint are clean, the suite is green, both greps are empty, and the manual smoke answered every tool with exit 0 from a nested directory."
+      },
+      "files": [],
+      "id": "TASK-017",
+      "pre_request": [
+        "TASK-009",
+        "TASK-010",
+        "TASK-011",
+        "TASK-012",
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016"
+      ],
+      "size": "M",
+      "title": "Closing gate: one surface, no removed variables, full suite green",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}
