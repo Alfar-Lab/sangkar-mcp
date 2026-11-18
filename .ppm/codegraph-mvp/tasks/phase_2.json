@@ -24,8 +24,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-status.test.ts && $HOME/.bun/bin/bun x tsc --noEmit. Done when the three cases return status ok, the envelope has all nine fields, and a grammar-unavailable language appears with parsed 0 and a note."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:26:15Z",
+          "detail": "Wrote app/src/tools/status/manifest.ts (verbatim TOOLS-SPEC §2 description, profile agent, input {paths, budget default 800}, STATUS_DEFAULT_TOKENS/STATUS_RETRY_AFTER_MS), app/src/tools/status/handler.ts (meta+latestGeneration, allFiles, rowsForPaths(prefixes), censusByLanguage, unresolvedForFiles; coverage complete/indexed/skipped/failed/unresolved_edges/not_indexed from the census identity sum(languages.files)=file rows+not_indexed rows; payload project/graph/languages/paths/health exactly as specified, db_path derived from ctx.config.dataDir with db size from a stat; paths expand prefixes to file rows and carry not_indexed_unknown; bootstrapping when no generation is published; budget via #shared/budget emit with a signed next cursor and budget_too_large returned as an envelope), and app/tests/tools-status.test.ts (fake GraphReader + ToolContext over temp dirs). Verification: `bun test tests/tools-status.test.ts` -> 13 pass, 0 fail (99 expect calls); `bun test tests/boundary.test.ts` -> 11 pass, 0 fail; `bun x tsc --noEmit` -> no error in any owned file (remaining errors are in concurrent workers' src/tools/expand, tools-trace, tools-impact files); `bun x biome check` on the three files clean."
+        },
+        {
+          "time": "2026-11-18T00:26:43Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-status.test.ts` -> 13 pass, 0 fail, 99 expect() calls. Files created are only the three owned ones (src/tools/status/manifest.ts 40L, src/tools/status/handler.ts 440L, tests/tools-status.test.ts 604L). Envelope built only through #shared/envelope, sized only through #shared/budget emit, no drizzle/indexer/console.log in the tool."
+        }
+      ]
     },
     {
       "id": "TASK-021",
@@ -50,8 +59,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-trace.test.ts. Done when a unique name returns grouped neighbours with hop and tier, a two-candidate query returns ambiguous without a payload, an unresolved call site in scope yields total_relation gte, and a truncated response's next cursor returns the following page with no duplicates."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:31:16Z",
+          "detail": "Wrote app/src/tools/trace/manifest.ts (verbatim TOOLS-SPEC §3 description verified byte-for-byte against the spec paragraph; six-arg input schema: query required, direction enum all|in|out default all, kinds array optional, depth integer default 2 min 1 max 4, budget integer default 3200, cursor string) and app/src/tools/trace/handler.ts (cursor verified before any work with argsHash = sha256:<hex> over effective args in fixed key order via Bun.CryptoHasher, cursor_invalid/expired/mismatch → fail with the refusal hint; resolve → ambiguous(≤5 candidates, no node/in/out) / not_found(near_misses) / ok; expand; payload keys exactly resolution/node/in/out/unresolved/not_indexed with groups in the fixed order calls,inherits,implements,references,tested_by,imports and empty groups omitted; unresolved+not_indexed from coverage assemble scoped to the node's file; emit with the single sizing point and a mint that signs the page boundary on the flattened sequence; totals omit the unwalked direction; unpublished generation → fail code bootstrapping). Tests in app/tests/tools-trace.test.ts: 24 pass / 0 fail ($HOME/.bun/bin/bun test tests/tools-trace.test.ts), including ok with tier+hop, ambiguous without body, not_found with near_misses, kinds narrowing, direction and depth, stale read_status, exact gte/eq relations, and a 600-token truncated page whose next cursor delivers the remaining neighbours with no duplicates and nothing lost, plus cursor_invalid/expired/mismatch and unpublished-graph refusals. $HOME/.bun/bin/bun x tsc --noEmit: clean. Boundaries: bun test tests/boundary.test.ts tests/envelope.test.ts tests/budget.test.ts tests/cursor.test.ts tests/contract.test.ts → 70 pass / 0 fail; domain/resolve/read/read-files → 99 pass / 0 fail."
+        },
+        {
+          "time": "2026-11-18T00:31:36Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-trace.test.ts` -> 24 pass, 0 fail, 117 expect() calls. Only the three owned files exist (src/tools/trace/manifest.ts 78L, handler.ts 698L, tests/tools-trace.test.ts 591L). Cursor is verified before any work (argsHash over the effective args), resolve/expand come from #shared/domain, emit is the only sizing point with a mint callback."
+        }
+      ]
     },
     {
       "id": "TASK-022",
@@ -76,8 +94,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-summary.test.ts. Done when the three scopes return exactly their documented keys, drivers are sentences, a stale generation sets read_status.stale true without failing, and a truncated response's next cursor returns the following page with no duplicates."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:34:18Z",
+          "detail": "Wrote app/src/tools/summary/{manifest,handler}.ts + app/tests/tools-summary.test.ts. manifest: name/description verbatim TOOLS-SPEC §4, profile agent, input {scope enum change|repo|area default change, target, base, budget 1200, cursor}. handler: cursor verified first (cursor_invalid/expired/mismatch -> fail with hint, never a partial page), then dispatch; change = changedSinceFrom + risk.score (per-symbol + aggregate) + testGaps + removedSymbolsFor + suggested_next; repo = size/census/entryPoints/hotspots/flows/not_indexed (item_cap when a bound is hit); area = surface/dependents_total/risk; freshness = older-generation rows + diff drift -> read_status.stale without failing; emit() with mint(position) is the only truncation point. Verification: bun test tests/tools-summary.test.ts = 11 pass / 0 fail (81 expect); bun test (full suite) = 431 pass / 0 fail; tsc --noEmit exit 0; biome check clean."
+        },
+        {
+          "time": "2026-11-18T00:34:53Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-summary.test.ts` -> 11 pass, 0 fail, 81 expect() calls. Owned files only (manifest 39L, handler 756L, test 440L). Change scope goes through changedSinceFrom(ctx.config.repoRoot, base, ctx.reader) so no connection is needed; coverage via assemble; emit is the only sizing point. Note: the reader-safe diff entry point (changedSinceFrom/DigestSource) was added to src/shared/domain/diff.ts by the orchestrator before dispatch, with a test in tests/diff.test.ts."
+        }
+      ]
     },
     {
       "id": "TASK-023",
@@ -101,8 +128,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-search.test.ts. Done when an exact name ranks first, a path prefix excludes everything outside it, two identical calls return identical order, and a truncated response's next cursor returns the following page with no duplicates."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:30:13Z",
+          "detail": "Wrote exactly the three packet files: app/src/tools/search/manifest.ts (52 lines), app/src/tools/search/handler.ts (367), app/tests/tools-search.test.ts (547). No other file created or edited.\n\nmanifest.ts: manifest {name:'search', description verbatim from TOOLS-SPEC.md §5 (three sentences joined with single spaces), profile:'agent'}; input {query string required, kind enum function|method|class|file|decorator, path string, budget integer default 2000, cursor string}; SEARCH_KINDS/SearchKind and DEFAULT_BUDGET_TOKENS exported so the handler imports the same numbers the schema advertises. `test` is not a kind because the index stores it as node.is_test, not as a kind value.\n\nhandler.ts: cursor verify-before-work via ctx.cursor.verify(cursor,{generation,tool:'search',argsHash}) where argsHash = sha256 of [trimmedQuery, kind|null, normalizedPrefix] — budget is deliberately excluded so a page can be resumed with a larger budget; refusals return envelope fail with the cursor module's own code+hint (test asserts readNodeFts is called 0 times on a refusal). Then readNodeFts(query, 200) — READER_BOUND is a statement bound, documented as such — and kind/path filters applied after the read with isUnderPrefix (so `src` excludes `src-old`), never re-sorting. position is an index into the flattened filtered list; mint(dropped) signs position start+(window.length-dropped), so page 2 continues with no duplicates. Payload {mode:'bm25', results[{id,qn,kind,file,lines,signature?,degree{in,out},score}]}; signature omitted (never undefined) when the row has none; degree from metricsFor(id), null metrics -> 0/0; no source text. emit(env, args.budget ?? 2000, {mint}); budget_too_large (ceiling or a page where nothing fits) is returned as fail, never thrown; bootstrapping when no generation is published. read_status is graph-side: stale when a file in scope was written by an earlier generation (stale_reason + stale_checked_at), omitted stale_checked_at for a repo-wide scope that compared no file; coverage/relation via assemble over exactly the filtered prefix, so a repo-wide search reports complete:false and gte rather than claiming the whole tree.\n\nEvidence: cd app && $HOME/.bun/bin/bun test tests/tools-search.test.ts -> 21 pass / 0 fail / 112 expect() calls; with tests/boundary.test.ts -> 32 pass / 0 fail (boundary 11 pass, so the new tool obeys tool-isolation and root-privileges). bun x tsc --noEmit -> no error in any of my three files (remaining errors are in concurrent workers' src/tools/expand, src/tools/impact and tests/tools-expand|impact|status, untouched). bun x biome check on the three files -> clean. Asserts: exact name ranks first and a 9/4-degree node stays 4th (no re-sort), path prefix excludes src-old/ and tests/, two identical calls return identical payload/order, truncation pages drain all 5 ids with no duplicates, kind filter, cursor_mismatch/cursor_expired/cursor_invalid refusals, bootstrapping, and both budget_too_large paths.\n\nObservation for TASK-027, not acted on: tests/boundary.test.ts rootAllowList lets src/index.ts import only ./tools/<name>/manifest, so it cannot import a handler — and manifest.ts re-exporting handle is itself a root-privileges violation (I tried it; boundary.test.ts failed). The root task therefore needs a boundary.test.ts allowance or a documented manifest surface change; neither is in this packet's files."
+        },
+        {
+          "time": "2026-11-18T00:35:50Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-search.test.ts` -> 21 pass, 0 fail, 112 expect() calls. Owned files only (manifest 52L, handler 367L, test 547L). Cursor verified before work; readNodeFts(200) is a documented statement bound; kind/path filters after the read via isUnderPrefix; emit is the only cut."
+        }
+      ]
     },
     {
       "id": "TASK-024",
@@ -127,8 +163,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-impact.test.ts. Done when a changed markdown file appears in unmatched_files, impacted rows carry hop and via, a truncated result sets total_relation gte with a next cursor, and that cursor returns the following page with no duplicates."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:26:03Z",
+          "detail": "Wrote app/src/tools/impact/manifest.ts (description verbatim from TOOLS-SPEC.md §6, profile agent, input paths/base/depth(2,1-4)/budget(2500)/cursor), app/src/tools/impact/handler.ts (verify-before-work cursor, changedSinceFrom or explicit paths, inbound expand, hop/via/tier + tested/entry_point from metricsFor, unmatched_files with 4 documented reasons, risk via domain/risk, coverage via assemble, emit with mint, post-emit exact page position/summary), and app/tests/tools-impact.test.ts. Verify: cd app && bun test tests/tools-impact.test.ts -> 12 pass, 0 fail, 102 expect() calls. Scoped tsc (impact+shared+test) clean; full `bun x tsc --noEmit` reports only tests/tools-trace.test.ts (another worker's file). biome check on the three owned files clean. boundary.test.ts: only violation is src/tools/search/manifest.ts importing \"./handler\" (other worker). No status changed by me."
+        },
+        {
+          "time": "2026-11-18T00:36:31Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-impact.test.ts` -> 12 pass, 0 fail, 102 expect() calls. Owned files only (manifest 27L, handler 553L, test 667L). Change set from changedSinceFrom(ctx.config.repoRoot, base, ctx.reader) or explicit paths; inbound expand at clamped depth; unmatched_files keeps unmatched paths; emit is the only sizing point with a mint callback."
+        }
+      ]
     },
     {
       "id": "TASK-025",
@@ -153,8 +198,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-expand.test.ts. Done when a class target infers members, a method target infers edges, a folder target infers coverage, and a source request on a modified file returns source_drift true with no content."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:27:04Z",
+          "detail": "Wrote app/src/tools/expand/{manifest,handler}.ts + app/tests/tools-expand.test.ts. manifest: name expand, verbatim TOOLS-SPEC §7 description, profile agent, input {target required, what enum, budget default 2500}; EXPAND_WHATS derived from the manifest enum. handler: resolves qn/name/path via #shared/domain/resolve; a bare numeric id is refused with a hint (no id lookup exists on GraphReader — documented); inference class/file/module->members, function/method/test/endpoint->edges, folder prefix (no node, coverage rows exist)->coverage, echoed in payload.what + payload.why (\"inferred: class -> members\" / \"requested: edges\"); members = reader.members with degree from metricsFor (null when unmeasured); edges = #shared/domain/neighbors expand(depth 1, direction all) grouped shape; coverage = reader.rowsForPaths over the prefix with file + not_indexed rows and envelope coverage via #shared/domain/coverage assemble; source = Bun.file under ctx.config.repoRoot (path normalized, escapes refused with internal error), sha256 via Bun.CryptoHasher compared to file.sha256, mismatch/vanished -> source_drift true, content null, read_status.stale true + stale_reason + stale_checked_at, else numbered line window. All answers sized only by #shared/budget emit; summary rewritten post-emit for \"showing N of M\"; bootstrapping when no published generation; budget above ceiling -> error budget_too_large. Verification: `cd app && $HOME/.bun/bin/bun test tests/tools-expand.test.ts` -> 20 pass, 0 fail, 106 expect calls; boundary.test.ts+envelope+budget -> 35 pass 0 fail; `bun x tsc --noEmit` -> zero errors in expand files (only concurrent tests/tools-trace.test.ts errors remain: TS2352 line 423, TS2304 SMALL_BUDGET line 515); `bun x biome check` clean on all three files. Known gap: TOOLS-SPEC §7 declares no cursor argument for expand, so a truncated answer carries a signed next token that cannot be replayed; flagged in the handler doc comment."
+        },
+        {
+          "time": "2026-11-18T00:36:49Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-expand.test.ts` -> 20 pass, 0 fail, 106 expect() calls. Owned files only (manifest 40L, handler 907L, test 786L). Class->members, method->edges, folder->coverage inference echoed in payload.what/why; source mode verifies sha256 against file.sha256 and returns source_drift with no content; emit is the only sizing point. Known spec gap recorded: TOOLS-SPEC §7 declares no cursor argument for expand, so a truncated answer's signed next cannot be replayed by a client."
+        }
+      ]
     },
     {
       "id": "TASK-026",
@@ -177,8 +231,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-index.test.ts. Done when the three exit codes map to ok, ok with nothing-to-do and fail with index_locked respectively, and the handler never writes to the database directly."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:27:20Z",
+          "detail": "Wrote app/src/tools/index/manifest.ts (name index, admin profile, TOOLS-SPEC §8 description verbatim, input force=false + mode enum full|fast default full), app/src/tools/index/handler.ts (Bun.spawn of bin/codegraph.ts worker, stderr streamed line-by-line into ctx.log, exit 0/2/75/other mapped to ok/ok/index_locked/internal, payload mode+duration_ms+previous_generation+files, imports only #shared/* and ./manifest, never the indexer and never a DB), and app/tests/tools-index.test.ts. Injection seam: exported WorkerRunner = (ctx, invocation) => Promise<WorkerReport>, passed as handle's third parameter (default streamWorker); workerInvocation(ctx, args) builds [execPath,\"run\",<appRoot>/bin/codegraph.ts,\"worker\",\"--mode\",m,\"--force\"?] with CODEGRAPH_REPO_ROOT/CODEGRAPH_DATA_DIR from ctx.config, and streamWorker is exported so a test can drive a real child. bun test tests/tools-index.test.ts: 15 pass, 0 fail, 78 expect. bun x tsc --noEmit: no error in either owned file (remaining errors are in concurrently written src/tools/{expand,search,trace}). Known gap: worker logs no not_indexed/unresolved counts, so coverage.complete is false and files.skipped is 0 on an index response."
+        },
+        {
+          "time": "2026-11-18T00:37:18Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-index.test.ts` -> 15 pass, 0 fail, 78 expect() calls. Owned files only. Handler spawns bin/codegraph.ts worker via an injectable WorkerRunner seam (handle(ctx,args,run=streamWorker)); exit 0/2/75/1 map to ok / ok-nothing-to-do / fail index_locked / fail internal. Note for TASK-027: src/index.ts still stubs every mode, so the `worker` branch must call runWorker({repoRoot,dataDir,mode,force}) from ./indexer/worker.ts for this tool (and the watcher) to do anything."
+        }
+      ]
     },
     {
       "id": "TASK-027",
@@ -202,8 +265,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/mcp-surface.test.ts. Done when the test captures exactly two JSON-RPC responses (initialize then tools/list), the agent profile lists six names, CODEGRAPH_PROFILE=admin lists seven, and the non-JSON stdout line count is 0."
       },
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:53:06Z",
+          "detail": "Wrote app/src/index.ts (composition root) + app/tests/mcp-surface.test.ts. Low-level MCP `Server` (not McpServer): zod is undeclared, so the manifest `input` literal is converted to JSON Schema once (defaults/min-max/enum carried, `required` from `required: true`) and the same literal validates calls (~60-line parseArgs: unknown keys dropped, defaults applied, missing-required/wrong-type -> AppError('internal') with a hint naming the argument). Registry = 7 explicit manifest+handler pairs, filtered by config.profile (agent 6 / admin 7) with the same map behind tools/list and tools/call. Open-time guard: missing/empty graph.db -> every call answers bootstrapping (retry_after_ms = status's 5000); schema_too_new (readSchemaVersion > schemaVersion), wrong_project_db (recorded meta.project_root exists and differs) and unsupported_filesystem (passes through from openReader) -> refusal envelope per call; a recorded root that no longer exists -> served with read_status.stale + stale_reason 'root_mismatch'; when meta.project_root is unrecorded (this build's worker writes no project_root/project_name) the guard logs store.identity_unrecorded and serves. Every answer gets next_tools = nextToolsFor(tool); handler throws -> fail() with the AppError code kept (budget_too_large/index_locked unchanged, non-AppError -> internal); isError true iff the envelope carries an error. Watcher: startWatch imported relatively from ./indexer/watch.ts, mcp mode only, disabled by a non-empty CODEGRAPH_NO_WATCH, never started for a refused store. SIGINT/SIGTERM -> stop watcher, release a lock slot (always null: the worker is the single writer and releases its own), close the DB; stdin EOF drains in-flight calls (counter) before the same shutdown, which fixed 3 of 7 lost async answers in the smoke run. worker/index modes run runWorker with --mode/--force; status mode prints human lines to stdout (the only stdout write in the file). Verification: bun test tests/mcp-surface.test.ts -> 2 pass / 0 fail (2 JSON-RPC responses, 6 agent names, 7 admin names, 0 non-JSON stdout lines, stderr all JSON, exit 0); tests/boundary.test.ts -> 11 pass / 0 fail; tsc --noEmit clean; biome check on both files clean. Manual over a real published generation (temp fixture, 1 file): all 7 tools + index returned ok envelopes with the nine fields and routed next_tools; wrong_project_db / schema_too_new / root_mismatch / bootstrapping / not_found-for-admin-only each verified; SIGTERM+SIGINT exit 0 with the watcher running."
+        },
+        {
+          "time": "2026-11-18T00:53:49Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/mcp-surface.test.ts` -> 2 pass, 0 fail, 24 expect() calls; tests/boundary.test.ts -> 11 pass; `$HOME/.bun/bin/bun x tsc --noEmit` -> clean. Only app/src/index.ts (839L) and app/tests/mcp-surface.test.ts were changed. Root registers via the low-level MCP Server + ListTools/CallTool request handlers so the manifest input literal stays the only schema (no zod dependency); profile filter from config.profile drives both tools/list and tools/call; watcher started mcp-only via ./indexer/watch.ts; SIGINT/SIGTERM stop it, release the lock slot and close the DB; next_tools filled from nextToolsFor; handler throws map to fail() keeping budget_too_large/index_locked. Known gaps recorded: (a) the phase-1 worker never writes meta.project_root/project_name, so the wrong_project_db guard is inert until it does; (b) the reader is opened once, so a store absent at startup keeps answering bootstrapping after the watcher publishes (freshness work, phase 3)."
+        }
+      ],
       "pre_request": [
         "TASK-020",
         "TASK-021",
@@ -236,8 +308,17 @@
         ],
         "verify": "cd app and run: $HOME/.bun/bin/bun test tests/tools-smoke.test.ts. Done when all seven tools respond within their budgets across the two profiles, the agent profile lists exactly 6, the admin profile lists 7, and the non-JSONRPC stdout line count is 0."
       },
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T01:04:01Z",
+          "detail": "Wrote app/tests/tools-smoke.test.ts (only file created; no src edits). beforeAll: mkdtemp repo with src/report.ts (class ReportBuilder{add,renderReport}, buildReport calls renderReport and is called by emitReport) + src/cli.ts (main calls emitReport), git init+commit, runWorker(force,full) => exit 0, 1 generation g-xxxxxx, then drift src/report.ts so summary(change) has a diff. Two real stdio children (process.execPath run bin/codegraph.ts mcp, CODEGRAPH_NO_WATCH=1): agent + admin. Asserted: initialize serverInfo=codegraph/protocolVersion 2024-11-05; agent tools/list=6 (equals AGENT_TOOL_NAMES, no index), admin=7 (equals TOOL_NAMES, extra name is only index); every tools/call envelope has the nine fields + totals.total_relation in {eq,gte} + read_status.generation g-hex; status => generation equals DB meta, graph.nodes/edges>0, health.indexer=idle, project.db_path graph.db; summary{scope:change} => base == HEAD sha, changed_files contains src/report.ts, removed_symbols [], risk score/band, every driver a multi-word sentence; trace{emitReport} => resolution.matched src/report.ts::emitReport, kind function, confidence extracted, in contains src/cli.ts::main, out contains src/report.ts::buildReport, unresolved rows well-formed; search{renderReport} first qn src/report.ts::ReportBuilder.renderReport, mode bm25, degree numbers; impact{paths:[src/report.ts]} => changed[0].path/symbols, impacted non-empty incl src/cli.ts::main with hop/via/tier/tested, totals.impacted_total>0; search{ReportBuilder,kind:class} single hit then expand => what=members, why=\"inferred: class -> members\", members add+renderReport (kind method), members_total>=shown; index over admin {force,fast} => status ok, mode fast, previous_generation = fixture generation, new read_status.generation == DB meta and != previous, generation rows reset to 1 (forced run seeds from empty stage, documented behaviour). stdout purity: non-JSON lines 0, non-JSON-RPC lines 0, unsolicited responses 0, stdout lines == requests for both sessions, exit 0, no timeout fired. bun test tests/tools-smoke.test.ts: 9 pass / 0 fail / 201 expect, 631-936 ms, identical across three runs; boundary.test.ts 11 pass/0 fail; tsc --noEmit clean; biome check clean. No tool hedged: all seven answered ok. Behaviour differences vs spec: none found (note: status payload has no project.generation field, generation is read_status.generation; forced index resets generation history to seq 1)."
+        },
+        {
+          "time": "2026-11-18T01:05:15Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/tools-smoke.test.ts` -> 9 pass, 0 fail, 201 expect() calls, ~0.6s. One new file only (app/tests/tools-smoke.test.ts), no src change. Indexes a two-file TypeScript fixture through runWorker, then drives two real `bin/codegraph.ts mcp` children over stdio: agent list 6 names (no index), admin list 7; all seven envelopes carry the nine fields with total_relation in {eq,gte}; status generation == DB meta.generation; summary{change} base == HEAD and sentence drivers; trace{emitReport} resolves and groups in/out; search ranks the exact name first; impact{paths} returns impacted rows with hop/via/tier/tested; expand on a class qn infers members with why \"inferred: class -> members\"; index{force,fast} publishes. Zero non-JSON and non-JSON-RPC stdout lines in both sessions. Phase-level gate also re-run by the orchestrator: full suite 442 pass / 0 fail across 33 files, `tsc --noEmit` clean, `biome check src tests bin` clean on 83 files."
+        }
+      ],
       "pre_request": [
         "TASK-020",
         "TASK-021",
@@ -272,8 +353,17 @@
       "id": "TASK-029",
       "size": "M",
       "title": "Watcher: debounced change detection that spawns the worker",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:24:46Z",
+          "detail": "Wrote app/src/indexer/watch.ts (startWatch: git HEAD+porcelain signature with mtime-only fallback, single debounce re-check, Bun.spawn of `bun run bin/codegraph.ts worker` via CODEGRAPH_REPO_ROOT/CODEGRAPH_DATA_DIR, exit 0/2 adopt baseline, 75 log+retry with no failure counted, other exits back off min(interval<<failures, 300000), unref'd interruptible timer, stop() kills child then resolves, injectable spawn seam, stats()/onSpawn for health) and app/tests/watch.test.ts (9 tests, stubbed spawn, real timers, non-git + git fixtures). Verify: `cd app && bun test tests/watch.test.ts` -> 9 pass / 0 fail, ~1.9s, 44 expect() calls, stable over 8 consecutive runs. `bun x tsc --noEmit` project-wide is red only on another worker's src/tools/search/manifest.ts (TS1443/TS1005 syntax); a scoped tsc -p over just the two owned files exits 0. `bun x biome check` clean on both files. pre-existing boundary.test.ts failure reproduced with my two files removed (caused by the same tools file); watch.ts imports only node:*, #shared/log, #shared/paths, ./discover, ./lang/registry - never the worker module, never touches graph.db."
+        },
+        {
+          "time": "2026-11-18T00:37:38Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/watch.test.ts` -> 9 pass, 0 fail, 44 expect() calls, ~2s, no hang. Owned files only (watch.ts 590L, tests/watch.test.ts 384L). startWatch imports node:* + #shared/log + #shared/paths + ./discover + ./lang/registry only — never the worker module and never a DB handle; git read with --no-optional-locks; exit 75 does not count a failure; backoff capped at 300000 ms; stop() kills a running child."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -296,8 +386,17 @@
       "id": "TASK-031",
       "size": "M",
       "title": "Ship the instructions text and nextToolsFor",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-18T00:18:53Z",
+          "detail": "Wrote app/docs/INSTRUCTIONS.md (62 lines, one screen) in the mandated order: 1 summary/scope change, 2 summary scope area + target, 3 trace with one query (search first when no name yet), 4 impact before editing and before merge, 5 expand rather than a larger budget, then a \"Do not\" list with exactly the four required anti-patterns (do not call index; do not read total_relation: gte as none; do not use trace to read source; do not pass a project argument since the repo is bound at startup) and the closing statement that the agent profile has exactly six tools, naming status, summary, trace, search, impact, expand.\n\napp/src/shared/instructions.ts (145 lines) exports INSTRUCTIONS_TEXT (byte-identical to the doc body), printInstructions(): void (only stdout writer in app/src, explicitly-called CLI mode only, documented), nextToolsFor(tool: string): string[] plus AGENT_TOOL_NAMES, ADMIN_TOOL_NAMES, TOOL_NAMES, AgentToolName, ToolName. No imports at all, so the shared-isolation layer rule holds. NEXT_TOOLS is Record<ToolName, readonly AgentToolName[]> so a route-less tool is a compile error; routes: status->summary,search | summary->impact,trace,expand | trace->expand | search->trace,expand | impact->trace,expand | expand->trace | index->status (agent-only name, since the agent profile cannot call index); unknown tool -> [] (documented); every call returns a fresh array.\n\napp/tests/instructions.test.ts (123 lines, 11 tests): six names in the profile paragraph, admin-only index named only as a don't, four anti-pattern regexes, heading order 1-5 + Do not, nextToolsFor only agent names for all seven tools and never itself, index routing, unknown/typo/whitespace inputs -> [], fresh-array guard, doc-vs-constant sync via Bun.file against app/docs/INSTRUCTIONS.md, <=70 line one-screen guard, and printInstructions stdout capture.\n\nEvidence, all run in app/: $HOME/.bun/bin/bun test tests/instructions.test.ts -> 11 pass, 0 fail, 42 expect() calls; bun test tests/boundary.test.ts -> 11 pass, 0 fail; $HOME/.bun/bin/bun x tsc --noEmit -> exit 0, no output; ./node_modules/.bin/biome check on both owned files -> no errors."
+        },
+        {
+          "time": "2026-11-18T00:37:56Z",
+          "detail": "Orchestrator verification: `cd app && $HOME/.bun/bin/bun test tests/instructions.test.ts` -> 11 pass, 0 fail, 42 expect() calls; app-wide `$HOME/.bun/bin/bun x tsc --noEmit` -> clean. New files only: src/shared/instructions.ts (145L, zero imports), docs/INSTRUCTIONS.md (62L), tests/instructions.test.ts (123L). Exports INSTRUCTIONS_TEXT, printInstructions(), nextToolsFor(tool) plus AGENT_TOOL_NAMES/ADMIN_TOOL_NAMES/TOOL_NAMES; doc-to-constant sync asserted through Bun.file."
+        }
+      ]
     }
   ]
 }

@@ -67,6 +67,16 @@ export interface ChangedSinceOptions {
 }
 
 /**
+ * The digest half of the change set, with its source already bound. `GraphReader` from
+ * `#shared/store/read/reader.ts` satisfies this structurally through `allFiles()`, which is what
+ * lets a tool handler run this module at all: a handler holds a reader and never a connection.
+ */
+export interface DigestSource {
+  /** Every indexed path with the digest the indexer stored for it. */
+  allFiles(): readonly { readonly path: string; readonly sha256: string }[];
+}
+
+/**
  * Extensions the MVP grammars cover, mapped to their lang id. TASK-013's registry owns this list
  * from phase 1 on; until that module exists a changed path counts as parseable here if and only
  * if the indexer could have parsed it, so the two lists must agree when they meet.
@@ -263,9 +273,10 @@ async function sha256Of(path: string): Promise<string> {
  * The change set for `repoRoot` against `base`, as the union of `git diff --name-status` and a
  * sha256 comparison of the `file` table against the working tree.
  *
- * The read handle is the third parameter on purpose: `shared/domain` decides what is true but
- * never opens a database (the caller passes the reader it already holds), and the hash comparison
- * cannot be done without the indexed digests.
+ * The digest source is the third parameter on purpose: `shared/domain` decides what is true but
+ * never opens a database (the caller passes the handle or the reader it already holds), and the
+ * hash comparison cannot be done without the indexed digests. A tool handler has no connection,
+ * so it calls {@link changedSinceFrom} with its injected `GraphReader`.
  *
  * A path git calls deleted but which still exists in the working tree is reported as `changed`,
  * not as `removed`: the bytes are present, so "gone" would be the wrong fact.
@@ -279,10 +290,34 @@ export async function changedSince(
   conn: Conn,
   options: ChangedSinceOptions = {},
 ): Promise<ChangeSet> {
+  return changeSetFor(repoRoot, base, indexedDigests(conn), options);
+}
+
+/**
+ * The same change set, sourced from an injected reader instead of a connection. This is the entry
+ * point `summary` and `impact` use: `GraphReader.allFiles()` already carries every `path` and
+ * `sha256` the hash comparison needs, so a handler never needs a handle to answer "what changed".
+ *
+ * Both entries share one implementation, so the git half, the degradation rule and the ordering
+ * cannot drift between the worker and the tools.
+ */
+export async function changedSinceFrom(
+  repoRoot: string,
+  base: string,
+  source: DigestSource,
+  options: ChangedSinceOptions = {},
+): Promise<ChangeSet> {
+  return changeSetFor(repoRoot, base, source.allFiles(), options);
+}
+
+async function changeSetFor(
+  repoRoot: string,
+  base: string,
+  digests: readonly FileDigestSqlRow[],
+  options: ChangedSinceOptions,
+): Promise<ChangeSet> {
   const timeoutMs = options.gitTimeoutMs ?? GIT_TIMEOUT_MS;
   const root = resolve(repoRoot);
-
-  const digests = indexedDigests(conn);
   const indexed = new Set<string>();
   const changed = new Set<string>();
   const removed = new Set<string>();

@@ -2,9 +2,10 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { changedSince, GIT_TIMEOUT_MS } from "#shared/domain/diff";
+import { changedSince, changedSinceFrom, GIT_TIMEOUT_MS } from "#shared/domain/diff";
 import { type Conn, db, openReader, openWriter } from "#shared/store/db";
 import { migrate } from "#shared/store/migrate";
+import { makeReader } from "#shared/store/read/reader";
 import * as schema from "#shared/store/schema";
 
 /**
@@ -226,6 +227,25 @@ describe("changedSince against a git fixture", () => {
 
   test("the default git bound is 30 s, so no invocation is unbounded", () => {
     expect(GIT_TIMEOUT_MS).toBe(30_000);
+  });
+
+  test("changedSinceFrom answers the same set from a reader, so a handler needs no connection", async () => {
+    const root = makeGitRepo();
+    const conn = openGraph(root, [
+      { path: "src/a.ts", language: "typescript", bytes: TS_A },
+      { path: "src/b.ts", language: "typescript", bytes: TS_B },
+    ]);
+
+    write(root, "src/a.ts", TS_A_CHANGED);
+    remove(root, "src/b.ts");
+
+    // The reader carries every `path`/`sha256` pair the hash comparison reads, which is the whole
+    // reason `summary` and `impact` can be handlers and still answer "what changed".
+    const fromReader = await changedSinceFrom(root, "HEAD", makeReader(conn));
+
+    expect(fromReader).toEqual(await changedSince(root, "HEAD", conn));
+    expect(fromReader.changed).toEqual(["src/a.ts"]);
+    expect(fromReader.removed).toEqual(["src/b.ts"]);
   });
 
   test("diff.ts never reads the environment: that access belongs to #shared/config.ts", () => {

@@ -28,7 +28,7 @@ const RULE_TEXT: Record<RuleId, string> = {
   "shared-isolation": "src/shared/** may never import src/tools/** or src/indexer/**",
   "drizzle-location": "drizzle-orm may be imported only under src/shared/store/**",
   "root-privileges":
-    "src/index.ts is the only module allowed to import the indexer or a tool handler, and it may import only #shared/*, ./indexer/* and ./tools/*/manifest",
+    "src/index.ts is the only module allowed to import the indexer or a tool handler, and it may import only #shared/*, ./indexer/* and ./tools/*/manifest or ./tools/*/handler",
 };
 
 export interface Violation {
@@ -178,13 +178,18 @@ function rootAllowList(specifier: string): string | null {
       ? `the composition root may use only #shared/*, never the private alias ${specifier}`
       : null;
   }
-  if (isUnderPrefix(target, "src/indexer") || isToolManifest(target)) {
+  // A private alias resolves to a real target, so it has to be refused before the allow-list: a
+  // reachable specifier (`#tools/find/handler`) is still not one the root may write.
+  if (specifier.startsWith("#")) {
+    return `the composition root may use only #shared/*, never the private alias ${specifier}`;
+  }
+  if (isUnderPrefix(target, "src/indexer") || isToolManifest(target) || isToolHandler(target)) {
     return null;
   }
   if (isUnderPrefix(target, "src/tools")) {
-    return `the composition root may import a tool's manifest only, but ${specifier} resolves to ${target}`;
+    return `the composition root may import a tool's manifest or handler only, but ${specifier} resolves to ${target}`;
   }
-  return `the composition root may import only #shared/*, ./indexer/* and ./tools/*/manifest, but ${specifier} resolves to ${target}`;
+  return `the composition root may import only #shared/*, ./indexer/* and ./tools/*/{manifest,handler}, but ${specifier} resolves to ${target}`;
 }
 
 /** Rule 5, both halves: the root's privileges, and everyone else's exclusion. */
@@ -393,7 +398,11 @@ describe("rule self-check: synthetic imports must be rejected", () => {
     for (const specifier of ["#shared/log", "./indexer/pipeline", "./tools/find/manifest"]) {
       expect(evaluateImport("src/index.ts", specifier)).toEqual([]);
     }
-    for (const specifier of ["./tools/find/handler", "./shared/log", "#tools/find/handler"]) {
+    // A tool module's two exports *are* its surface to the root: the manifest it registers and the
+    // handler it calls. Anything else under a tool stays unreachable from the root, and the rule
+    // below still forbids the manifest itself from reaching across to the handler.
+    expect(evaluateImport("src/index.ts", "./tools/find/handler")).toEqual([]);
+    for (const specifier of ["./tools/find/helper", "./shared/log", "#tools/find/handler"]) {
       expect(
         evaluateImport("src/index.ts", specifier).map((violation) => violation.rule),
       ).toContain("root-privileges");
