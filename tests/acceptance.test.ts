@@ -85,7 +85,7 @@ const APP_ROOT = resolve(import.meta.dir, "..");
 const CLI_ENTRY = join(APP_ROOT, "bin", "sangkar.ts");
 
 /** `DESIGN.md` §14 / `TECH-SPEC.md` §14: the reference corpus, indexed but never written. */
-const CORPUS = resolve(APP_ROOT, "..", "code-review-graph");
+const CORPUS = resolve(APP_ROOT, "code-review-graph");
 
 /** Two full indexes of the corpus plus the sweeps; the default 5 s per test would never hold. */
 const RUN_TIMEOUT_MS = 300_000;

@@ -57,7 +57,7 @@ export function nextToolsFor(tool: string): string[] {
 }
 
 /**
- * The guide, byte for byte the body of `app/docs/INSTRUCTIONS.md`
+ * The guide, byte for byte the body of `docs/INSTRUCTIONS.md`
  * (tests/instructions.test.ts fails if the two drift). Rule order is deliberate: orient, scope,
  * look up, judge blast radius, then fetch detail — the order an agent needs them in one task.
  * The anti-patterns come last because each one names a call the reader would otherwise make.

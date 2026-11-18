@@ -21,7 +21,7 @@ import { runWorker } from "../src/indexer/worker";
  * untracked `.sangkar/` or a rewritten fixture would show up.
  */
 
-const CORPUS = resolve(import.meta.dir, "..", "..", "code-review-graph");
+const CORPUS = resolve(import.meta.dir, "..", "code-review-graph");
 
 /** Two full indexes of the corpus take ~20 s; the default 5 s per test would flake. */
 const RUN_TIMEOUT_MS = 300_000;

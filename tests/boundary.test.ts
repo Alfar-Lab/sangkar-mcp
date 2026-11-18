@@ -298,7 +298,7 @@ function walkTree(): Map<string, string> {
 const tree = walkTree();
 
 describe("module boundaries on the real tree", () => {
-  test("app/src and app/tests are actually scanned", () => {
+  test("src and tests are actually scanned", () => {
     expect(tree.size).toBeGreaterThan(5);
     const specifiers = [...tree.values()].flatMap(importedSpecifiers);
     expect(specifiers.length).toBeGreaterThan(0);

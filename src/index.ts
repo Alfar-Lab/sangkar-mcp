@@ -15,7 +15,7 @@
  *   parsed one cannot drift.
  *
  * Why the low-level `Server` and not `McpServer`: `McpServer.registerTool` takes a Zod raw shape as
- * its `inputSchema`, and zod is not a declared dependency of this app (`app/package.json`) — it is
+ * its `inputSchema`, and zod is not a declared dependency of this app (`package.json`) — it is
  * only reachable transitively through the SDK. The plan's schema is a literal in each manifest, so
  * `Server` plus `setRequestHandler` keeps the SDK and keeps that single source of truth, instead of
  * adding a dependency and a second schema dialect to express the same seven tools.
@@ -96,7 +96,7 @@ const DB_FILE = "graph.db";
 
 /**
  * The identity an MCP client reports in `serverInfo`. The version is a literal because the root may
- * not import `app/package.json` — `tests/boundary.test.ts` confines its imports to `#shared/*`, the
+ * not import `package.json` — `tests/boundary.test.ts` confines its imports to `#shared/*`, the
  * indexer and the tool modules — and a second copy of the version is cheaper than a boundary hole.
  */
 const SERVER_NAME = "sangkar";

@@ -11,7 +11,6 @@ Bun 1.4.4 or newer. The app is a Bun program — `bun:sqlite`, `bun build`, `Bun
 cannot run it.
 
 ```sh
-cd app
 bun install
 bun link            # puts `sangkar` on PATH
 ```
@@ -23,7 +22,7 @@ else. Skip it and invoke the entry point directly, which is the same program:
 bun run bin/sangkar.ts status
 ```
 
-Installing creates no database and writes nothing outside `app/node_modules`.
+Installing creates no database and writes nothing outside `node_modules`.
 
 ## First run
 

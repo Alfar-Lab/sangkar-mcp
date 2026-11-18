@@ -5,6 +5,18 @@
 codebase-memory-mcp/
 code-review-graph/
 
+# Installed dependencies and build output
+node_modules/
+dist/
+
+# The graph store; it carries its own .gitignore holding a single `*`
+.sangkar/
+# Pre-rename store, kept only until the first `sangkar index`
+.codegraph/
+*.db
+*.db-wal
+*.db-shm
+
 # Local editor / OS noise
 .DS_Store
 *.swp

@@ -122,7 +122,7 @@ function documentOf(stdout: string): string {
 
 /**
  * The envelope a tool answer must be: exit 0, one JSON document, the ten members, and an `error`
- * object exactly when the status is `error` or `bootstrapping` (`app/src/shared/envelope.ts`).
+ * object exactly when the status is `error` or `bootstrapping` (`src/shared/envelope.ts`).
  */
 function answered<T = unknown>(run: Run): Envelope<T> {
   expectExit(run, 0, "the tool");

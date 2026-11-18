@@ -126,7 +126,7 @@ function resolveArgs(args: IndexArgs): WorkerArgs {
  * The child command, and the only place the two paths it acts on are decided.
  *
  * `[execPath, "run", bin/sangkar.ts, "worker", …]` is the source-tree form. In a compiled binary
- * (`bun build --compile`, `app/package.json`'s `build`) there is no `bin/sangkar.ts` on disk and
+ * (`bun build --compile`, `package.json`'s `build`) there is no `bin/sangkar.ts` on disk and
  * `execPath` *is* the server, so the same mode is addressed as `[execPath, "worker", …]`; the
  * entry's existence is what distinguishes the two, and that is a file check rather than a guess
  * about the build.
