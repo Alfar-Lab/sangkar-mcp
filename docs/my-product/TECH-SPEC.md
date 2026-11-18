@@ -44,7 +44,7 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 ├── biome.json                  # style only, not the boundary
 ├── drizzle.config.ts           # drizzle-kit: dialect sqlite, schema + out paths (§5.4.4)
 ├── bin/
-│   └── codegraph.ts            # single CLI entry: mcp (default) | index | status | worker
+│   └── codegraph.ts            # single CLI entry: cgraph <tool|mcp|worker|index>
 ├── src/
 │   ├── index.ts                # composition root: builds the server, registers tools
 │   ├── shared/                 # LAYER 1 — kernel + engine (the ONLY cross-module import target)
@@ -69,7 +69,7 @@ Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
 │   │       └── diff.ts
 │   ├── tools/                  # LAYER 2 — one directory per tool, private
 │   │   ├── status/
-│   │   │   ├── manifest.ts     # name, description, profile, input schema
+│   │   │   ├── manifest.ts     # name, description, input schema
 │   │   │   ├── handler.ts
 │   │   │   └── handler.test.ts
 │   │   ├── trace/
@@ -339,7 +339,6 @@ Every module exports the same three things, and the composition root is the only
 export const manifest = {
   name: "trace",
   description: "<the verbatim text from TOOLS-SPEC.md §3>",
-  profile: "agent",                       // "agent" | "admin"
 } as const;
 
 export const input = {
@@ -381,8 +380,8 @@ Rules for handlers:
 
 1. `loadConfig()`; resolve the repo root; open the reader; run the open-time guard
    (`DATABASE.md` §5: `root_mismatch` / `wrong_project_db` / `unsupported_filesystem` / `schema_too_new`).
-2. Import the seven manifests explicitly, filter by profile (`agent` | `admin`), build the
-   `ToolContext`, and register with the MCP SDK.
+2. Import the seven manifests explicitly and register all seven unconditionally — one surface, no
+   per-client filtering — building the `ToolContext` every handler receives.
 3. Start the watcher (if enabled) which **spawns** the indexer process on change.
 4. Wire signal handlers to release the write lock and close the DB.
 
@@ -463,7 +462,7 @@ sequenceDiagram
     participant D as SQLite (readonly)
 
     C->>R: tools/call trace {query, direction, budget}
-    R->>R: verify profile, parse args against manifest.input
+    R->>R: parse args against manifest.input (no surface check)
     R->>T: handle(ctx, args)
     T->>S: resolve(query, kinds)
     S->>D: node(qn) / node(name,kind)

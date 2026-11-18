@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 
@@ -107,8 +108,12 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   return {
     dataDir,
     repoRoot,
-    // Empty when unset; the cursor module owns the length check so the key stays in one place.
-    cursorKey: env.CODEGRAPH_CURSOR_KEY ?? "",
+    // An absent or empty variable yields a per-process key, so a cursor minted by one invocation
+    // cannot be verified by another; set CODEGRAPH_CURSOR_KEY to share cursors across processes.
+    cursorKey:
+      env.CODEGRAPH_CURSOR_KEY === undefined || env.CODEGRAPH_CURSOR_KEY === ""
+        ? randomBytes(32).toString("hex")
+        : env.CODEGRAPH_CURSOR_KEY,
     budgets: { defaultTokens: DEFAULT_BUDGET_TOKENS, maxTokens: MAX_BUDGET_TOKENS },
   };
 }

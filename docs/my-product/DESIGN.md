@@ -54,7 +54,7 @@ Trust is not a helper tool. It is the contract that makes the other three safe t
 
 ## 4. Tool surface
 
-Six agent-facing tools. One admin tool. Every name is a bare verb.
+Seven tools on one surface. Every name is a bare verb.
 
 | Tool | Job | Required args | Why it exists |
 |---|---|---|---|
@@ -64,14 +64,14 @@ Six agent-facing tools. One admin tool. Every name is a bare verb.
 | `search` | find | `query` | `search_graph` + `search_code` were 25.5 % of CBM |
 | `impact` | blast radius | none | `detect_changes` 1249 + `get_impact_radius` 281 |
 | `expand` | detail on demand | `cursor` | replaces every `detail_level` variant and every per-item cap |
-| `index` | **admin only** | none | exposed under the `admin` profile; normally the daemon does it |
+| `index` | repair | none | repair and bootstrap path; discouraged by the instructions (measured: 1 081 calls, 12.9 % failures) |
 
-**Tool profiles** (learned from CBM's `--tool-profile scout|analysis`):
-
-- `agent` (default): `status`, `trace`, `summary`, `search`, `impact`, `expand`
-- `admin`: the above + `index`, `forget`, `daemon`
-
-A tool profile is a hard allow-list at the protocol layer, not a docstring convention.
+**One surface, no profiles.** CBM's `--tool-profile scout|analysis` motivated a split, and the
+measurement behind it still stands: `index` was called **1 081 times** and failed **12.9 %** of the time,
+the worst error rate of any real tool, for work the server already does itself. What shipped is not a
+hard allow-list at the protocol layer: all seven tools are registered for every client, and the
+instructions discourage `index` instead, keeping it as the repair and bootstrap path — a fresh tree has
+no store for a tool call to answer from.
 
 ### 4.1 Signatures
 
@@ -146,7 +146,7 @@ Hybrid: FTS5/BM25 first, semantic rerank only when an embedding index exists. Ne
 
 Expands exactly the result the cursor came from, pinned to the same generation and the same arguments. Rules in §7.
 
-**`index`** (admin profile)
+**`index`** (repair tool, registered with the rest)
 
 | arg | type | default | meaning |
 |---|---|---|---|
@@ -311,7 +311,7 @@ Identity: short name = repo basename + 4-char hash of the absolute path. Multi-r
 |---|---|
 | server start, index missing | do **not** index inline; first tool call returns `status: "bootstrapping"` + `retry_after_ms` (CBM does this for architecture jobs; the agent retries instead of dying on a client deadline) |
 | first tool call, index stale | refresh incrementally in the background, answer from the current generation with `stale: true` |
-| `index` (admin) | forced/repair path |
+| `index` (repair) | forced/repair path; call only when `status` reports a broken graph |
 | file watcher / VCS hook | coalesced debounce → incremental |
 
 ### 10.3 Publish protocol (copied from CBM, because it is what survived concurrency)
@@ -420,7 +420,7 @@ So this project treats instructions as a deliverable, shipped with the server:
 | M2 | `trace` with resolve/ambiguity/**absence** | the main feature |
 | M3 | `summary(change)`, `impact`, `expand`, `emit` | the hot path is cheap |
 | M4 | watcher/hooks, staged publish, generation, staleness | auto-update is real |
-| M5 | instructions + tool profiles; rename pass on any `*_tool` leftovers | adoption |
+| M5 | instructions + one seven-tool surface (no profiles); rename pass on any `*_tool` leftovers | adoption |
 | M6 | evaluation harness: both parent repos as fixtures, telemetry-style counters, absence-claim audit | the acceptance table in §14 |
 
 ---

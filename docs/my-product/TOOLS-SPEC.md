@@ -3,7 +3,7 @@
 > **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
 > [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
 
-Companion to `DESIGN.md`. Six agent tools, one admin tool.
+Companion to `DESIGN.md`. Seven tools on one surface.
 
 **On the examples:** these tools do not exist yet, so the payloads below are **constructed to spec**, not
 captured. Where possible the values are lifted from the real capture in `TOOL-OUTPUTS.md` (the
@@ -515,7 +515,7 @@ Inference table (disclosed in the response, documented in the instructions):
 
 ---
 
-## 8. `index` (admin profile only)
+## 8. `index` (repair tool, registered with the rest)
 
 **Description:**
 
@@ -546,12 +546,13 @@ Inference table (disclosed in the response, documented in the instructions):
 }
 ```
 
-### Why this tool exists at all, and why it is hidden
+### Why this tool exists at all, and why it is a repair tool
 
 The measured runs show indexing called **1 081 times** and failing **12.9 %** of the time — the worst
 error rate of any real tool, for what is pure infrastructure. It stays in the protocol because *repair*
-is a real need, but it moves to the `admin` profile so the agent profile cannot see it. The instructions
-say: if the graph looks wrong, call `status` and report — do not rebuild.
+is a real need, registered with the rest of the seven; there is no profile that hides it. It is a repair
+tool, so call it only when `status` reports a broken graph. The instructions say: if the graph looks
+wrong, call `status` and report — do not rebuild.
 
 The output deliberately reports `previous_generation` and the full file accounting: after a rebuild the
 only questions are "did it take" and "what did it still miss", and both are in the envelope already.

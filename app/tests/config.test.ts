@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { detectRepoRoot, flagValue, loadConfig } from "#shared/config";
+import { CURSOR_KEY_MIN_BYTES } from "#shared/cursor";
 
 /**
  * Configuration is decided by the command line and the working directory, so every case here is a
@@ -36,6 +37,11 @@ function nested(root: string, ...segments: string[]): string {
   const dir = join(root, ...segments);
   mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/** Key strength in the unit the cursor guard measures, so the assertions match its check. */
+function keyBytes(key: string): number {
+  return Buffer.byteLength(key, "utf8");
 }
 
 afterAll(() => {
@@ -183,11 +189,52 @@ describe("loadConfig", () => {
     expect(overridden.dataDir).toBe(join(flagged, ".codegraph"));
   });
 
-  test("keeps the fallback budgets and leaves cursorKey empty when unset", () => {
+  test("keeps the fallback budgets and supplies a key when unset", () => {
     const bare = tempDir("cgraph-config-budget-");
     const config = loadConfig({ argv: [], env: {}, cwd: bare });
     expect(config.budgets.defaultTokens).toBe(1_200);
     expect(config.budgets.maxTokens).toBe(32_000);
-    expect(config.cursorKey).toBe("");
+    expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
+  });
+});
+
+describe("loadConfig cursor key", () => {
+  test("generates a key long enough for the cursor module when the variable is absent", () => {
+    const bare = tempDir("cgraph-config-key-absent-");
+    const config = loadConfig({ argv: [], env: {}, cwd: bare });
+    expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
+  });
+
+  test("generates a different key per call, so the fallback is random rather than constant", () => {
+    const bare = tempDir("cgraph-config-key-random-");
+    const first = loadConfig({ argv: [], env: {}, cwd: bare });
+    const second = loadConfig({ argv: [], env: {}, cwd: bare });
+    expect(first.cursorKey).not.toBe(second.cursorKey);
+  });
+
+  test("returns an explicit variable verbatim, including one too short for cursors", () => {
+    const bare = tempDir("cgraph-config-key-explicit-");
+    const long = loadConfig({
+      argv: [],
+      env: { CODEGRAPH_CURSOR_KEY: "k".repeat(CURSOR_KEY_MIN_BYTES) },
+      cwd: bare,
+    });
+    expect(long.cursorKey).toBe("k".repeat(CURSOR_KEY_MIN_BYTES));
+
+    // The length check belongs to cursor.ts, which refuses a short key at startup; config only
+    // reports what the environment supplied.
+    const short = loadConfig({
+      argv: [],
+      env: { CODEGRAPH_CURSOR_KEY: "short" },
+      cwd: bare,
+    });
+    expect(short.cursorKey).toBe("short");
+  });
+
+  test("treats an empty variable as absent and generates a key", () => {
+    const bare = tempDir("cgraph-config-key-empty-");
+    const config = loadConfig({ argv: [], env: { CODEGRAPH_CURSOR_KEY: "" }, cwd: bare });
+    expect(config.cursorKey).not.toBe("");
+    expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
   });
 });

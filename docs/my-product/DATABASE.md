@@ -150,7 +150,9 @@ One database file per project, **inside the project directory**:
 <repo-root>/.codegraph/.gitignore      <- a single `*`, written on first index
 ```
 
-Resolution order: `<root>/.codegraph/` → `--data-dir <path>` → `CODEGRAPH_DATA_DIR`.
+Resolution order: `<root>/.codegraph/` → `--data-dir <path>`. A relative `--data-dir` resolves against
+the repo root, which is `--repo-root` when given and otherwise the nearest ancestor of the working
+directory holding `.codegraph/`, then the nearest holding `.git`, then the working directory itself.
 
 Rules:
 
