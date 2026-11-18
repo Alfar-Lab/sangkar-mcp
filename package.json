@@ -4,7 +4,7 @@
   "description": "Read-only MCP server and CLI over one repository's call graph, backed by SQLite.",
   "type": "module",
   "bin": {
-    "sangkar": "./bin/sangkar.ts"
+    "sangkar": "bin/sangkar.ts"
   },
   "files": [
     "bin",
@@ -34,8 +34,7 @@
     "url": "https://github.com/Alfar-Lab/sangkar-mcp/issues"
   },
   "publishConfig": {
-    "access": "public",
-    "tag": "beta"
+    "access": "public"
   },
   "scripts": {
     "mcp": "bun run bin/sangkar.ts",
@@ -49,7 +48,8 @@
     "db:generate": "drizzle-kit generate",
     "db:drift": "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
     "db:parity": "bun test tests/schema-parity.test.ts",
-    "acceptance": "bun test tests/acceptance.test.ts"
+    "acceptance": "bun test tests/acceptance.test.ts",
+    "release:beta": "npm publish --tag beta"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.32.2",
