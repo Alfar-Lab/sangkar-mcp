@@ -2,6 +2,7 @@
 
 **Status:** brainstorming / pre-implementation. No code exists.
 **Working name:** `<name>` (TBD — not a decision yet).
+**Sources compared throughout:** **CRG** = [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — Python MCP graph server, 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`). **CBM** = [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — C/Go MCP graph server, `dev`, 164 grammars.
 **Evidence base:** `TOOL-SURFACE.md`, `TOOL-OUTPUTS.md`, `TOOL-USAGE-ANALYSIS.md`, `GRAPH-MODEL.md`, `INDEXING-PIPELINE.md`, `STORAGE-ARCHITECTURE.md` in this folder. Every "because" below points at one of them.
 
 ---
@@ -299,7 +300,8 @@ CRG silently skips a file when its grammar is unavailable (observed: `xslt`, `li
 
 ### 10.1 Bind the repo once
 
-The server binds `repo_root` at startup from the working directory (overridable by flag). **No tool takes a `project` argument.** CBM spent 18 of 145 calls (12.4 %) on `list_projects` because its project identity is an unmemorable path slug (`home-ljosalfar-server-Documents-…-code-review-graph`).
+The server binds `repo_root` at startup from the working directory (overridable by flag). **No tool takes a `project` argument.** CBM spent 18 of 145 calls (12.4 %) on `list_projects` because its project identity is an unmemorable slug derived from the absolute path
+(`home-…-<repo>`), so the agent must re-discover it instead of remembering it.
 
 Identity: short name = repo basename + 4-char hash of the absolute path. Multi-repo is a separate concern (multiple server instances), not a parameter on six tools.
 

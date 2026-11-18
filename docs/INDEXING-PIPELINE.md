@@ -1,8 +1,12 @@
 # Indexing pipeline pseudocode: `code-review-graph` vs `codebase-memory-mcp`
 
-Verified against source. Orchestrator spot-checks: `MIN_FILES_FOR_PARALLEL 50` (`pipeline.c:4331`),
-CRG 8-file serial cutoff (`incremental.py:3031, 3516`), `_MAX_PARSE_WORKERS` (`incremental.py:64`),
-`cbm_pipeline_pass_githistory` has **zero callers**, no `index` CLI subcommand exists.
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
+> [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
+
+Every statement below was read directly from each project's source. Anchor facts:
+`MIN_FILES_FOR_PARALLEL` is 50; CRG parses serially below 8 files; `_MAX_PARSE_WORKERS` is
+`CRG_PARSE_WORKERS` or `min(cpu, 8)`; `cbm_pipeline_pass_githistory` has **zero callers**; no `index`
+CLI subcommand exists.
 
 ---
 
@@ -11,10 +15,10 @@ CRG 8-file serial cutoff (`incremental.py:3031, 3516`), `_MAX_PARSE_WORKERS` (`i
 ## 1.1 Entry: `build`
 
 ```
-build_or_update_graph(full_rebuild=True, postprocess, wait_for_lock)      tools/build.py:486
+build_or_update_graph(full_rebuild=True, postprocess, wait_for_lock)
   root    = resolve_root(repo_root)
   db_path = get_db_path(root, read_only=True)          # honours CRG_DATA_DIR, no mkdir
-  lock    = WriteLock(db_path).acquire(blocking=wait_for_lock)            locking.py:139-148
+  lock    = WriteLock(db_path).acquire(blocking=wait_for_lock)
             # flock(LOCK_EX) on <data-dir>/write.lock, own PID into the file
             # not acquired -> {status:"contended", holder_pid} -> CLI exit 75
   _prepare_db_path(root, db_path)          # mkdir .code-review-graph/, migrate legacy .db
@@ -30,15 +34,15 @@ build_or_update_graph(full_rebuild=True, postprocess, wait_for_lock)      tools/
        # verified_file_count coverage > 25%, or tracked coverage >= 50%
 
   previous_state = metadata.build_state
-  store.set_metadata(build_state, "in-progress")                       build.py:597
+  store.set_metadata(build_state, "in-progress")
 
   if full_rebuild: result = full_build(root, store, recurse_submodules, enrich, follow_symlinks)
   else:            result = incremental_update(root, store, base, ...)
   ...
-  advance_to_postprocess_pending(store)                                build.py:693
-  warnings = _run_postprocess(store, postprocess, full_rebuild=...)     build.py:231
+  advance_to_postprocess_pending(store)
+  warnings = _run_postprocess(store, postprocess, full_rebuild=...)
   if postprocess != "none" and not contended:
-      store.set_metadata(build_state, "complete")                      build.py:711
+      store.set_metadata(build_state, "complete")
   store.close(); lock.release()
 ```
 
@@ -46,11 +50,10 @@ build_or_update_graph(full_rebuild=True, postprocess, wait_for_lock)      tools/
 
 ```
 full_build(repo_root, store, recurse_submodules, enrich, follow_symlinks)
-                                                              incremental.py:2988
   repo_root = canonical(repo_root)
   parser    = CodeParser(repo_root)                    # one per process/worker (threading.local)
 
-  files, followed, followed_dirs = _collect_files(repo_root, ...)                inc:2440
+  files, followed, followed_dirs = _collect_files(repo_root, ...)
       patterns  = DEFAULT_IGNORE_PATTERNS + .code-review-graphignore
                   + nested_build_output_patterns(module-scan depth 3, <=2000 dirs, 300s TTL)
       candidates = git ls-files + untracked        # or svn list, or rglob(minus install_manifest)
@@ -79,7 +82,6 @@ full_build(repo_root, store, recurse_submodules, enrich, follow_symlinks)
               if err: errors.append(...); continue
               _relink_edges(edges, repo_root, followed_dirs)
               store.store_file_nodes_edges(full_path, nodes, edges, fhash)   # 1 txn per file
-                                                                             graph.py:1807
 
   # ---- metadata ----
   set last_updated, last_build_type="full", intentionally_incomplete="0",
@@ -106,15 +108,15 @@ full_build(repo_root, store, recurse_submodules, enrich, follow_symlinks)
 ```
 
 Node shape: `{kind File|Class|Function|Type|Test, name, file_path, line_start, line_end, language,
-parent_name, params, return_type, modifiers, is_test, extra, identity_name}` (`parser.py:1175`).
+parent_name, params, return_type, modifiers, is_test, extra, identity_name}`.
 Edge shape: `{kind CALLS|IMPORTS_FROM|INHERITS|IMPLEMENTS|CONTAINS|TESTED_BY|DEPENDS_ON|REFERENCES,
-source, target, file_path, line, extra}` (`parser.py:1198`). Targets may be **bare** names at this
+source, target, file_path, line, extra}`. Targets may be **bare** names at this
 stage — that is what the resolvers exist to fix.
 
 ## 1.3 `_run_postprocess` — 11 ordered phases
 
 ```
-_run_postprocess(store, postprocess ∈ {none, minimal, full}, full_rebuild,                build.py:231
+_run_postprocess(store, postprocess ∈ {none, minimal, full}, full_rebuild,
                  changed_files, entry_point_qns, communities_were_affected)
   if postprocess == "none":
         store.refresh_target_resolution(); return                          # phase 0 only
@@ -139,7 +141,7 @@ path and lacks the resolvers and the second `refresh_target_resolution`.
 ## 1.4 `incremental_update` — the delta path
 
 ```
-incremental_update(repo_root, store, base, changed_files, reconcile_stale, ...)   inc:3173
+incremental_update(repo_root, store, base, changed_files, reconcile_stale, ...)
   # -- identity gates that silently escalate to a full build --
   if cpp_identity_version != "1" and has_cpp_nodes and no pending: return full_build()
   pending_csharp = all .cs files   if csharp_identity_version != "5"
@@ -207,11 +209,11 @@ incremental_update(repo_root, store, base, changed_files, reconcile_stale, ...) 
 
 | Knob | Value | Effect |
 |---|---|---|
-| `_MAX_PARSE_WORKERS` | `CRG_PARSE_WORKERS` or `min(cpu, 8)` | pool size (`inc:64`) |
+| `_MAX_PARSE_WORKERS` | `CRG_PARSE_WORKERS` or `min(cpu, 8)` | pool size |
 | executor kind | process; **thread** for MCP-stdio / win32 non-TTY | avoids pipe-inheritance deadlock |
 | serial cutoff | `< 8` files or `CRG_SERIAL_PARSE=1` | no pool |
 | `chunksize` | 20 | `executor.map` |
-| FTS delta ceiling | `max(500, 0.35 × nodes)` | above it, full `rebuild` (`search.py:106`) |
+| FTS delta ceiling | `max(500, 0.35 × nodes)` | above it, full `rebuild` |
 | dependent expansion | depth 2, cap 500 | sets `.truncated` |
 | binary probe | NUL in first 8 KiB | skip |
 | partial-graph rebuild | < 25 % verified / < 50 % tracked coverage | full rebuild |
@@ -223,11 +225,11 @@ incremental_update(repo_root, store, base, changed_files, reconcile_stale, ...) 
 ## 2.1 Trigger and admission
 
 ```
-main() -> "cli" -> run_cli()                                              src/main.c:1322
+main() -> "cli" -> run_cli()
   if flag --index-worker: srv = mcp_server_new(); handle_tool(tool, args)  # the worker
   else:                   main_local_cli_daemon_execute(tool, args)         # the client
 
-mcp_index_repository(args)                                              src/mcp/mcp.c:11783
+mcp_index_repository(args)
   mode = full | moderate | fast | cross-repo-intelligence
   if mode == cross-repo-intelligence: return            # no index job exists for this
   if index_supervisor_should_wrap():                    # host never indexes in-process
@@ -248,7 +250,7 @@ quarantine journal; a file is skipped only after appearing in **two consecutive*
 ## 2.2 Stage, then route
 
 ```
-cbm_pipeline_run(p)                                                       pipeline.c:5134
+cbm_pipeline_run(p)
   final = resolve_db_path(p)                     # CBM_CACHE_DIR/<project>.db
   sweep_orphan_stages(final)                      # reclaim dead "<base>.stage.XXXXXX"
   stage = create_staging_path(final); p->db_path = stage
@@ -263,7 +265,7 @@ cbm_pipeline_run(p)                                                       pipeli
 ```
 
 ```
-cbm_pipeline_run_staged(p)                                               pipeline.c:4380
+cbm_pipeline_run_staged(p)
   mode = requested_mode; maybe promote_mode_to_existing_coverage(p)
   refresh_git_context(p); set_macro_extraction(mode == FULL)
   userconfig = load_test_config(p)                          # aborts on error (ABORT_PRESERVE_DB)
@@ -292,7 +294,7 @@ cbm_pipeline_run_staged(p)                                               pipelin
 ## 2.3 Route: no-op / incremental / full
 
 ```
-try_incremental_or_delete_db(p, files, count, baseline)         pipeline_incremental.c:3250
+try_incremental_or_delete_db(p, files, count, baseline)
   if p->stage_backup_pending:
         if live_generation_current(p, baseline):     # read-only integrity + format + exact manifest
               p->live_noop = true; return 0          # nothing copied, sealed or renamed
@@ -305,7 +307,7 @@ try_incremental_or_delete_db(p, files, count, baseline)         pipeline_increme
   if rc == FORCE_FULL_REINDEX: adr_migrate_before_delete(db); unlink(db); remove_sidecars(db)
   return rc
 
-run_incremental:                                                  pipeline_incremental.c:4130
+run_incremental:
   store = open_path_query(db)                # query_only: never re-WAL a sealed generation
   stored = get_file_hashes(project)          # sha256 + mtime_ns + size per file
   if exact_generation(p, store, stored, baseline):        # manifest set+bytes, coverage, doclinks
@@ -333,7 +335,7 @@ run_incremental:                                                  pipeline_incre
 ## 2.4 Full path: extraction
 
 ```
-run_extraction_phase(p, ctx, files, count)                        pipeline.c:4334
+run_extraction_phase(p, ctx, files, count)
   pass_structure(p, stem_marks, files, count)             # B1: Project, Branch, Folder/Package,
                                                           #     File nodes + CONTAINS_FILE
   workers = frozen ? 1 : cbm_pipeline_worker_count(p)
@@ -412,7 +414,7 @@ Barriers are real: B = single-threaded ordered boundary, P = internally parallel
 ## 2.6 Dump and publish
 
 ```
-dump_and_persist_hashes(p, baseline)                                    pipeline.c:4079
+dump_and_persist_hashes(p, baseline)
   gbuf_settle_variants(gbuf)
   temp_to_final[] = build_dump_nodes(gbuf)     # skip deleted, assign final rowids
   release_gbuf_indexes(gbuf)                   # ~3.8 GB at kernel scale, freed BEFORE edges
@@ -424,7 +426,7 @@ dump_and_persist_hashes(p, baseline)                                    pipeline
         # writes tables, then PARALLEL_SORT_INDEXES and builds all 11 index B-trees,
         # then the sqlite_master page — the whole file is authored, no CREATE INDEX
 
-publish_staged(stage, fts_wholesale)                                    pipeline.c:3849
+publish_staged(stage, fts_wholesale)
   store = open_path(stage)
   replace file_hashes(project, baseline)         # the semantic manifest
   unless in_place: replace lsp_surfaces / doc_candidates
@@ -485,14 +487,16 @@ path** that publishes a partial graph.
 
 ## Doc/code contradictions found (code authoritative)
 
-1. `pipeline.c:3-12` header claims a "bulk load sources with LZ4 HC" phase and a "communities" phase —
-   neither exists. LZ4 is used by `internal/cbm/ac.c`, not by the pipeline.
-2. `README.md:405` "in-memory SQLite, single dump at end" — the dump writes a **file** via the raw page
-   writer; `open_memory()` is only the watcher's bookkeeping store.
-3. `README.md:1153` phase order is wrong: k8s/infra runs **before** calls on the sequential path, tests
-   before configlink, route nodes after doclinks.
+1. The pipeline's own file header claims a "bulk load sources with LZ4 HC" phase and a
+   "communities" phase — neither exists. LZ4 is used by the Aho-Corasick matcher's fused
+   decompression, not by the pipeline.
+2. The project's own documentation claims "in-memory SQLite, single dump at end" — the dump writes
+   a **file** via the raw page writer; `open_memory()` is only the watcher's bookkeeping store.
+3. The documented phase order is wrong: k8s/infra runs **before** calls on the sequential path,
+   tests before configlink, route nodes after doclinks.
 4. `cbm_pipeline_pass_githistory` is declared and defined with **no caller**; the real phase is
    `run_githistory`.
-5. `postprocessing.py:32` is not the build pipeline despite its docstring: it claims five steps and
-   omits the resolvers and the second `refresh_target_resolution`.
-6. `sqlite_writer.c:7` header says page size 4096; `#define CBM_PAGE_SIZE 65536` at line 48.
+5. `postprocessing.run_post_processing` is not the build pipeline despite its docstring: it claims
+   five steps and omits the resolvers and the second `refresh_target_resolution`.
+6. The SQLite writer's file header says page size 4096; the actual definition is
+   `CBM_PAGE_SIZE` = 65536.

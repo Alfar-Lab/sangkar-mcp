@@ -1,13 +1,16 @@
 # Graph data model: nodes, edges, and what is deliberately neither
 
-Verified against source. Counts are grep-derived from code, not from docs.
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
+> [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
+
+Every count below is measured from each project's own source, never from its documentation.
 
 | | `code-review-graph` | `codebase-memory-mcp` |
 |---|---|---|
 | Node kinds | **14** + 1 display-only | **28** labels |
 | Edge kinds | **17** (16 emitted + `OVERRIDES` dead) | **43** relations |
 | Storage | `nodes` / `edges` tables, text-keyed | `nodes` / `edges` tables, id-keyed |
-| Node-vs-edge decision | 4 dicts in `parser.py` | 1 spec struct per language |
+| Node-vs-edge decision | 4 parallel dictionaries | 1 spec struct per language |
 
 ---
 
@@ -26,18 +29,18 @@ and its signature are columns on the `Function` row in both projects. There is n
 
 The decision is not code — it is a table lookup.
 
-### code-review-graph — four dicts (`parser.py`)
+### code-review-graph — four parallel extraction dicts
 
 ```
-_CLASS_TYPES     1450  -> Class node          _CALL_TYPES   1705  -> CALLS edge
-_FUNCTION_TYPES  1549  -> Function node       _IMPORT_TYPES 1643  -> IMPORTS_FROM edge
+_CLASS_TYPES     -> Class node          _CALL_TYPES   -> CALLS edge
+_FUNCTION_TYPES  -> Function node       _IMPORT_TYPES -> IMPORTS_FROM edge
 ```
 
 32 languages have a row in all four (`dart` has none in `_CALL_TYPES` and is handled by
-`_extract_dart_calls_from_children`, `parser.py:13430`). Languages whose four tables are empty
+`_extract_dart_calls_from_children`). Languages whose four tables are empty
 (elixir, nix, zig, lua, luau, sql, hcl) dispatch entirely through constructs handlers.
 
-### codebase-memory-mcp — one spec struct (`internal/cbm/lang_specs.h:26-45`)
+### codebase-memory-mcp — one spec struct per language
 
 ```c
 node-producing fields:   function_node_types, class_node_types, field_node_types,
@@ -48,9 +51,9 @@ grammar binding:         ts_factory
 re-parse specs:          embedded_imports   // Svelte/Vue/Astro script_element -> raw_text
 ```
 
-One row per language (`lang_specs.c:1719-2760`, 165 rows, `_Static_assert` against
-`CBM_LANG_COUNT` at `:2762`). The single walker `cbm_extract_unified`
-(`extract_unified.c:3002`) matches node kinds against these arrays.
+One row per language — 165 rows — with a compile-time `_Static_assert` that the row count equals
+`CBM_LANG_COUNT`. A single unified walker, `cbm_extract_unified`, matches node kinds against these
+arrays.
 
 ---
 
@@ -74,7 +77,7 @@ One row per language (`lang_specs.c:1719-2760`, 165 rows, `_Static_assert` again
 | `Variable` | Liquid `assign` | `extra.lines` (name reused = one node) |
 | `Output` | Liquid `{{ ... }}` | named `output:<expr>` |
 | `JsonPath` | JSON path | capped 1,000 paths / 32 levels / 256 KiB |
-| `Signal` | display-only, derived from `extra.verilog_kind` (`graph.py:5064`) | not a stored kind |
+| `Signal` | display-only, derived from `extra.verilog_kind` | not a stored kind |
 
 ### codebase-memory-mcp — 28 labels
 
@@ -83,14 +86,15 @@ Structural spine: `Project`, `Branch`, `Folder`, `Package`, `File`, `Module`, `S
 Code symbols: `Class`, `Struct`, `Interface`, `Trait`, `Enum`, `Type`, `Function`, `Method`,
 `Field`, `Variable`, `Constant`, `Macro`, `Decorator`.
 
-Synthesised infrastructure (verified producers): `Route` (`pass_route_nodes.c`), `Channel`
-(`extract_channels.c`), `Resource` + `Chart` (`pass_k8s.c`, `pass_terraform.c`), `Image`
-(`pass_docker.c`), `EnvVar` (`extract_env_accesses.c`), `Table` (`extract_defs.c`).
+Synthesised infrastructure, each with a producer verified in code: `Route` (a dedicated route pass),
+`Channel` (the channel extractor), `Resource` + `Chart` (the Kubernetes and Terraform passes),
+`Image` (the Docker pass), `EnvVar` (the environment-access extractor), `Table` (the definition
+extractor).
 `Process` exists in the label set but its producer was not verified here — treat as UNKNOWN.
 
 Note what CBM models as a first-class node and CRG does not: `Struct`, `Trait`, `Enum`,
 `Constant`, `Macro`, `Decorator`, and the whole deploy chain (`Resource`/`Chart`/`Image`).
-`Macro` nodes are only emitted in `full` mode (`cbm_set_macro_extraction`, `pipeline.c:4414`).
+`Macro` nodes are only emitted in `full` mode, gated by `cbm_set_macro_extraction`.
 
 ---
 
@@ -114,9 +118,9 @@ Note what CBM models as a first-class node and CRG does not: `Struct`, `Trait`, 
 | `HANDLES` | handler → `Endpoint`; listener → event | — |
 | `TRIGGERS` | `Scheduler` → `@Scheduled` method | — |
 | `PUBLISHES` | method → Spring event | — |
-| `OVERRIDES` | **declared in `constants.py:245` with weight 0.9, emitted by no parser** | 0.9 |
+| `OVERRIDES` | **declared in the edge-weight table with weight 0.9, emitted by no parser** | 0.9 |
 
-Traversal direction per kind is a separate table (`constants.py:263-276`): `CONTAINS` is `none`,
+Traversal direction per kind is a separate table: `CONTAINS` is `none`,
 `TESTED_BY` is `outgoing`, everything else `incoming`.
 
 ### codebase-memory-mcp — 43 relations
@@ -173,7 +177,7 @@ Both projects invent nodes purely so an edge has a target. Same concept, differe
 
 - CRG: the endpoint reverts to its bare name, the qualified form moves to `extra.claimed_endpoint`
   (so the edge re-binds if that node appears later), and the edge drops to `UNRESOLVED`.
-  Tiers (`docs/schema.md:148-156`): `EXTRACTED` 1.0, `INFERRED` 0.8 or resolver score,
+  Tiers: `EXTRACTED` 1.0, `INFERRED` 0.8 or resolver score,
   `AMBIGUOUS` 0.4 (`extra.ambiguous_targets`), `UNRESOLVED` 0.2.
 - CBM: unbound calls are recorded in `index_unresolved_candidates`, so an inbound trace can say
   candidates were truncated instead of claiming there are no callers.
@@ -198,7 +202,7 @@ same `(source_id, target_id, type)` triple is legitimately several edges. Non-IM
 | Edge endpoint | `source_qualified` / `target_qualified` **text** | `source_id` / `target_id` **integers**, FK `ON DELETE CASCADE` |
 | Rename of a symbol | reconciled in Python before delete (`_plan_file_identities`), no cascade | node row replaced, ids remapped, edges cascade |
 | Query shape | `WHERE target_qualified = ?` on `idx_edges_target_kind` | `WHERE target_id = ?` on `idx_edges_target_kind` |
-| FK enforcement | **off** (`foreign_keys` never set) | **on** (`store.c:770`) |
+| FK enforcement | **off** (`foreign_keys` never set) | **on** (`PRAGMA foreign_keys = ON` at open) |
 
 So CRG's model is *textual and repairable* — an edge can point at a name that does not exist yet, and
 the resolver machinery is what closes the gap. CBM's model is *referential* — an edge cannot exist

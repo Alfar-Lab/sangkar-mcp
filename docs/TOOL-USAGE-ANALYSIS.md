@@ -1,5 +1,8 @@
 # What the agent actually calls: usage telemetry vs the 47 tools
 
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
+> [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
+
 Source: the two charts supplied from real sessions. CBM and CRG ran on **different machines**, so
 volumes are not comparable. Distributions, error rates and zero-call sets are.
 
@@ -14,7 +17,7 @@ volumes are not comparable. Distributions, error rates and zero-call sets are.
 | Calls from top 5 tools | 78.6 % | 90.9 % (5 real + the invalid-name bucket = 98.7 %) |
 
 Both servers have **roughly half their surface unused**, and in both cases the unused half contains the
-features their READMEs lead with.
+features their documentation leads with.
 
 ---
 
@@ -43,9 +46,8 @@ Three observations:
 2. **`check_index_coverage` is the #3 tool — and it is the one capability CRG does not have.** The agent
    does not trust the graph by default; it verifies coverage before relying on an absence claim. That
    is a product insight, not an accident.
-3. **`list_projects` at 18 calls** is a smell: the project identity is a derived slug
-   (`home-ljosalfar-server-Documents-…-code-review-graph`), so the agent must re-discover it instead of
-   remembering it.
+3. **`list_projects` at 18 calls** is a smell: the project identity is a derived slug from the
+   absolute path, so the agent must re-discover it instead of remembering it.
 
 ## 2. CRG: 5 898 calls, but 6 tools carry 95.7 %
 
@@ -111,7 +113,7 @@ Most likely causes, in order:
 1. All 30 CRG tools carry a `_tool` suffix while CBM's are bare verbs (`search_graph`, `trace_path`).
    An agent that works across both will write `detect_changes` or `get_impact_radius`.
 2. CRG's CLI names differ from its MCP names (`detect-changes`, `impact`, `search`, `query`) — exactly
-   the strings a model has seen in `docs/COMMANDS.md`.
+   the strings a model has seen in CRG's own documented command set.
 
 Either way it is a **naming tax**, worth ~3 % of all calls. Renaming the 30 tools to bare verbs and
 matching the CLI would recover it for free.

@@ -1,5 +1,8 @@
 # Tool specification
 
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
+> [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
+
 Companion to `DESIGN.md`. Six agent tools, one admin tool.
 
 **On the examples:** these tools do not exist yet, so the payloads below are **constructed to spec**, not
@@ -111,14 +114,14 @@ three ways to ask for the same report at three sizes; `budget` and `paths` cover
     "not_indexed": []
   },
   "payload": {
-    "project": { "name": "code-review-graph-7f3a", "root": "/work/code-review-graph", "commit": "bbdda4b9" },
-    "graph": { "nodes": 13955, "edges": 130044, "size_bytes": 208666624, "db_path": "~/.cache/<n>/code-review-graph-7f3a/graph.db" },
+    "project": { "name": "acme-graph-7f3a", "root": "/work/acme-graph", "commit": "bbdda4b9" },
+    "graph": { "nodes": 13955, "edges": 130044, "size_bytes": 208666624, "db_path": "~/.cache/<n>/acme-graph-7f3a/graph.db" },
     "languages": [
       { "language": "python", "files": 408, "parsed": 408, "failed": 0 },
       { "language": "xslt", "files": 4, "parsed": 0, "failed": 4, "note": "grammar_unavailable" }
     ],
     "paths": [
-      { "path": "code_review_graph/graph.py", "indexed": true, "symbols": 214, "sha256": "9c1f…" },
+      { "path": "src/graph.py", "indexed": true, "symbols": 214, "sha256": "9c1f…" },
       { "path": "docs/legacy.xslt", "indexed": false, "reason": "grammar_unavailable" }
     ],
     "health": { "indexer": "idle", "last_publish_ms": 41200, "consecutive_failures": 0 }
@@ -183,33 +186,33 @@ are separate products.
   "payload": {
     "resolution": {
       "query": "resolve_bare_call_targets",
-      "matched": "code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "matched": "src/graph.py::GraphStore.resolve_bare_call_targets",
       "kind": "method",
       "how": "exact name, 1 of 1 candidate",
       "confidence": "extracted"
     },
     "node": {
       "id": 3211,
-      "qn": "code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+      "qn": "src/graph.py::GraphStore.resolve_bare_call_targets",
       "kind": "method",
-      "file": "code_review_graph/graph.py",
+      "file": "src/graph.py",
       "lines": [3201, 3216],
       "signature": "def resolve_bare_call_targets(self) -> int",
       "is_test": false
     },
     "in": [
       { "edge": "calls", "tier": "extracted", "items": [
-        { "id": 3233, "qn": "code_review_graph/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "file": "code_review_graph/postprocessing.py", "line": 90, "hop": 1 },
+        { "id": 3233, "qn": "src/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "file": "src/postprocessing.py", "line": 90, "hop": 1 },
         { "id": 6073, "qn": "tests/test_csharp_namespaces.py::_build", "kind": "function", "file": "tests/test_csharp_namespaces.py", "line": 812, "hop": 1, "is_test": true }
       ]},
       { "edge": "tested_by", "tier": "extracted", "items": [ { "id": 5997, "qn": "tests/test_cpp_overload_identity.py::test_cross_file_receiver_call_without_type_evidence_stays_unresolved", "kind": "test", "line": 821, "hop": 1 } ] }
     ],
     "out": [
-      { "edge": "calls", "tier": "extracted", "items": [ { "id": 3341, "qn": "code_review_graph/graph.py::GraphStore._drop_bare_endpoint_context", "hop": 1 } ] },
+      { "edge": "calls", "tier": "extracted", "items": [ { "id": 3341, "qn": "src/graph.py::GraphStore._drop_bare_endpoint_context", "hop": 1 } ] },
       { "edge": "calls", "tier": "inferred", "items": [ { "id": 11002, "qn": "builtins.dict", "external": true, "hop": 1 } ] }
     ],
     "unresolved": [
-      { "file": "code_review_graph/parser.py", "line": 8123, "name": "resolve_bare_call_targets", "evidence": "receiver type unknown", "tier": "unresolved" }
+      { "file": "src/parser.py", "line": 8123, "name": "resolve_bare_call_targets", "evidence": "receiver type unknown", "tier": "unresolved" }
     ],
     "not_indexed": []
   }
@@ -275,13 +278,13 @@ uniformly.
   "next_tools": ["impact", "trace", "expand"],
   "payload": {
     "base": "bbdda4b9",
-    "changed_files": ["code_review_graph/graph.py", "code_review_graph/postprocessing.py", "tests/test_graph.py"],
+    "changed_files": ["src/graph.py", "src/postprocessing.py", "tests/test_graph.py"],
     "changed_symbols": [
-      { "id": 3211, "qn": "code_review_graph/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "change": "modified", "lines": [3201, 3216], "risk": 0.71 },
-      { "id": 3233, "qn": "code_review_graph/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "change": "added", "risk": 0.34 }
+      { "id": 3211, "qn": "src/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "change": "modified", "lines": [3201, 3216], "risk": 0.71 },
+      { "id": 3233, "qn": "src/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "change": "added", "risk": 0.34 }
     ],
     "risk": { "score": 0.62, "band": "medium", "drivers": ["41 dependents", "2 changed symbols without tests", "1 changed entry point"] },
-    "test_gaps": [ { "qn": "code_review_graph/postprocessing.py::_resolve_bare_endpoints", "reason": "no tested_by edge within 2 hops" } ],
+    "test_gaps": [ { "qn": "src/postprocessing.py::_resolve_bare_endpoints", "reason": "no tested_by edge within 2 hops" } ],
     "removed_symbols": [],
     "suggested_next": [ { "tool": "impact", "why": "41 dependents on GraphStore" }, { "tool": "trace", "query": "GraphStore.resolve_bare_call_targets", "why": "changed entry point" } ]
   }
@@ -300,10 +303,10 @@ uniformly.
     "size": { "files": 530, "nodes": 13955, "edges": 130044 },
     "languages": [ { "language": "python", "files": 408 }, { "language": "typescript", "files": 28 } ],
     "entry_points": [
-      { "qn": "code_review_graph/cli.py::main", "kind": "function", "reachable": 214 }
+      { "qn": "src/cli.py::main", "kind": "function", "reachable": 214 }
     ],
     "coupling_hotspots": [
-      { "qn": "code_review_graph/graph.py::GraphStore", "in": 41, "out": 88 }
+      { "qn": "src/graph.py::GraphStore", "in": 41, "out": 88 }
     ],
     "flows": [ { "name": "build", "steps": 39, "files": 8 } ],
     "not_indexed": [ { "path": "docs/legacy.xslt", "reason": "grammar_unavailable" } ]
@@ -365,8 +368,8 @@ five source-shaping knobs; those are file-reader features, not graph features.
   "payload": {
     "mode": "bm25",
     "results": [
-      { "id": 3211, "qn": "code_review_graph/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "file": "code_review_graph/graph.py", "lines": [3201, 3216], "signature": "def resolve_bare_call_targets(self) -> int", "degree": { "in": 2, "out": 15 }, "score": 0.787 },
-      { "id": 8842, "qn": "code_review_graph/parser.py::CodeParser._resolve_call_targets", "kind": "method", "file": "code_review_graph/parser.py", "lines": [8024, 8385], "degree": { "in": 3, "out": 27 }, "score": 0.191 }
+      { "id": 3211, "qn": "src/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "file": "src/graph.py", "lines": [3201, 3216], "signature": "def resolve_bare_call_targets(self) -> int", "degree": { "in": 2, "out": 15 }, "score": 0.787 },
+      { "id": 8842, "qn": "src/parser.py::CodeParser._resolve_call_targets", "kind": "method", "file": "src/parser.py", "lines": [8024, 8385], "degree": { "in": 3, "out": 27 }, "score": 0.191 }
     ]
   }
 }
@@ -420,11 +423,11 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
   "next_tools": ["trace", "expand"],
   "payload": {
     "changed": [
-      { "path": "code_review_graph/graph.py", "symbols": 3, "entry_point": false }
+      { "path": "src/graph.py", "symbols": 3, "entry_point": false }
     ],
     "impacted": [
-      { "id": 3233, "qn": "code_review_graph/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "hop": 1, "via": "calls", "tier": "extracted", "tested": true },
-      { "id": 1180, "qn": "code_review_graph/cli.py::_handle_build_update", "kind": "function", "hop": 2, "via": "calls", "tier": "inferred", "tested": false, "entry_point": true }
+      { "id": 3233, "qn": "src/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "hop": 1, "via": "calls", "tier": "extracted", "tested": true },
+      { "id": 1180, "qn": "src/cli.py::_handle_build_update", "kind": "function", "hop": 2, "via": "calls", "tier": "inferred", "tested": false, "entry_point": true }
     ],
     "unmatched_files": [ { "path": "CHANGELOG.md", "reason": "no symbols" } ],
     "risk": { "score": 0.62, "band": "medium", "drivers": ["2 entry points affected", "6 of 41 impacted nodes tested"] }
@@ -485,7 +488,7 @@ Inference table (disclosed in the response, documented in the instructions):
   "truncation_reason": "budget",
   "next": "cur_9a02cc",
   "payload": {
-    "target": { "id": 1006, "qn": "code_review_graph/graph.py::GraphStore", "kind": "class", "lines": [1006, 5859] },
+    "target": { "id": 1006, "qn": "src/graph.py::GraphStore", "kind": "class", "lines": [1006, 5859] },
     "what": "members",
     "why": "inferred: class -> members",
     "members": [

@@ -351,7 +351,7 @@ function gitRepo(): string {
 
 /** The description the model sees, lifted from the spec so the two cannot drift silently. */
 function specDescription(): string {
-  const spec = readFileSync(join(import.meta.dir, "..", "..", "TOOLS-SPEC.md"), "utf8");
+  const spec = readFileSync(join(import.meta.dir, "..", "..", "docs", "TOOLS-SPEC.md"), "utf8");
   const start = spec.indexOf("## 6. `impact`");
   const end = spec.indexOf("### Parameters", start);
   const quoted = spec

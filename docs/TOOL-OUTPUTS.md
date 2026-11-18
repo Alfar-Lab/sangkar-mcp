@@ -1,14 +1,19 @@
 # Real tool outputs: both MCP servers on one corpus
 
+> **Historical example data.** Every payload below was captured on 2026-11-17 and is kept as-is.
+> `<repo>` is a placeholder for the analysed corpus repository and `<project>` for its derived project
+> id (CBM's project slug); `<home>` stands in for the capture machine's home directory. Nothing below
+> depends on that local checkout — the paths are illustrative, the payloads are real.
+
 Everything below was produced by **actually running** both servers, not synthesised.
 
 | | value |
 |---|---|
-| Corpus (identical for both) | `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph` @ `bbdda4b9e4b4`, branch `staging` |
-| `code-review-graph` | 2.4.0, `build` (full), schema v15, Python 3.12 venv |
-| `codebase-memory-mcp` | `dev`, self-built `make -f Makefile.cbm cbm` (164 grammars), `mode=full` |
+| Corpus (identical for both) | `<repo>` = [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) @ `bbdda4b9e4b4`, branch `staging` (530 files) |
+| `code-review-graph` | [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — 2.4.0, `build` (full), schema v15, Python 3.12 venv |
+| `codebase-memory-mcp` | [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — `dev`, self-built `make -f Makefile.cbm cbm` (164 grammars), `mode=full` |
 | Capture | MCP stdio JSON-RPC (`initialize` → `tools/list` → `tools/call`), 2026-11-17 |
-| Payloads | CRG: `./*.json` here (32 files) · CBM: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/*.json` |
+| Payloads | This repo's capture files in `tool-outputs/`: CRG `./*.json` (32 files) · CBM `tool-outputs/*.json` |
 
 ## What the same corpus looks like to each
 
@@ -77,7 +82,7 @@ get_minimal_context_tool {}
 …
 ```
 
-*905 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_minimal_context_tool.json`*
+*905 bytes, trimmed to 600. Full payload: `tool-outputs/get_minimal_context_tool.json`*
 
 ### `list_graph_stats_tool`
 
@@ -94,7 +99,7 @@ list_graph_stats_tool {}
 …
 ```
 
-*2524 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/list_graph_stats_tool.json`*
+*2524 bytes, trimmed to 700. Full payload: `tool-outputs/list_graph_stats_tool.json`*
 
 ### `semantic_search_nodes_tool`
 
@@ -113,9 +118,9 @@ semantic_search_nodes_tool {query: 'impact radius'}
   "results": [
     {
       "name": "get_impact_radius_sql",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.get_impact_radius_sql",
+      "qualified_name": "<repo>/code_review_graph/graph.py::GraphStore.get_impact_radius_sql",
       "kind": "Function",
-      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "file_path": "<repo>/code_review_graph/graph.py",
       "line_start": 4663,
       "line_end": 4902,
       "language": "python",
@@ -123,7 +128,7 @@ semantic_search_nodes_tool {query: 'impact radius'}
 …
 ```
 
-*16569 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/semantic_search_nodes_tool.json`*
+*16569 bytes, trimmed to 700. Full payload: `tool-outputs/semantic_search_nodes_tool.json`*
 
 ### `query_graph_tool`
 
@@ -137,9 +142,9 @@ query_graph_tool {pattern: 'callers_of', target: 'GraphStore.resolve_bare_call_t
 {
   "status": "ok",
   "pattern": "callers_of",
-  "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+  "target": "<repo>/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
   "description": "Find all functions that call a given function",
-  "summary": "Found 12 call site(s) across 12 node(s) for callers_of('/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets')",
+  "summary": "Found 12 call site(s) across 12 node(s) for callers_of('<repo>/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets')",
   "result_count": 12,
   "results_omitted": 0,
   "results": [
@@ -147,11 +152,11 @@ query_graph_tool {pattern: 'callers_of', target: 'GraphStore.resolve_bare_call_t
       "id": 3233,
       "kind": "Function",
       "name": "_resolve_bare_endpoints",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py::_resolve_bare_endpoints",
+      "qualified_name": "<repo>/code_review_graph/postprocessing.py::_resolve_bare_endpoints",
 …
 ```
 
-*15124 bytes, trimmed to 800. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/query_graph_tool.json`*
+*15124 bytes, trimmed to 800. Full payload: `tool-outputs/query_graph_tool.json`*
 
 ### `query_graph_tool`
 
@@ -177,7 +182,7 @@ traverse_graph_tool {query: 'GraphStore', depth: 2, token_budget: 1500}
 
 ```json
 {
-  "start_node": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+  "start_node": "<repo>/code_review_graph/graph.py::GraphStore",
   "mode": "bfs",
   "max_depth": 2,
   "token_budget": 1500,
@@ -185,9 +190,9 @@ traverse_graph_tool {query: 'GraphStore', depth: 2, token_budget: 1500}
   "traversal": [
     {
       "name": "GraphStore",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "qualified_name": "<repo>/code_review_graph/graph.py::GraphStore",
       "kind": "Class",
-      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "file": "<repo>/code_review_graph/graph.py",
       "depth": 0
     },
     {
@@ -195,7 +200,7 @@ traverse_graph_tool {query: 'GraphStore', depth: 2, token_budget: 1500}
 …
 ```
 
-*7225 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/traverse_graph_tool.json`*
+*7225 bytes, trimmed to 600. Full payload: `tool-outputs/traverse_graph_tool.json`*
 
 ### `get_impact_radius_tool`
 
@@ -218,7 +223,7 @@ get_impact_radius_tool {}
 …
 ```
 
-*205685 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_impact_radius_tool.json`*
+*205685 bytes, trimmed to 500. Full payload: `tool-outputs/get_impact_radius_tool.json`*
 
 ### `get_review_context_tool`
 
@@ -241,7 +246,7 @@ get_review_context_tool {include_source: false, max_files: 5}
 …
 ```
 
-*173951 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_review_context_tool.json`*
+*173951 bytes, trimmed to 500. Full payload: `tool-outputs/get_review_context_tool.json`*
 
 ### `detect_changes_tool`
 
@@ -261,8 +266,8 @@ detect_changes_tool {}
       "id": 1929,
       "kind": "Class",
       "name": "GraphStore",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
-      "file_path": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "qualified_name": "<repo>/code_review_graph/graph.py::GraphStore",
+      "file_path": "<repo>/code_review_graph/graph.py",
       "line_start": 1006,
       "line_end": 5859,
       "language": "python",
@@ -276,7 +281,7 @@ detect_changes_tool {}
 …
 ```
 
-*10492 bytes, trimmed to 900. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/detect_changes_tool.json`*
+*10492 bytes, trimmed to 900. Full payload: `tool-outputs/detect_changes_tool.json`*
 
 ### `get_affected_flows_tool`
 
@@ -312,7 +317,7 @@ get_affected_flows_tool {}
 …
 ```
 
-*275097 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_affected_flows_tool.json`*
+*275097 bytes, trimmed to 500. Full payload: `tool-outputs/get_affected_flows_tool.json`*
 
 ### `get_hub_nodes_tool`
 
@@ -329,9 +334,9 @@ get_hub_nodes_tool {top_n: 5}
   "hub_nodes": [
     {
       "name": "GraphStore",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore",
+      "qualified_name": "<repo>/code_review_graph/graph.py::GraphStore",
       "kind": "Class",
-      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
+      "file": "<repo>/code_review_graph/graph.py",
       "in_degree": 846,
       "out_degree": 769,
       "total_degree": 1615,
@@ -343,7 +348,7 @@ get_hub_nodes_tool {top_n: 5}
 …
 ```
 
-*2787 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_hub_nodes_tool.json`*
+*2787 bytes, trimmed to 600. Full payload: `tool-outputs/get_hub_nodes_tool.json`*
 
 ### `get_bridge_nodes_tool`
 
@@ -360,19 +365,19 @@ get_bridge_nodes_tool {top_n: 5}
   "bridge_nodes": [
     {
       "name": "CodeParser",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "qualified_name": "<repo>/code_review_graph/parser.py::CodeParser",
       "kind": "Class",
-      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py",
+      "file": "<repo>/code_review_graph/parser.py",
       "betweenness": 0.042807,
       "community_id": 6
     },
     {
       "name": "GraphStore",
-      "qualified_name": "/home/ljosalfar-server/Documents/researchs/
+      "qualified_name": "<repo>/
 …
 ```
 
-*2582 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_bridge_nodes_tool.json`*
+*2582 bytes, trimmed to 600. Full payload: `tool-outputs/get_bridge_nodes_tool.json`*
 
 ### `get_knowledge_gaps_tool`
 
@@ -396,18 +401,18 @@ get_knowledge_gaps_tool {max_per_category: 3}
     "isolated_nodes": [
       {
         "name": "$.backup.git-push",
-        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml::yaml:0:$.backup.git-push",
+        "qualified_name": "<repo>/.beads/config.yaml::yaml:0:$.backup.git-push",
         "kind": "YamlPath",
-        "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml",
+        "file": "<repo>/.beads/config.yaml",
         "degree": 1
       },
       {
         "name": "$.database",
-        "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp
+        "qualified_name": "<repo>
 …
 ```
 
-*4925 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_knowledge_gaps_tool.json`*
+*4925 bytes, trimmed to 700. Full payload: `tool-outputs/get_knowledge_gaps_tool.json`*
 
 ### `get_surprising_connections_tool`
 
@@ -424,15 +429,15 @@ get_surprising_connections_tool {top_n: 5}
   "surprising_connections": [
     {
       "source": "_spy",
-      "source_qualified": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_changes.py::TestAnalyzeChangesInternalParseRemap._spy",
+      "source_qualified": "<repo>/tests/test_changes.py::TestAnalyzeChangesInternalParseRemap._spy",
       "target": "map_changes_to_nodes",
-      "target_qualified": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/changes.py::map_changes_to_nodes",
+      "target_qualified": "<repo>/code_review_graph/changes.py::map_changes_to_nodes",
       "edge_kind": "CALLS",
       "surprise_score": 0.65,
 …
 ```
 
-*3748 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_surprising_connections_tool.json`*
+*3748 bytes, trimmed to 600. Full payload: `tool-outputs/get_surprising_connections_tool.json`*
 
 ### `get_suggested_questions_tool`
 
@@ -448,17 +453,17 @@ get_suggested_questions_tool {}
     {
       "category": "bridge_node",
       "question": "'CodeParser' is a critical connector between multiple code regions. Is it adequately tested and documented?",
-      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py::CodeParser",
+      "target": "<repo>/code_review_graph/parser.py::CodeParser",
       "priority": "high"
     },
     {
       "category": "bridge_node",
       "question": "'GraphStore' is a critical connector between multiple code regions. Is it adequately tested and documented?",
-      "target": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-
+      "target": "<repo>/code-
 …
 ```
 
-*3253 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_suggested_questions_tool.json`*
+*3253 bytes, trimmed to 600. Full payload: `tool-outputs/get_suggested_questions_tool.json`*
 
 ### `find_large_functions_tool`
 
@@ -471,11 +476,11 @@ find_large_functions_tool {min_lines: 300, limit: 5}
 ```json
 {
   "status": "ok",
-  "summary": "Found 273 node(s) with >= 300 lines, showing 5 of 273:\n  25167 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/parser.py (code_review_graph/parser.py:1)\n  21366 lines |    Class | CodeParser (code_review_graph/parser.py:3801)\n  6216 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_multilang.py (tests/test_multilang.py:1)\n  6035 lines |     File | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/
+  "summary": "Found 273 node(s) with >= 300 lines, showing 5 of 273:\n  25167 lines |     File | <repo>/code_review_graph/parser.py (code_review_graph/parser.py:1)\n  21366 lines |    Class | CodeParser (code_review_graph/parser.py:3801)\n  6216 lines |     File | <repo>/tests/test_multilang.py (tests/test_multilang.py:1)\n  6035 lines |     File | <repo>/code_review_graph/
 …
 ```
 
-*4326 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/find_large_functions_tool.json`*
+*4326 bytes, trimmed to 600. Full payload: `tool-outputs/find_large_functions_tool.json`*
 
 ### `list_flows_tool`
 
@@ -519,7 +524,7 @@ list_flows_tool {limit: 3}
 …
 ```
 
-*24129 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/list_flows_tool.json`*
+*24129 bytes, trimmed to 500. Full payload: `tool-outputs/list_flows_tool.json`*
 
 ### `get_flow_tool`
 
@@ -566,7 +571,7 @@ get_flow_tool {flow_id: 1}
 …
 ```
 
-*19448 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_flow_tool.json`*
+*19448 bytes, trimmed to 500. Full payload: `tool-outputs/get_flow_tool.json`*
 
 ### `list_communities_tool`
 
@@ -590,13 +595,13 @@ list_communities_tool {max_results: 3, max_members: 5}
       "dominant_language": "python",
       "description": "Directory-based community: tests",
       "members": [
-        "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/conftest.py::isolated_crg_home",
-        "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/conftest.py::pytest_configure",
-        "/home/ljosalfar-server/Doc
+        "<repo>/tests/conftest.py::isolated_crg_home",
+        "<repo>/tests/conftest.py::pytest_configure",
+        "<home>/Doc
 …
 ```
 
-*3671 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/list_communities_tool.json`*
+*3671 bytes, trimmed to 600. Full payload: `tool-outputs/list_communities_tool.json`*
 
 ### `get_community_tool`
 
@@ -619,13 +624,13 @@ get_community_tool {community_id: 1, include_members: true, max_members: 5}
     "dominant_language": "json",
     "description": "Directory-based community: .beads",
     "members": [
-      "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml::yaml:0:$",
-      "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.beads/config.yaml::yaml:0:$.backup",
-      "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review
+      "<repo>/.beads/config.yaml::yaml:0:$",
+      "<repo>/.beads/config.yaml::yaml:0:$.backup",
+      "<repo>/code-review
 …
 ```
 
-*6065 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_community_tool.json`*
+*6065 bytes, trimmed to 600. Full payload: `tool-outputs/get_community_tool.json`*
 
 ### `get_architecture_overview_tool`
 
@@ -671,7 +676,7 @@ get_architecture_overview_tool {}
 …
 ```
 
-*2810 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_architecture_overview_tool.json`*
+*2810 bytes, trimmed to 700. Full payload: `tool-outputs/get_architecture_overview_tool.json`*
 
 ### `refactor_tool`
 
@@ -689,14 +694,14 @@ refactor_tool {mode: 'dead_code', max_results: 5}
   "type": "rename",
   "old_name": "resolve_bare_call_targets",
   "new_name": "resolve_bare_call_targets_v2",
-  "qualified_name": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
+  "qualified_name": "<repo>/code_review_graph/graph.py::GraphStore.resolve_bare_call_targets",
   "edits": [
     {
-      "file": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-revie
+      "file": "<repo>/code-revie
 …
 ```
 
-*2306 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/refactor_tool.json`*
+*2306 bytes, trimmed to 600. Full payload: `tool-outputs/refactor_tool.json`*
 
 ### `apply_refactor_tool`
 
@@ -713,15 +718,15 @@ apply_refactor_tool {refactor_id: <from rename preview>, dry_run: true}
   "applied": 0,
   "edits_applied": 17,
   "would_modify": [
-    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py",
-    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/postprocessing.py",
-    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/tools/build.py",
-    "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/tests/test_cpp_overload_identity.py",
-    "/home/ljosalfar-server/Documents/rese
+    "<repo>/code_review_graph/graph.py",
+    "<repo>/code_review_graph/postprocessing.py",
+    "<repo>/code_review_graph/tools/build.py",
+    "<repo>/tests/test_cpp_overload_identity.py",
+    "<repo>
 …
 ```
 
-*3331 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/apply_refactor_tool.json`*
+*3331 bytes, trimmed to 600. Full payload: `tool-outputs/apply_refactor_tool.json`*
 
 ### `get_docs_section_tool`
 
@@ -739,7 +744,7 @@ get_docs_section_tool {section_name: 'commands'}
 …
 ```
 
-*4124 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_docs_section_tool.json`*
+*4124 bytes, trimmed to 500. Full payload: `tool-outputs/get_docs_section_tool.json`*
 
 ### `generate_wiki_tool`
 
@@ -753,7 +758,7 @@ generate_wiki_tool {force: true}
 {
   "status": "ok",
   "summary": "Wiki generated: 11 new, 0 updated, 0 unchanged (11 total pages)",
-  "wiki_dir": "/home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/.code-review-graph/wiki",
+  "wiki_dir": "<repo>/.code-review-graph/wiki",
   "pages_generated": 11,
   "pages_updated": 0,
   "pages_unchanged": 0,
@@ -764,7 +769,7 @@ generate_wiki_tool {force: true}
 …
 ```
 
-*560 bytes, trimmed to 400. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/generate_wiki_tool.json`*
+*560 bytes, trimmed to 400. Full payload: `tool-outputs/generate_wiki_tool.json`*
 
 ### `get_wiki_page_tool`
 
@@ -778,11 +783,11 @@ get_wiki_page_tool {community_name: 'code-review-graph-name'}
 {
   "status": "ok",
   "summary": "Wiki page for 'code-review-graph-name' (11047 chars)",
-  "content": "# code-review-graph-name\n\n## Overview\n\nDirectory-based community: code_review_graph\n\n- **Size**: 2722 nodes\n- **Cohesion**: 0.1623\n- **Dominant Language**: python\n\n## Members\n\n| Name | Kind | File | Lines |\n|------|------|------|-------|\n| find_hub_nodes | Function | /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/analysis.py | 27-68 |\
+  "content": "# code-review-graph-name\n\n## Overview\n\nDirectory-based community: code_review_graph\n\n- **Size**: 2722 nodes\n- **Cohesion**: 0.1623\n- **Dominant Language**: python\n\n## Members\n\n| Name | Kind | File | Lines |\n|------|------|------|-------|\n| find_hub_nodes | Function | <repo>/code_review_graph/analysis.py | 27-68 |\
 …
 ```
 
-*11590 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_wiki_page_tool.json`*
+*11590 bytes, trimmed to 500. Full payload: `tool-outputs/get_wiki_page_tool.json`*
 
 ### `list_repos_tool`
 
@@ -843,7 +848,7 @@ embed_graph_tool {provider: 'local'}
 …
 ```
 
-*501 bytes, trimmed to 500. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/embed_graph_tool.json`*
+*501 bytes, trimmed to 500. Full payload: `tool-outputs/embed_graph_tool.json`*
 
 ### `build_or_update_graph_tool`
 
@@ -882,7 +887,7 @@ build_or_update_graph_tool {full_rebuild: false}
 …
 ```
 
-*1185 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/build_or_update_graph_tool.json`*
+*1185 bytes, trimmed to 700. Full payload: `tool-outputs/build_or_update_graph_tool.json`*
 
 ### `run_postprocess_tool`
 
@@ -909,7 +914,7 @@ run_postprocess_tool {flows: false, communities: false, fts: true}
 …
 ```
 
-*449 bytes, trimmed to 400. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/run_postprocess_tool.json`*
+*449 bytes, trimmed to 400. Full payload: `tool-outputs/run_postprocess_tool.json`*
 
 
 ## codebase-memory-mcp — 16 of 17 tools, real payloads
@@ -923,21 +928,21 @@ index_status {project, verbose: true}
 ```
 
 ```text
-project: home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph
+project: <project>
 nodes: 17230
 edges: 87766
 status: ready
-root_path: /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph
+root_path: <repo>
 indexed_at: 2026-11-17T06:57:59Z
 git:
   is_git: true
   is_worktree: false
   is_detached: false
   root_exists: true
-  worktree_root: /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph
+  worktree_root: <repo>
   git_dir: .git
   git_common_dir: .git
-  canonical_root: /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph
+  canonical_root: <repo>
   branch: staging
   branch_slug: staging
   head_sha: bbdda4b9e4b4818a9f04d7ef96ac0e50da13f208
@@ -1044,14 +1049,14 @@ search_graph {project, query: 'resolve_bare_call_targets', format: 'json'}
   ],
   "rows": [
     [
-      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore.resolve_bare_call_targets",
+      "<project>.code_review_graph.graph.GraphStore.resolve_bare_call_targets",
       "Method",
       "code_review_graph/graph.py",
       "3201-3216",
       -50.69574092348044
     ],
     [
-      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.parser.CodeParser._resolve_call_targets",
+      "<project>.code_review_graph.parser.CodeParser._resolve_call_targets",
       "Method",
       "code_review_graph/parser.py",
       "8024-8385",
@@ -1061,7 +1066,7 @@ search_graph {project, query: 'resolve_bare_call_targets', format: 'json'}
 …
 ```
 
-*737 bytes, trimmed to 600. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/search_graph.json`*
+*737 bytes, trimmed to 600. Full payload: `tool-outputs/search_graph.json`*
 
 ### `search_code`
 
@@ -1085,7 +1090,7 @@ search_code {project, pattern: 'max_nodes', result_limit: 3}
   ],
   "rows": [
     [
-      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.tools.query.get_impact_radius",
+      "<project>.code_review_graph.tools.query.get_impact_radius",
       "Function",
       "code_review_graph/tools/query.py",
       "738-1011",
@@ -1097,7 +1102,7 @@ search_code {project, pattern: 'max_nodes', result_limit: 3}
       19
     ],
     [
-      "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore.get_impact_radius_sql",
+      "<project>.code_review_graph.graph.GraphStore.get_impact_radius_sql",
       "Method",
       "code_review_graph/graph.py",
       "4663-4902",
@@ -1112,7 +1117,7 @@ search_code {project, pattern: 'max_nodes', result_limit: 3}
 …
 ```
 
-*1502 bytes, trimmed to 700. Full payload: `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/search_code.json`*
+*1502 bytes, trimmed to 700. Full payload: `tool-outputs/search_code.json`*
 
 ### `trace_path`
 
@@ -1134,7 +1139,7 @@ callees: 4  (rows: name hop; qn = group prefix empty ? name : prefix + "." + nam
 builtins:
   dict 2
   len 2
-home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore:
+<project>.code_review_graph.graph.GraphStore:
   _drop_bare_endpoint_context 1
   _resolve_bare_endpoints 1
 callers_total: 2
@@ -1179,9 +1184,9 @@ get_code_snippet {qualified_name, project, max_lines: 20, include_neighbors: tru
 
 ```text
 name: resolve_bare_call_targets
-qualified_name: home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.graph.GraphStore.resolve_bare_call_targets
+qualified_name: <project>.code_review_graph.graph.GraphStore.resolve_bare_call_targets
 label: Method
-file_path: /home/ljosalfar-server/Documents/researchs/codegraph-mcp/code-review-graph/code_review_graph/graph.py
+file_path: <repo>/code_review_graph/graph.py
 start_line: 3201
 end_line: 3216
 store_generation: uce9472b0a5e2d60fg2
@@ -1212,10 +1217,10 @@ get_file_outline {project, file_path: 'code_review_graph/postprocessing.py', lim
 ```text
 file_path: code_review_graph/postprocessing.py
 results: 8  (cols: name label lines qn)
-  logger Variable 29-29 home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.postprocessing.logger
-  run_post_processing Function 32-77 home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.postprocessing.run_post_processing
-  _resolve_bare_endpoints Function 83-103 home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.postprocessing._resolve_bare_endpoints
-  _compute_signatures Function 106-138 home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph.code_review_graph.postpro
+  logger Variable 29-29 <project>.code_review_graph.postprocessing.logger
+  run_post_processing Function 32-77 <project>.code_review_graph.postprocessing.run_post_processing
+  _resolve_bare_endpoints Function 83-103 <project>.code_review_graph.postprocessing._resolve_bare_endpoints
+  _compute_signatures Function 106-138 <project>.code_review_graph.postpro
 …
 ```
 
@@ -1230,7 +1235,7 @@ get_architecture {project, aspects: ['languages','packages']}
 ```
 
 ```text
-project: home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph
+project: <project>
 total_nodes: 17230
 total_edges: 87766
 languages: 10  (cols: language files)
@@ -1293,7 +1298,7 @@ check_index_coverage {project, paths: ['code_review_graph/graph.py','does/not/ex
 ```
 
 ```text
-project: home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph
+project: <project>
 signal: best_effort
 indexed_at: 2026-11-17T06:57:59Z
 metadata:
@@ -1341,9 +1346,9 @@ list_projects {detail: 'stats', limit: 3}
 
 ```text
 projects: 3  (cols: name root_path branch nodes edges size_bytes)
-  home-ljosalfar-server-Documents-apps-ef-watcher /home/ljosalfar-server/Documents/apps/ef-watcher master 2597 5539 11337728
-  home-ljosalfar-server-Documents-apps-portfolio-web /home/ljosalfar-server/Documents/apps/portfolio-web main 739 1407 5046272
-  home-ljosalfar-server-Documents-harness-app-pi-web /home/ljosalfar-server/Documents/harness-app/pi-web custom 16571 68596 73269248
+  <home>-Documents-apps-ef-watcher <home>/Documents/apps/ef-watcher master 2597 5539 11337728
+  <home>-Documents-apps-portfolio-web <home>/Documents/apps/portfolio-web main 739 1407 5046272
+  <home>-Documents-harness-app-pi-web <home>/Documents/harness-app/pi-web custom 16571 68596 73269248
 total: 7
 returned: 3
 has_more: true
@@ -1363,7 +1368,7 @@ index_repository {repo_path, status: true}
 
 ```json
 {
-  "project": "home-ljosalfar-server-Documents-researchs-codegraph-mcp-code-review-graph",
+  "project": "<project>",
   "state": "idle",
   "detail": "no index job has run for this project in this daemon generation; index_status describes the published graph"
 }
@@ -1428,9 +1433,9 @@ so it is the one tool with no captured output. Its contract is `{project, status
 
 | Observation | Evidence |
 |---|---|
-| `get_affected_flows_tool` returned **275 097 bytes** (~69 k tokens) against a **pinned 6 000-token default / 40 000 worst case**; one flow alone was 153 479 bytes. The 400-step flow budget bounds *steps across* flows, not one flow's size | `tests/test_token_budget.py` pins 6000/40000; payload `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/tool-outputs/get_affected_flows_tool.json` |
-| `get_impact_radius_tool` returned **205 687 bytes** (~51 k tokens) against a pinned 50 000-token worst case | payload in `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/` |
-| `get_review_context_tool` returned **173 951 bytes** (~43 k tokens) with `include_source: false` | payload in `/home/ljosalfar-server/Documents/researchs/codegraph-mcp/` |
+| `get_affected_flows_tool` returned **275 097 bytes** (~69 k tokens) against a **pinned 6 000-token default / 40 000 worst case**; one flow alone was 153 479 bytes. The 400-step flow budget bounds *steps across* flows, not one flow's size | `tests/test_token_budget.py` pins 6000/40000; payload `tool-outputs/get_affected_flows_tool.json` |
+| `get_impact_radius_tool` returned **205 687 bytes** (~51 k tokens) against a pinned 50 000-token worst case | payload in `tool-outputs/` |
+| `get_review_context_tool` returned **173 951 bytes** (~43 k tokens) with `include_source: false` | payload in `tool-outputs/` |
 | All three overruns happen on a **530-file repo**, not a monorepo — the failure mode scales with graph density (one dense flow, one dense radius), not repository size | corpus stats above |
 | CBM counts Markdown as an indexable language; CRG has no Markdown node kind — so "files indexed" is not comparable across the two | `MATCH (f:File) … CONTAINS '.md'` vs `list_graph_stats_tool.nodes_by_kind` |
 | CRG silently skipped two grammars (`xslt`, `liquid`) — `LookupError` from `tree-sitter-language-pack`; those files still get a `File` node but no symbols | build log; `languages` still lists both |

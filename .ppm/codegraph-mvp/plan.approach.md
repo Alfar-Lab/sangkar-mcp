@@ -12,7 +12,8 @@
   exists; `drizzle-kit generate` emits SQLite migrations; `getTableConfig` lives in `drizzle-orm/sqlite-core`.
 - Measured query cost that shapes the store layer: raw prepared 0.69 µs, reused Drizzle prepared 1.7 µs,
   re-built Drizzle builder **42.7 µs** per read on the same indexed table.
-- The reference corpus for parity is `code-review-graph/` (530 files), where CRG measured 13 955 nodes /
+- The reference corpus for parity is [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph)
+  at commit `bbdda4b9e4b4` (530 files), where CRG measured 13 955 nodes /
   130 044 edges and CBM 17 230 / 87 766 on the same tree; the by-kind oracle those captures record is
   File 530, Class 877, Function 5 197, Test 6 351, and CBM recorded per-language **file** counts
   (python 408, typescript 28, yaml 24 …). No capture records per-language node counts, so TASK-019

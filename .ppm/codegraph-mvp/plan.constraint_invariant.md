@@ -67,7 +67,9 @@ Rules every task must respect. Violating one is a defect, not a preference.
 
 - All `verify` steps run in `app/` against **fixtures only**: `app/tests/fixtures/` for unit tests and an
   ephemeral database in a temp directory (`mkdtemp`) for integration tests.
-- The reference corpus is `code-review-graph/` at the repo root, read-only, used by integration and parity
+- The reference corpus is [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) at
+  commit `bbdda4b9e4b4` (branch `staging`), materialised as a read-only working copy outside version control
+  (`git clone https://github.com/tirth8205/code-review-graph`). It is the fixture for integration and parity
   tests. Tests must never write into it.
 - Node/npm are not used. `bun` is at `~/.bun/bin/bun` and is **not on `PATH`** — verify commands use
   `$HOME/.bun/bin/bun` or the `package.json` scripts run through it.

@@ -1,7 +1,10 @@
 # MCP tool surface: `codebase-memory-mcp` vs `code-review-graph`
 
-Verified counts: **CBM 17 tools** (`src/mcp/mcp.c:537-886`, annotations `:918-945`, dispatch `:22259-22327`);
-**CRG 30 tools + 5 prompts** (`main.py`, 30 `@mcp.tool` at `:383-1469`, 5 `@mcp.prompt` at `:1508-1552`).
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python.
+> [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — CBM `dev`, C/Go (164 grammars).
+
+Verified counts: **CBM 17 tools** (the same 17 appear in its schemas, annotations and dispatch); **CRG 30 tools + 5 prompts**
+(30 registered `@mcp.tool` handlers and 5 registered `@mcp.prompt` functions in the Python server).
 
 ---
 
@@ -27,10 +30,9 @@ Verified counts: **CBM 17 tools** (`src/mcp/mcp.c:537-886`, annotations `:918-94
 | `manage_adr` | **writes** ADR sidecar CRUD | `project` | `mode`=outline\|get\|update\|set_sections | `section_limit` 500 |
 | `ingest_traces` | **writes** observed call paths | `traces[]`,`project` | `label`="unlabeled", per-trace `path[]` (2-256), `count` | 10 000 traces, 200 000 pairs |
 
-Aliases and non-tool surfaces: `trace_call_path` is dispatchable but unadvertised (`mcp.c:22298`).
-Two **prompts** exist (`explore_codebase`, `review_change_impact`, `mcp.c:1391-1392`) — README does not
-mention them. Tool-profile gating (`--tool-profile scout|analysis`) narrows the list to 8 or 13 tools
-(`mcp.c:1016-1050`).
+Aliases and non-tool surfaces: `trace_call_path` is dispatchable but unadvertised.
+Two **prompts** exist (`explore_codebase`, `review_change_impact`) — CBM's documentation does not
+mention them. Tool-profile gating (`--tool-profile scout|analysis`) narrows the list to 8 or 13 tools.
 
 ## 2. The 30 CRG tools
 
@@ -68,7 +70,7 @@ mention them. Tool-profile gating (`--tool-profile scout|analysis`) narrows the 
 
 ## 3. The 5 CRG prompts
 
-All prepend `_TOKEN_EFFICIENCY_PREAMBLE` (`prompts.py:18-32`): call `get_minimal_context_tool` first,
+All prepend `_TOKEN_EFFICIENCY_PREAMBLE`: call `get_minimal_context_tool` first,
 `detail_level="minimal"` unless insufficient, **≤3 calls per turn**.
 
 | Prompt | Args | Workflow it dictates |
@@ -86,7 +88,7 @@ All prepend `_TOKEN_EFFICIENCY_PREAMBLE` (`prompts.py:18-32`): call `get_minimal
 | | CBM | CRG |
 |---|---|---|
 | Truncation signal | `truncated` + `truncation_reason` + `total_relation: gte` + `next_cursor` | per-list `*_total` + `truncated`, plus `", showing N of M"` appended to `summary` |
-| Token budget | `max_output_tokens` per tool, **4 bytes/token** (`mcp.c:51`); absent on `get_architecture`, `get_graph_schema`, `list_projects`, `index_status` | fixed per-tool budgets **pinned by tests** (`tests/test_token_budget.py`, `BUDGETS` at `:241`, `ABSOLUTE_MAX_TOKENS = 50_000`) |
+| Token budget | `max_output_tokens` per tool, **4 bytes/token**; absent on `get_architecture`, `get_graph_schema`, `list_projects`, `index_status` | fixed per-tool budgets **pinned by tests** (a `BUDGETS` table, `ABSOLUTE_MAX_TOKENS = 50_000`) |
 | Timeout | cypher 30 s; `search_code` scan 30 s; index worker quiet 900 s | `CRG_TOOL_TIMEOUT`, **default 0 = unbounded**; worker thread with `abandon_on_cancel`; 5 tools explicitly `bounded=False` |
 | Validation | JSON-schema `minimum`/`maximum` per arg | `_validate_positive_int` rejects `<1` and booleans (20 tools); `detail_level` **never validated** — unknown value silently behaves as `standard` |
 | Two tools outside the contract | `get_architecture` has no budget at all | `get_docs_section_tool`, `list_repos_tool` are sync `def`s → never offloaded, never timeout-bounded |
@@ -119,23 +121,23 @@ applied. CBM instead encodes limits in the JSON schema and enforces them at the 
 `query_graph` separated by *input shape* (symbol vs text vs query language).
 
 **CRG carries deliberate duplication**: `detect_changes_tool`'s own docstring says it *"Replaces
-get_review_context for change-aware reviews"* (`main.py:1102-1104`), yet both remain, and
-`get_impact_radius_tool` re-implements the same radius with its own copy of the ceilings
-(`query.py:76-78` duplicates `review.py:49-51`). Its 8 analysis tools are four centrality rankings plus
-a composite — `get_suggested_questions_tool` is literally built from the other four.
+get_review_context for change-aware reviews"*, yet both remain, and `get_impact_radius_tool`
+re-implements the same radius with its own duplicated copy of the ceilings. Its 8 analysis tools are
+four centrality rankings plus a composite — `get_suggested_questions_tool` is literally built from the
+other four.
 
 ## 7. Documented vs code mismatches
 
 | Claim | Reality |
 |---|---|
-| CBM `docs/RUNTIME_TRACE_MODEL.md:49-55`: `ingest_traces` "does not open or mutate a store", returns `status:"accepted"` + an unimplemented note | Code opens a read-write store (`mcp.c:22128-22136`) and returns `status:"stored"`, `pairs_stored`, `paths_stored`, `evicted_runs` |
-| CBM README:944: `get_architecture` covers "ADR" | `VALID_ASPECTS` (`mcp.c:8225-8228`) has **no** `adr` aspect |
-| CBM `check_index_coverage` schema marks only `project` required | handler errors without `paths`/`scopes` (`mcp.c:7598-7603`) |
-| CBM schemas leave `max_output_tokens` without a `default` on `query_graph`/`search_code` | handlers default 3200 / 12000-or-3200 (`mcp.c:6458`, `:18183`) |
-| CRG `get_review_context_tool` docstring: "Default: 50" | signature and `docs/COMMANDS.md:594` say **100** (`main.py:663`) — docstring is stale |
-| CRG `get_affected_flows_tool` default `max_flows=50` | silently cut to **25** in standard mode (`review.py:115,935`) |
-| CRG docstrings: `max_members` "capped at 100" | actual cap **25** (`community_tools.py:25`) |
-| CRG `docs/FEATURES.md:22`: "every read-only MCP tool is bounded by a timeout" | two sync tools never reach `_offload` |
+| CBM's runtime-trace docs: `ingest_traces` "does not open or mutate a store", returns `status:"accepted"` + an unimplemented note | The handler opens a read-write store and returns `status:"stored"`, `pairs_stored`, `paths_stored`, `evicted_runs` |
+| CBM's documentation: `get_architecture` covers "ADR" | `VALID_ASPECTS` has **no** `adr` aspect |
+| CBM `check_index_coverage` schema marks only `project` required | the handler errors without `paths`/`scopes` |
+| CBM schemas leave `max_output_tokens` without a `default` on `query_graph`/`search_code` | the handlers default 3200 / 12000-or-3200 |
+| CRG `get_review_context_tool` docstring: "Default: 50" | the signature and CRG's own CLI docs say **100** — docstring is stale |
+| CRG `get_affected_flows_tool` default `max_flows=50` | silently cut to **25** in standard mode |
+| CRG docstrings: `max_members` "capped at 100" | actual cap **25** |
+| CRG's feature docs: "every read-only MCP tool is bounded by a timeout" | two sync tools never reach `_offload` |
 | CRG `MAX_IMPACT_DEPTH` / `MAX_BFS_DEPTH` constants | not enforced as ceilings; `max_depth` is only clamped `>=0` |
 
 ---

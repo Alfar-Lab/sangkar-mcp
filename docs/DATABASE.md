@@ -1,5 +1,7 @@
 # Database design
 
+**Sources compared throughout:** **CRG** = [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — Python MCP graph server, 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`). **CBM** = [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — C/Go MCP graph server, `dev`, 164 grammars.
+
 Companion to `DESIGN.md` (§11–12) and `TOOLS-SPEC.md`. Every table below exists because a specific tool
 field requires it — §6 maps tool → query → index.
 
@@ -154,7 +156,7 @@ Rules:
 
 1. **Never modify a tracked file to make the directory ignored.** `.codegraph/.gitignore` containing one
    `*` makes git ignore everything inside without touching the repo's own `.gitignore`. (CRG converges on
-   exactly this — `incremental.py:631-651`.)
+   exactly this: one `*` line inside its own data-directory `.gitignore`, never an edit to the tracked one.)
 2. **`.codegraph/` is excluded from discovery**, alongside `.git`. Forgetting this means indexing your own
    database, which grows every run.
 3. **Refuse to run on a filesystem where WAL cannot work** (NFS, SMB, most FUSE, synced folders). Detect
@@ -531,7 +533,8 @@ requiring "all other arguments identical".
 
 ## 9. Size and latency budget
 
-Projection for the reference corpus (530 files, 14 k nodes, 130 k edges), with the measured CRG/CBM
+Projection for the reference corpus — the CRG repository named above at commit `bbdda4b9e4b4`
+(530 files, 14 k nodes, 130 k edges) — with the measured CRG/CBM
 figures for contrast:
 
 | Object | Ours (est.) | CRG (measured) | CBM (measured) |

@@ -1,5 +1,7 @@
 # Technical specification
 
+**Sources compared throughout:** **CRG** = [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — Python MCP graph server, 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`). **CBM** = [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — C/Go MCP graph server, `dev`, 164 grammars.
+
 Implementation shape for the server described in `DESIGN.md`, `TOOLS-SPEC.md` and `DATABASE.md`.
 Runtime: **Bun + TypeScript**, strict module isolation, one module per tool.
 
@@ -437,7 +439,8 @@ plus `.codegraph/languages.toml` for user additions (`GRAPH-MODEL.md` rules: bui
 
 ### 9.1 Parser spike acceptance criteria (before any tool code)
 
-1. All 12 languages parse without `ERROR` nodes on the reference corpus (`code-review-graph/`, 530 files).
+1. All 12 languages parse without `ERROR` nodes on the reference corpus — the CRG repository at commit
+   `bbdda4b9e4b4`, 530 files (capture method: `TOOL-OUTPUTS.md`).
 2. p50 ≤ 4 ms/file, p95 ≤ 25 ms/file on this machine.
 3. The four-table representation reproduces ≥95 % of CRG's node counts per language on the same corpus
    (CRG is the oracle: 13 955 nodes / 130 044 edges measured).
@@ -535,7 +538,7 @@ Error codes used so far (from `DATABASE.md` §5 and the tool specs): `wrong_proj
 | **cursor** | tampered/expired/mismatched cursors are refused, and `expand` cannot cross a generation | ms |
 | **schema parity** (`tests/schema-parity.test.ts`) | migrations applied to an empty DB match `getTableConfig(schema)` — columns, indexes, FKs — for every table; catches a `schema.ts` edit with no migration (§5.4.4) | ms |
 | **statement cache** | the prepared-statement map stays bounded under 10 k distinct query shapes and its size is reported in `status.health` | ms |
-| **integration** | real `bun:sqlite` DB built from the reference corpus (`code-review-graph/`, 530 files) — the same fixture both parents were measured on | seconds |
+| **integration** | real `bun:sqlite` DB built from the reference corpus (the CRG repository at commit `bbdda4b9e4b4`, 530 files) — the same fixture both parents were measured on | seconds |
 | **absence** | for a symbol with zero callers *and* an unresolved call site, `trace` returns `gte` + the unresolved row; with coverage incomplete, `complete: false` | seconds |
 | **regression vs oracle** | node/edge counts per language compared against CRG's measured numbers (`TOOL-OUTPUTS.md`) | one run |
 

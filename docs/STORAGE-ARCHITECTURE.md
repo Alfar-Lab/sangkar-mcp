@@ -1,12 +1,18 @@
 # Storage architecture: `codebase-memory-mcp` vs `code-review-graph`
 
-Every claim below is traced to source. Verified directly:
-`code-review-graph/code_review_graph/graph.py`, `migrations.py`, `search.py`, `embeddings.py`, `locking.py`;
-`codebase-memory-mcp/src/store/store.c`, `internal/cbm/sqlite_writer.c`, `src/graph_buffer/`, `src/pipeline/`.
+> **Source:** [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph)
+> — CRG 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`), Python source.
+> **Source:** [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp)
+> — CBM `dev`, C/Go source (164 grammars).
+
+Every claim below is stated directly about the analysed software — the Python source of CRG 2.4.0
+and the C/Go source of CBM `dev` — with no reference outside this document.
 
 ---
 
 ## 1. `code-review-graph` — one SQLite file per repository
+
+**Product:** `code-review-graph` (CRG) — version 2.4.0, Python source, one SQLite file per repository.
 
 ### 1.1 Physical layout
 
@@ -40,9 +46,9 @@ flowchart TB
     DS --> LOGS
 ```
 
-- Data-dir resolution: registry `data_dir` → `CRG_DATA_DIR` → `<repo>/.code-review-graph/` (`incremental.py:675-762`).
-- Sidecars removed on `mode=ro&immutable=1` reads (`graph.py:1146-1156`); **no** `-journal`, that would mean rollback-journal mode.
-- The registry is JSON, not SQLite (`registry.py:20-63`).
+- Data-dir resolution: registry `data_dir` → `CRG_DATA_DIR` → `<repo>/.code-review-graph/`.
+- Sidecars are removed on `mode=ro&immutable=1` reads; **no** `-journal` appears, that would mean rollback-journal mode.
+- The registry is JSON, not SQLite.
 
 ### 1.2 ER model of `graph.db` (schema v15)
 
@@ -155,17 +161,17 @@ erDiagram
 
 **Load-bearing details**
 
-| Fact | Evidence |
+| Fact | How it is enforced |
 |---|---|
-| Edges are keyed by **qualified-name text**, not node ids → renames are reconciled in Python, no FK cascade | `graph.py:386-404` |
-| `foreign_keys` is **never enabled** — the FKs declared by v6 were decorative, and v15 dropped those tables | `graph.py:1042-1048`, `migrations.py:668-698` |
-| `nodes_fts` is **external-content** FTS5 (`content='nodes'`), `porter unicode61`; column order is BM25 weight order | `migrations.py:171-196` |
-| **No triggers, no views.** FTS sync is application-driven: full `rebuild` or a rowid delta replayed via the mirror table | `search.py:154, 199-290`; grep for `CREATE TRIGGER`/`CREATE VIEW` = 0 hits |
-| Delta is abandoned for a `rebuild` at `max(500, 0.35 × nodes)` | `search.py:106-107` |
-| Schema version lives in **`metadata`**, not `PRAGMA user_version` (repo-wide grep: 0 hits) | `migrations.py:130-155` |
-| PRAGMAs: WAL (writers only), `busy_timeout=5000`, `cache_size=-2000` (≈2 MB), `temp_store=FILE`. `synchronous` left at SQLite default **FULL** | `graph.py:1042-1048` |
-| Vector search is a **linear scan** over `embeddings` per provider — no ANN index | `embeddings.py:1084-1100` |
-| Migrations are **forward-only**; v15 is a *shrink* migration (drops 3 tables + 4 indexes) and needs a rebuild to roll back | `migrations.py:701-718`, `CHANGELOG.md:1469-1473` |
+| Edges are keyed by **qualified-name text**, not node ids → renames are reconciled in Python, no FK cascade | edge identity is the `source_qualified` / `target_qualified` text pair; rename reconciliation runs in Python at store time |
+| `foreign_keys` is **never enabled** — the FKs declared by v6 were decorative, and v15 dropped those tables | no connection ever turns foreign keys on, so nothing was enforced; the v6 tables are absent from the v15 schema |
+| `nodes_fts` is **external-content** FTS5 (`content='nodes'`), `porter unicode61`; column order is BM25 weight order | created with an explicit `content='nodes'` option; the column order is chosen to be the BM25 weight order |
+| **No triggers, no views.** FTS sync is application-driven: full `rebuild` or a rowid delta replayed via the mirror table | the schema declares neither a trigger nor a view; every FTS write is issued by the application itself |
+| Delta is abandoned for a `rebuild` at `max(500, 0.35 × nodes)` | the delta path compares the pending row count with that threshold and switches to a full rebuild above it |
+| Schema version lives in **`metadata`**, not `PRAGMA user_version` | the version is written to and read from the `metadata` table; `PRAGMA user_version` is never stored |
+| PRAGMAs: WAL (writers only), `busy_timeout=5000`, `cache_size=-2000` (≈2 MB), `temp_store=FILE`. `synchronous` left at SQLite default **FULL** | applied to the write connection when the database is opened |
+| Vector search is a **linear scan** over `embeddings` per provider — no ANN index | one scan over every `embeddings` row per provider; no index structure is ever built |
+| Migrations are **forward-only**; v15 is a *shrink* migration (drops 3 tables + 4 indexes) and needs a rebuild to roll back | each version's migration commits in its own transaction and is never reversed; undoing v15 means rebuilding the DB |
 
 ### 1.3 Write path
 
@@ -199,23 +205,25 @@ sequenceDiagram
     CLI->>LK: release, truncate PID
 ```
 
-- `isolation_level=None` → **every statement outside an explicit transaction commits itself** (per-row WAL fsync). Batch transactions exist only for tests (`graph.py:1030, 1807-1832`).
-- Incremental = union of three signals: VCS diff, sha256 content mismatch, and pending-re-parse markers. **mtime is never used** (`incremental.py:1377-1475, 3173-3420`).
-- Dependents of a changed file are re-written with `store_file_edges` (edges only, node ids kept) — `incremental.py:3499-3512`.
-- `build_state` tri-state (`in-progress` / `postprocess-pending` / `complete`) tells you whether a killed build needs a full rebuild or just `postprocess` (`build_state.py:41-82`).
+- `isolation_level=None` → **every statement outside an explicit transaction commits itself** (per-row WAL fsync). Batch transactions exist only in the test harness.
+- Incremental = union of three signals: VCS diff, sha256 content mismatch, and pending-re-parse markers. **mtime is never used**.
+- Dependents of a changed file are re-written with `store_file_edges` (edges only, node ids kept).
+- `build_state` tri-state (`in-progress` / `postprocess-pending` / `complete`) tells you whether a killed build needs a full rebuild or just `postprocess`.
 
 ### 1.4 Footprint
 
 | Observation | Value |
 |---|---|
 | Dominant tables | `edges` (one row per call site) + `idx_edges_composite` (5 columns), `nodes_fts` + full mirror `nodes_fts_state` |
-| Measured DB sizes | kubernetes/kubernetes **5.36 GB**, cli/cli **325.9 MB** (`CHANGELOG.md:1327-1339`) |
-| Size cap / auto-prune / VACUUM | **none** — v15 leaves pages on the freelist by design (`migrations.py:678-690`) |
-| Only subtractive op | `forget` — deletes rows, re-parses all referrers, re-runs the whole post-process pipeline (`forget.py:120-199`) |
+| Measured DB sizes | kubernetes/kubernetes **5.36 GB**, cli/cli **325.9 MB** |
+| Size cap / auto-prune / VACUUM | **none** — v15 leaves pages on the freelist by design |
+| Only subtractive op | `forget` — deletes rows, re-parses all referrers, re-runs the whole post-process pipeline |
 
 ---
 
 ## 2. `codebase-memory-mcp` — one SQLite DB per project, two writers, atomic publish
+
+**Product:** `codebase-memory-mcp` (CBM) — version `dev`, C/Go source with 164 grammars.
 
 ### 2.1 Physical layout
 
@@ -246,10 +254,10 @@ flowchart TB
     PDB -.-> XREPO
 ```
 
-- One DB per **project name**, not per worktree; the project registry IS the `projects` table inside the DB (`store.c:365-369`).
-- Cache root resolved in `platform.c:707-733`.
-- The team artifact is `VACUUM INTO` → drop indexes → zstd `-3`/`-9` → `.zst` + `artifact.json`; import decompresses, reopens (recreating indexes), integrity-checks (`artifact.c:821-990`, `artifact.h:18`). Compression roughly **8–13:1**; a full Linux index is ~14 GB (README:429).
-- **Three version numbers, deliberately independent**: artifact schema `2` (`artifact.h:18`), index format `5` (`store.h:39`), SQLite `schema_format 4` (`sqlite_writer.c:74-76`).
+- One DB per **project name**, not per worktree; the project registry IS the `projects` table inside the DB.
+- Cache root resolved from `CBM_CACHE_DIR`, defaulting to `~/.cache/codebase-memory-mcp` through per-platform home resolution.
+- The team artifact is `VACUUM INTO` → drop indexes → zstd `-3`/`-9` → `.zst` + `artifact.json`; import decompresses, reopens (recreating indexes) and integrity-checks the result. Compression roughly **8–13:1**; a full Linux index is ~14 GB.
+- **Three version numbers, deliberately independent**: artifact schema `2`, index format `5`, SQLite `schema_format 4`.
 
 ### 2.2 ER model
 
@@ -388,19 +396,19 @@ erDiagram
 
 **Load-bearing details**
 
-| Fact | Evidence |
+| Fact | How it is enforced |
 |---|---|
-| Edges are **integer-id FK** (`source_id`/`target_id` → `nodes.id`, `ON DELETE CASCADE`) — the opposite choice from CRG | `store.c:398-409` |
-| `foreign_keys = ON` (real enforcement, unlike CRG) | `store.c:770` |
-| Dedup key is a **composite with a generated column**: `UNIQUE(source_id, target_id, type, local_name_gen)` — because one IMPORTS statement can carry several local names | `store.c:378-409` + comment |
-| Runtime traces are keyed by **qualified name, not node id**: node ids are reassigned on every reindex, so id-keyed observation would rot | `store.c:482-505` + comment |
-| `nodes_fts` is FTS5 **contentless** (5 stored columns), `unicode61 remove_diacritics 2`; legacy DBs may still have the 4-column shape, so the code probes | `store.c:591-645` |
-| Metadata tables are deliberately **outside** the graph: `lsp_surface`, `index_coverage`, `index_coverage_meta`, `index_checkout` are "input/metadata about the graph, not part of it" | `store.c:424-527` + comments |
-| Vectors: **int8 × 768**, written by an 11-signal algorithmic encoder, **no model**; a 4-bit RaBitQ-style codec exists too | `semantic.h:39-40`, `rotsq.h:49-55`, `pass_semantic_edges.c:1411-1414` |
-| Vector search = ordered scan + top-K with 5× prefilter — **no ANN index** | `store.c:908-940, 12912-12975` |
-| `node_vectors` / `token_vectors` / `store_meta` are created **only by the raw page writer**, not by `init_schema`; on a SQL-path DB vector search degrades to "no vectors" | `sqlite_writer.c:2315-2322`, `store.c:12880-12890` |
-| `CBM_PAGE_SIZE = 65536` for the raw writer (its own header comment still says 4096 — code wins); DBs via `sqlite3_backup` inherit the source page size | `sqlite_writer.c:7 vs :48`, `store.c:2628-2700` |
-| PRAGMAs: `journal_mode=WAL`, `synchronous=NORMAL` (**OFF** during bulk, **FULL** at seal), `cache_size=-65536` (64 MiB), `mmap_size=64 MB`, `busy_timeout=10000`, `temp_store=MEMORY`, `journal_size_limit=256 MiB`, authorizer **denies ATTACH/DETACH** | `store.c:757-836, 1026-1036` |
+| Edges are **integer-id FK** (`source_id`/`target_id` → `nodes.id`, `ON DELETE CASCADE`) — the opposite choice from CRG | both columns are real foreign keys onto `nodes.id` and the declared cascade is executed by SQLite |
+| `foreign_keys = ON` (real enforcement, unlike CRG) | turned on for every connection, so the declared foreign keys are actually enforced by SQLite |
+| Dedup key is a **composite with a generated column**: `UNIQUE(source_id, target_id, type, local_name_gen)` — because one IMPORTS statement can carry several local names | a `UNIQUE` constraint over the generated column, so several local names can hang off one IMPORTS row |
+| Runtime traces are keyed by **qualified name, not node id**: node ids are reassigned on every reindex, so id-keyed observation would rot | keyed on the qualified-name columns; ids are rewritten on every reindex and cannot serve as the key |
+| `nodes_fts` is FTS5 **contentless** (5 stored columns), `unicode61 remove_diacritics 2`; legacy DBs may still have the 4-column shape, so the code probes | created contentless; a legacy 4-column shape is detected at open and reused as-is |
+| Metadata tables are deliberately **outside** the graph: `lsp_surface`, `index_coverage`, `index_coverage_meta`, `index_checkout` are "input/metadata about the graph, not part of it" | kept in separate tables that graph traversal never joins |
+| Vectors: **int8 × 768**, written by an 11-signal algorithmic encoder, **no model**; a 4-bit RaBitQ-style codec exists too | the encoder quantises to int8 × 768 signals with no model; the 4-bit codec is a separate optional path |
+| Vector search = ordered scan + top-K with 5× prefilter — **no ANN index** | an ordered scan with a top-K prefilter; no ANN index structure exists |
+| `node_vectors` / `token_vectors` / `store_meta` are created **only by the raw page writer**, not by `init_schema`; on a SQL-path DB vector search degrades to "no vectors" | the page writer emits that DDL itself; `init_schema` does not create these tables |
+| `CBM_PAGE_SIZE = 65536` for the raw writer; DBs via `sqlite3_backup` inherit the source page size | the raw writer allocates 65536-byte pages, while an older comment in that same writer still says 4096 — the constant is what runs; a copied DB keeps the page size it was copied from |
+| PRAGMAs: `journal_mode=WAL`, `synchronous=NORMAL` (**OFF** during bulk, **FULL** at seal), `cache_size=-65536` (64 MiB), `mmap_size=64 MB`, `busy_timeout=10000`, `temp_store=MEMORY`, `journal_size_limit=256 MiB`, authorizer **denies ATTACH/DETACH** | applied when the connection is opened, and again when the stage is sealed |
 
 ### 2.3 Write path — in-memory buffer, raw page writer, atomic publish
 
@@ -430,12 +438,12 @@ sequenceDiagram
     PIPE->>FIN: atomic rename over the live file, delete stale -wal/-shm/-journal
 ```
 
-- Writes are **never in place**: build to a stage file, seal it, `rename()` over the live DB. Readers keep serving the old file (a stale serving DB is preserved on failure — `INDEX_RESOURCE_LIMITS.md:97-112`).
-- Incremental: per-file purge (`pipeline_incremental.c:1148`), FTS delta append (`pipeline_delta.c:1051`), and `SIMILAR_TO` / `SEMANTICALLY_RELATED` rebuilt **wholesale** (`pipeline_delta.c:1190-1203`).
-- Freshness: the watcher polls git HEAD + dirty tree, interval `5 s + 1 s per 500 files`, capped at 60 s (`watcher.h:1-10`).
-- Concurrency: single writer via `BEGIN IMMEDIATE` + 10 s `busy_timeout`; readers open `SQLITE_OPEN_READONLY`, skip write PRAGMAs, fall back to `immutable=1` on read-only filesystems; a process-wide mutex guards WAL first-access/recovery (`store.c:1208-1288`).
-- Query layer: the Cypher subset is **parsed then executed through direct C store calls** (`cbm_store_find_nodes*`, `cbm_store_find_edges_by_*`) — it is *not* translated into one big SQL join. Ceilings: **100 000 rows** and **30 s** (`cypher.c:3249-3261`). Large walks switch to an in-RAM CSR adjacency layer (`graph_mem.h:1-30`).
-- Resource guards fail closed and never publish a partial graph: `index_max_files`, `index_max_source_mb`, `index_max_rss_mb`, `index_max_duration_seconds`, single source file ≤ 512 MiB, artifact decompressed ceiling 64 GiB (`docs/INDEX_RESOURCE_LIMITS.md`, `artifact.c:20-23`).
+- Writes are **never in place**: build to a stage file, seal it, `rename()` over the live DB. Readers keep serving the old file; a stale serving DB is preserved when the build fails.
+- Incremental: per-file purge, FTS delta append, and `SIMILAR_TO` / `SEMANTICALLY_RELATED` rebuilt **wholesale**.
+- Freshness: the watcher polls git HEAD + dirty tree, interval `5 s + 1 s per 500 files`, capped at 60 s.
+- Concurrency: single writer via `BEGIN IMMEDIATE` + 10 s `busy_timeout`; readers open `SQLITE_OPEN_READONLY`, skip write PRAGMAs, fall back to `immutable=1` on read-only filesystems; a process-wide mutex guards WAL first-access/recovery.
+- Query layer: the Cypher subset is **parsed then executed through direct C store calls** (`cbm_store_find_nodes*`, `cbm_store_find_edges_by_*`) — it is *not* translated into one big SQL join. Ceilings: **100 000 rows** and **30 s**. Large walks switch to an in-RAM CSR adjacency layer.
+- Resource guards fail closed and never publish a partial graph: `index_max_files`, `index_max_source_mb`, `index_max_rss_mb`, `index_max_duration_seconds`, single source file ≤ 512 MiB, artifact decompressed ceiling 64 GiB.
 
 ---
 
