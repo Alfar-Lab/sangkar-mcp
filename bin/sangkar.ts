@@ -8,7 +8,7 @@ export {};
  * the verb is the bootstrap (a fresh tree has no store for a tool call to answer from) and the tool
  * is what a client calls, with identical arguments.
  */
-const RESERVED = ["mcp", "worker", "index"] as const;
+const RESERVED = ["mcp", "worker", "index", "telemetry"] as const;
 type Reserved = (typeof RESERVED)[number];
 
 const USAGE = `sangkar <name> [arguments] [global flags] — the name comes first.
@@ -17,6 +17,7 @@ verbs
   mcp     MCP server on stdio (default): the tool surface a client talks to
   worker  index worker process, spawned by the server
   index   index the repository; also a tool, with identical arguments
+  telemetry  write a self-contained HTML report of the recorded usage (local only)
 
 tools
   status   report index status: five human lines, or the envelope with --json
@@ -35,6 +36,7 @@ global flags (on either side of the name)
 examples
   sangkar trace 'handleRequest' --depth 1
   sangkar mcp --repo-root /path/to/repo
+  sangkar telemetry --since 7d
 
 sangkar index is how the first index is created; until then every tool answers bootstrapping.
 `;
@@ -46,6 +48,8 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>]",
   worker: `usage: sangkar worker ${WORKER_FLAGS}`,
   index: `usage: sangkar index ${WORKER_FLAGS}`,
+  telemetry:
+    "usage: sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]",
 };
 
 function isReserved(value: string): value is Reserved {
@@ -64,6 +68,13 @@ if (requested === "--help" || requested === "-h" || requested === "help") {
 if (isReserved(requested) && (argv.includes("--help") || argv.includes("-h"))) {
   process.stdout.write(`${VERB_USAGE[requested]}\n`);
   process.exit(0);
+}
+
+// The report needs the telemetry directory and nothing else — no graph, no store, no kernel — so it
+// dispatches here rather than through `main`, which is the only other place a verb could go.
+if (requested === "telemetry") {
+  const { runTelemetry } = await import("../src/shared/telemetry/cli");
+  process.exit(await runTelemetry(argv.slice(1)));
 }
 
 // Imported lazily: `--help` and an unknown name must exit without loading the kernel.

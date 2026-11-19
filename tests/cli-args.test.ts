@@ -76,6 +76,15 @@ describe("cli args: globals", () => {
     expect(GLOBAL_VALUE_FLAGS).toEqual(["repo-root", "data-dir"]);
   });
 
+  test("a verb's own flag is not a global: --out is refused", () => {
+    // `sangkar telemetry --out` names a report path and nothing else, so promoting it to the
+    // global set would make every tool accept it. The short list is the assertion.
+    expect(GLOBAL_VALUE_FLAGS).toEqual(["repo-root", "data-dir"]);
+    const refusal = usageErrorOf(() => parseCliArgs("status", statusInput, ["--out", "x"]));
+    expect(refusal.message).toBe('unknown option "--out"');
+    expect(refusal.message).toContain("--out");
+  });
+
   test("switches and value flags are removed, everything else keeps its order", () => {
     const split = splitGlobals([
       "--json",
