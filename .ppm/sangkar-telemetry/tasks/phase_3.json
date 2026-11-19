@@ -1,0 +1,114 @@
+{
+  "phase": "phase_3",
+  "title": "Documentation and the closing gate",
+  "tasks": [
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Create `docs/my-product/TELEMETRY.md` and make the two user-visible consent edits. It is a normative design record in the same voice as `DATABASE.md` and `TECH-SPEC.md`: facts, field lists and reasons, no tutorial. Required sections and content:\n\n1. **What it is** — local-only usage telemetry: three JSON-Lines record kinds written to `<dataDir>/telemetry/YYYY-MM-DD.jsonl`, plus `sangkar telemetry`, which folds them into one self-contained HTML file. Nothing is uploaded; there is no network code path.\n2. **Consent** — `SANGKAR_TELEMETRY`: unset or empty means on, the exact string `off` means off, any other value means on (one spelling, case-sensitive). Read once, in `src/shared/config.ts`, as `AppConfig[\"telemetry\"]`. Off means no file and no directory is created.\n3. **Identity** — `install_id` is 16 random bytes as hex in `<dataDir>/telemetry/install_id.json`, rotated when the stored UTC date is not today, so one id covers one UTC day and days are unlinkable; `session_id` is 16 random bytes per process; `seq` counts calls from 1 within a process. No repo path, remote URL, hostname or user identity is read to build either id.\n4. **The three record schemas** — one table per kind, every field in serialisation order, with the source of each derived field. Every table starts `ts, v` and `v` is `RECORD_VERSION = 1`: state in one sentence that adding a field keeps `v` at `1` and that removing or renaming one is a version bump, because `report.ts` skips a line whose `v` is not `1` instead of guessing at it. State explicitly that every field is always present and `null` marks \"not known\". Three `call` rules get their own notes, each with its reason:\n   - `arg_names_set` is the names the **request** supplied, before defaults. A defaulted name never appears, because `parseArgs` fills every declared default (`src/shared/cli/args.ts:200-211`), so an empty set means \"the caller sent no arguments\" — recording the defaulted set would make the field a constant equal to the schema and destroy its only value, which is seeing which arguments a caller actually reaches for. A positional CLI token is supplied: `sangkar trace handleRequest` records `query`.\n   - `budget_tokens` is the **effective** budget after the manifest default, because it measures the budget actually in force. The two fields point different ways on purpose: one describes the request, the other the answer.\n   - `status` is `envelope.status`, or `\"absent\"` for the CLI's no-graph `status` answer, which exits 0 without an envelope; never `\"error\"` for a process that exited 0, so a record's status and the exit code never contradict each other. A `call` record with `payload_tokens: 0` and `status: \"absent\"` is that case; `payload_tokens: 0` with `status: \"error\"` is a refusal that never reached a handler.\n5. **The privacy prohibition, with its reason** — a record holds numbers, closed-union identifiers and timestamps; never source text, symbol names, qualified names, file paths, `search.query`, `impact.paths`, cursor strings, error message text, a repo remote URL, git identity, a hostname or an environment variable value. Reason: a local-only file is still a file that gets pasted into an issue, and a symbol name or a path is the content of the user's private repository — so the record must be useless to anyone but its owner. Two consequences get named: `tool` is clamped to a registered name or the literal `\"unknown\"`, and `stale_reason` is a closed enum — one of `STALE_REASONS` (`src/shared/domain/freshness.ts:61-67`) or `\"other\"` — because `trace` writes a repo path into that envelope field (`src/tools/trace/handler.ts:680-683`) and the envelope's prose is never copied; the envelope itself is unchanged. Note the two enforcement points: the builders copy an explicit whitelist, and `tests/telemetry.test.ts` deep-walks the serialised output and asserts the invariant.\n6. **The verb and its flags** — `sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]`, with these exact semantics: default output `<dataDir>/telemetry/report.html`; a relative `--out` resolves against the repo root; `--since` defaults to all records; a malformed `--since` is a usage error (exit 2, no file); zero records still writes the report with an empty-state panel and exits 0; a corrupt or partial line is skipped and counted in the report and the stdout line; `--help` prints usage and writes nothing; success prints exactly one line and exits 0; a write failure prints to stderr and exits 1.\n7. **What the report shows**, in the panel order `html.ts` renders, and one line stating the file is self-contained: inline CSS, inline JS, embedded JSON, no network reference, no external font or script.\n8. **What this plan deliberately does not do** — no network sink (the `TelemetrySink` seam is there so one is additive), no pre-bucketing (raw numbers only), no retention or pruning of the `.jsonl` files, no auto-open of the browser, no sampling. Add one line that the server and the worker it spawns append to the same daily file with one write per flush, so interleaving is line-atomic.\n9. **Adding a field later** — change `record.ts`'s field order, `TELEMETRY.md` §4 and the report panel in one commit; `v` stays `1` for an addition and becomes `2` only for a removal or a rename; a field added to a record but not to this table is a defect.\n\n**The consent edits.** In `README.md`, add one row to the environment-variable table as its third data row, immediately after the `SANGKAR_NO_WATCH` row (currently line 182): `| `SANGKAR_TELEMETRY` | unset | usage telemetry under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables it, and when off no file and no directory is created |`. The sentence directly above that table (`README.md:177`) reads `Two settings remain, and both are read from the environment rather than a flag:` — add the row without it and the file contradicts itself, so change it to `Three settings remain, and all three are read from the environment rather than a flag:`. The count in the prose and the number of rows must agree; a one-row grep cannot catch that, which is why verify checks both. In `bin/sangkar.ts`, extend the `telemetry` line of `USAGE` that TASK-015 added to `  telemetry  write a self-contained HTML report of the recorded usage (local only; recording is on by default)`.\n\nWhy both edits sit in this task rather than in TASK-015 (which wrote the `USAGE` block) or TASK-021 (which owns `AGENTS.md`): the consent sentence has to agree word for word with §2 of the document this task writes, and writing three copies of it in three tasks is how they drift. `README.md` was in no phase's files, so it joins this one; `bin/sangkar.ts` stays phase_2's for its verb, dispatch and `VERB_USAGE` text, and phase_3 makes exactly this one serial edit to a `USAGE` line — recorded in plan.risk.md's ownership row rather than left implicit.\n\nEvery claim must match the code that exists after phase_2. Do not document a flag, a field or a behaviour that is not implemented; if the implementation deviates, report the deviation instead of documenting it.",
+        "goal": "The record schema, the privacy prohibition with its reason, the consent variable and the verb exist as one normative document that a future reader can check against the code.",
+        "steps": [
+          "Write sections 1-3: what it is, consent, identity.",
+          "Write section 4: the three schema tables with every field in order (`ts, v, …`), the `v` rule, and the three `call` notes (supplied names versus effective budget, `\"absent\"` status).",
+          "Write section 5: the prohibition, its reason, the `tool` clamp and the `stale_reason` enum with the `trace` counter-example, and the enforcement points.",
+          "Write sections 6-9: the verb and its flags, the report contents, the explicit non-goals plus the shared-file append rule, and the add-a-field recipe.",
+          "Add the `SANGKAR_TELEMETRY` row to `README.md`'s variable table, correct the sentence above it from \"Two settings remain, and both\" to \"Three settings remain, and all three\", and add the \"on by default, local only\" clause to the `telemetry` line in `bin/sangkar.ts`'s `USAGE`; change nothing else in either file.",
+          "Cross-check every field name and flag against `src/shared/telemetry/*.ts` and `bin/sangkar.ts`, then run the greps in verify."
+        ],
+        "verify": "The file exists, and `grep -c` against it finds each of `SANGKAR_TELEMETRY`, `install_id`, `session_id`, `arg_names_set`, `unresolved_ratio`, `--out`, `--since` and `report.html` at least once; `grep -n \"SANGKAR_TELEMETRY\" README.md` prints exactly one line, inside the variable table; `grep -n \"Two settings remain\" README.md` prints nothing and `grep -n \"Three settings remain, and all three are read from the environment rather than a flag:\" README.md` prints exactly one line; `grep -c '^| `SANGKAR_' README.md` prints 3, so the prose count and the row count agree; and `sed -n '177,183p' README.md` shows that one sentence above a table with exactly three variable rows; `grep -n \"local only\" bin/sangkar.ts` prints exactly one line, inside `USAGE`. Done when every schema field named in plan.approach.md §3 appears in the doc, the prose count and the row count agree, and `git status --porcelain` lists no path outside the three owned files (earlier phases' files are still uncommitted and expected — no commit happens between tasks or phases)."
+      },
+      "files": [
+        "docs/my-product/TELEMETRY.md",
+        "README.md",
+        "bin/sangkar.ts"
+      ],
+      "id": "TASK-019",
+      "pre_request": [],
+      "size": "M",
+      "title": "Write docs/my-product/TELEMETRY.md: schemas, privacy reason, verb",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "`docs/my-product/TECH-SPEC.md` only. Two additive edits, no rewrites, no deletions.\n\n1. §11 \"Errors, logging, stdout discipline\" (the section with the rule table, around line 511): add one short paragraph after the table stating that usage telemetry is the second, local-only write path — files under `<dataDir>/telemetry/`, never stdout, never the network, gated by `SANGKAR_TELEMETRY`, and that the record schemas and the privacy prohibition are specified in [TELEMETRY.md](TELEMETRY.md). Do not repeat the schema here; a second copy is the thing that drifts.\n2. §3 (module isolation and the layer table): add `src/shared/telemetry/` to the `shared/` row or list with the one-line role \"usage records, the JSONL sink, the aggregator and the HTML report — imports `#shared/*` only\", so a reader of the layout section learns the directory exists.\n\nVerified context for the first edit: §11 currently states stdout is protocol-only, all logs go to stderr as JSON lines through `shared/log.ts`, handlers return instead of throwing, error codes are a closed union, and worker failures surface as an exit code. Telemetry does not change any of those; say so in one clause rather than leaving the reader to infer it.\n\nDo not edit `DESIGN.md`: its six \"telemetry\" mentions (lines 24, 47, 270, 344, 388, 424) refer to the reference servers' captured usage data, and merging that meaning with ours would make both unreadable. That decision is recorded in plan.objective.md §Scope.\n\nDo not change any line width convention, heading level or table formatting that the file already uses.",
+        "goal": "The two normative design docs name the new write path and the new directory without restating the schema, so a reader of TECH-SPEC §11 cannot miss that telemetry exists.",
+        "steps": [
+          "Read §3 and §11 as they stand and identify the exact insertion points.",
+          "Add the §3 role line for `src/shared/telemetry/`.",
+          "Add the §11 paragraph naming the local-only write path and linking TELEMETRY.md.",
+          "Confirm the link target exists (`docs/my-product/TELEMETRY.md`) and no schema table was duplicated."
+        ],
+        "verify": "`grep -n \"TELEMETRY.md\" docs/my-product/TECH-SPEC.md` prints at least one line, `grep -n \"shared/telemetry\" docs/my-product/TECH-SPEC.md` prints at least one line, and `git status --porcelain` lists no path outside `docs/my-product/TECH-SPEC.md` (phase_3's earlier files are still uncommitted and expected — no commit happens between tasks). Done when the link resolves to an existing file and `git diff --stat` shows an additive change of a few lines, not a rewrite."
+      },
+      "files": [
+        "docs/my-product/TECH-SPEC.md"
+      ],
+      "id": "TASK-020",
+      "pre_request": [
+        "TASK-019"
+      ],
+      "size": "S",
+      "title": "Cross-reference telemetry from TECH-SPEC §11 and the layout",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "`AGENTS.md` only. Five edits, all additive or corrective.\n\n1. `## Non-negotiables`, the \"Tools never touch a connection\" bullet, currently says the single `process.env` exception is `SANGKAR_CURSOR_KEY`. Correct it to name both config-file variables (`SANGKAR_CURSOR_KEY`, `SANGKAR_TELEMETRY`, read by `src/shared/config.ts`) and the deliberate root-only `SANGKAR_NO_WATCH` read at `src/index.ts:596`. This is a pre-existing inaccuracy the plan found, not a new rule.\n2. `## Layout`, the `src/shared/` block: add a `telemetry/` line — `telemetry/                 records, JSONL sink, aggregator, HTML report; imports #shared/* only, never a tool or the indexer` — and update the `bin/sangkar.ts` line from `mcp (default) | worker | index, then a tool name` to `mcp (default) | worker | index | telemetry, then a tool name`.\n3. `## Test map`: add two rows — \"the telemetry record shape, the consent switch, the daily id rotation and the privacy invariant\" → `telemetry.test.ts`, `telemetry-root.test.ts`; and \"the report's aggregation, escaping and self-containment, and the verb\" → `telemetry-report.test.ts`, `cli.test.ts`.\n4. `## Recipes`: add one recipe, \"**Add a telemetry field.** `src/shared/telemetry/record.ts`, `docs/my-product/TELEMETRY.md` §4 and the report panel in `html.ts` change in the same commit; a record field the doc does not name is a defect.\"\n5. `## Docs and plans`: add `TELEMETRY.md` to the `docs/my-product/` list, and add the third plan to the plan list at `AGENTS.md:206`, marking it in progress: `` `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/` — completed plans; `.ppm/sangkar-telemetry/` — in progress; task JSON is the execution record for each. `` **Do not touch the completion sentence at `AGENTS.md:177`** (`Both plans are complete … `codegraph-mvp` 36/36, `cgraph-cli` 22/22`): this task runs before the closing gate, so claiming three finished plans here would make AGENTS.md assert completion while phase_3 is still being verified. That sentence belongs to TASK-022 and is written only if its gate is green.\n\nDo not restate the record schema in AGENTS.md (TELEMETRY.md owns it), do not touch `## Definition of done` (the gate is unchanged), and do not reflow unrelated paragraphs — the file is read by agents and a large diff costs a reviewer real time.\n\nKnown pre-existing drift to leave alone: `AGENTS.md`'s docs list names `GRAPH-MODEL.md`, `INDEXING-PIPELINE.md` and `STORAGE-ARCHITECTURE.md`, which live under `docs/research/`, not `docs/my-product/`. Report it; do not fix it in this task.",
+        "goal": "An agent working in this repository learns from AGENTS.md that telemetry exists, where it lives, which tests guard it, how to add a field, and which environment variables the kernel actually reads.",
+        "steps": [
+          "Fix the environment-exception bullet so it names both config variables and the root-only `SANGKAR_NO_WATCH`.",
+          "Add the `src/shared/telemetry/` layout line and update the `bin/sangkar.ts` line.",
+          "Add the two test-map rows.",
+          "Add the add-a-telemetry-field recipe.",
+          "Update the `docs/my-product/` list and the plan list at `AGENTS.md:206` only — the third plan joins it marked in progress, and the completion sentence at `AGENTS.md:177` is left exactly as it is.",
+          "Re-read the diff and confirm nothing outside those five edits changed."
+        ],
+        "verify": "`grep -n \"telemetry\" AGENTS.md` shows the layout, test-map, recipe and docs entries, `grep -n \"SANGKAR_NO_WATCH\" AGENTS.md` prints one line, and `grep -n \"sangkar-telemetry\" AGENTS.md` shows the plan list entry marked in progress. Done when all four hold, `git status --porcelain` lists no path outside `AGENTS.md` (the earlier phases' files are still uncommitted and expected — no commit happens between tasks), `grep -n \"Both plans are complete\" AGENTS.md` still prints exactly one unchanged line — this task does not move the completion claim — and `git diff --stat -- AGENTS.md` shows a small additive change."
+      },
+      "files": [
+        "AGENTS.md"
+      ],
+      "id": "TASK-021",
+      "pre_request": [
+        "TASK-019"
+      ],
+      "size": "M",
+      "title": "Update AGENTS.md: layout, env exceptions, test map, recipe, state",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "This is the plan's closing gate: it reports, it does not repair code. It may make exactly one edit, and only when the gate is green — the plans sentence at `AGENTS.md:177` under `## Current state and known gaps`, whose completion claim TASK-021 deliberately left alone. No source, test, doc or `.ppm/` file is edited; a red gate leaves `AGENTS.md` byte-identical and records which check failed. Bun is not on PATH: use `$HOME/.bun/bin/bun`.",
+        "goal": "Every Done-when item in plan.objective.md is checked with a command or a diff, and the plan is only declared finished with the evidence recorded.",
+        "steps": [
+          "Run the definition of done: `$HOME/.bun/bin/bun run typecheck && $HOME/.bun/bin/bun run lint && $HOME/.bun/bin/bun test && $HOME/.bun/bin/bun run db:drift`. Only if all four exit 0, update the one sentence at `AGENTS.md:177` to record three completed plans — `Both plans are complete … `codegraph-mvp` 36/36, `cgraph-cli` 22/22` becomes `All three plans are complete … `codegraph-mvp` 36/36, `cgraph-cli` 22/22, `sangkar-telemetry` <completed>/<total>`, with the real counts from `ppm plan_status --plan sangkar-telemetry` — and change nothing else in that file. If any of the four failed, leave `AGENTS.md` untouched and record which one failed.",
+          "Run `$HOME/.bun/bin/bun run acceptance` once as a regression confirmation and record the result (it is not a gate: this plan adds no query to a hot path and touches no store module).",
+          "Confirm the surface did not move: `git diff --name-only ed16170 -- src/tools package.json bun.lock tests/boundary.test.ts` prints nothing, and `git diff --name-only ed16170 -- src/shared/instructions.ts docs/INSTRUCTIONS.md` prints nothing. No `..HEAD` range: nothing is committed between tasks, so HEAD is still `ed16170` and a commit-range diff prints nothing whether or not the surface moved — the base-to-worktree form is the one that can fail.",
+          "Confirm the consent switch end to end: in a temp tree, `sangkar status` writes a `telemetry/*.jsonl` and the same command with `SANGKAR_TELEMETRY=off` creates no `telemetry/` directory.",
+          "Confirm the report is one self-contained file: `sangkar telemetry` writes the file, and `grep -c -E \"http://|https://|src=|<link|@import|url\\(\" <file>` prints 0.",
+          "Check the whole-plan Done-when list in plan.objective.md item by item, confirm `AGENTS.md:177` now agrees with the gate result (three completed plans only if step 1 was green, otherwise unchanged), and record any item that cannot be shown with evidence."
+        ],
+        "verify": "Done when typecheck, lint, the full suite and db:drift all exit 0, every Done-when item in plan.objective.md is marked with the command that proved it, and any item that could not be proved is reported as an open gap rather than assumed. `AGENTS.md:177` matches the gate result — the completion claim appears only when step 1 exited 0 — and `git status --porcelain` lists no path outside the plan's own files plus that one conditional sentence. Record the final output block in `ppm task_write_progress`."
+      },
+      "files": [
+        "AGENTS.md"
+      ],
+      "id": "TASK-022",
+      "pre_request": [
+        "TASK-019",
+        "TASK-020",
+        "TASK-021"
+      ],
+      "size": "S",
+      "title": "Final verification: definition of done plus every Done-when item",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

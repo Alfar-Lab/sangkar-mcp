@@ -1,0 +1,83 @@
+{
+  "phase": "phase_2",
+  "title": "Documents and close",
+  "tasks": [
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Document exactly what phase_1 shipped, reading the handlers for the truth rather than this packet's memory of it. Required content:\n\n- §2 status: payload.project gains branch and remote; new payload.unresolved = {total, material, buckets} with total equal to coverage.unresolved_edges; state that buckets are scope-limited when paths are requested.\n- §3 trace: the path argument (prefix semantics, same as search); totals.candidates_total (matched) and totals.candidates_shown (returned); next_call on candidates and near misses; the unresolved filter argument with its closed value set; payload.unresolved_census and the bucket on each unresolved entry.\n- §5 search: unchanged, but state that path's semantics are the shared prefix rule now used by trace and expand too.\n- §7 expand: path; range: [from, to] with the clamp rule and the why sentence that reports a clamp; the new what=outline payload (members with qn, kind, lines, signature); next_call on candidates.\n- §4/§6 summary and impact: totals.unresolved_material and payload.unresolved.\n\nKeep the documented 32000 budget ceiling and every per-tool default as they are. Do not restate numbers the code derives. Docs must match the code in the same commit group as the phase_1 changes — say so in the plan's closing report, not in this file.",
+        "goal": "TOOLS-SPEC.md describes every argument and payload key this plan added, so the document and the handlers cannot disagree.",
+        "steps": [
+          "Diff the phase_1 changes and list every added or changed argument and payload key.",
+          "Rewrite the affected per-tool sections in TOOLS-SPEC.md with the argument, its accepted values, its default and one literal example call.",
+          "State the clamp rule for range and the equals relation between census.total and coverage.unresolved_edges.",
+          "Check that no existing documented key was silently renamed or dropped; if one was, stop and report it.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run test tests/tools-smoke.test.ts tests/tools-index.test.ts  (description-text assertions still pass)\nDone when: every key added by TASK-007..TASK-012 appears in TOOLS-SPEC.md with its domain, default and an example, and no removal is unexplained."
+      },
+      "files": [
+        "docs/my-product/TOOLS-SPEC.md"
+      ],
+      "goal": "TOOLS-SPEC.md documents the new arguments and payload keys.",
+      "id": "TASK-013",
+      "pre_request": [],
+      "size": "M",
+      "title": "Document the new arguments and payload keys",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "DATABASE.md: §3.1 and the meta key list must show project_name, project_root, project_branch, project_remote as written by the publisher, and state that branch/remote are best-effort (empty when git cannot answer) and that a store published before this change keeps nulls. §5 must state that identity is written in the publish transaction, not on open.\n\nDESIGN.md: §6's envelope description must record that coverage is unchanged and that the unresolved census lives in each tool's payload with total equal to coverage.unresolved_edges; §8's resolution contract gains the path filter and the candidates_total/candidates_shown pair as the one definition of a candidate count.\n\nKeep the documents' existing voice and structure. Do not rewrite sections this plan did not change, and do not add numbers a reader would have to trust instead of measuring.",
+        "goal": "DATABASE.md and DESIGN.md record the identity keys and the census placement, so the design record matches the shipped behaviour.",
+        "steps": [
+          "Add the four meta keys and their best-effort rule to DATABASE.md §3.1 and the publish path in §5.",
+          "Record the null-for-legacy-store behaviour.",
+          "Amend DESIGN.md §6 for where the census lives and why coverage is untouched.",
+          "Amend DESIGN.md §8 for the path filter and the single candidate-count definition.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run db:drift  (clean, unchanged)\nRead-back check: grep the four meta keys in docs/my-product/DATABASE.md and the census rule in DESIGN.md, both present.\nDone when: no document claims a meta key or payload key this build does not write."
+      },
+      "files": [
+        "docs/my-product/DATABASE.md",
+        "docs/my-product/DESIGN.md"
+      ],
+      "goal": "The design record matches the recorded identity and the census placement.",
+      "id": "TASK-014",
+      "pre_request": [],
+      "size": "S",
+      "title": "Document identity keys and census placement",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "You own no source files. Run the checks, then report evidence, not intentions. A failing check is reported with its exact output and the task that should fix it; do not weaken a test, skip a file, or edit code to make a check pass.\n\nSequence:\n1. ~/.bun/bin/bun run typecheck\n2. ~/.bun/bin/bun run lint\n3. ~/.bun/bin/bun run test  (whole suite, ~47s)\n4. ~/.bun/bin/bun run db:drift\n5. ~/.bun/bin/bun run acceptance  (latency and the prepared-statement ratio; this plan must not have moved either)\n6. Re-index (~/.bun/bin/bun run bin/sangkar.ts index) and capture the acceptance probes from plan.objective.md: an ambiguous trace (totals agree), trace --path, status project and unresolved, expand --what outline and --range, and a runtime-diagnostic probe.\n\nReport: each command's exit status, the failing test names if any, the captured probe output, and a list of anything in plan.objective.md's Done-when list that is not satisfied.",
+        "goal": "The whole plan is verified against the repository's definition of done, with observed output.",
+        "steps": [
+          "Run typecheck, lint, the whole test suite and db:drift, capturing exit codes.",
+          "Run acceptance and compare its latency and prepared-statement ratio against the recorded baseline.",
+          "Re-index and capture every acceptance probe named in plan.objective.md.",
+          "Report pass/fail per probe with the observed output and name any unsatisfied criterion.",
+          "List the defects this plan deliberately left open (#1, #2, #4, #6, #7) as remaining findings."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck && ~/.bun/bin/bun run lint && ~/.bun/bin/bun run test && ~/.bun/bin/bun run db:drift  (all exit 0)\n~/.bun/bin/bun run acceptance  (exit 0, ratio and latency within the recorded bound)\nDone when: every command's output is quoted in the report and every Done-when criterion is marked satisfied or missing with evidence."
+      },
+      "files": [],
+      "goal": "Final verification of the whole plan with observed output.",
+      "id": "TASK-015",
+      "pre_request": [
+        "TASK-013",
+        "TASK-014"
+      ],
+      "size": "S",
+      "title": "Definition-of-done run and acceptance probes",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

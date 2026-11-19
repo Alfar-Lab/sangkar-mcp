@@ -1,0 +1,206 @@
+{
+  "phase": "phase_1",
+  "title": "Tool surfaces",
+  "tasks": [
+    {
+      "details": {
+        "contract": "manifest: add path: { type: \"string\" } to the input table. Leave the description prose byte-identical (TOOLS-SPEC.md's text is asserted by tests; the docs task rewrites it).\n\nhandler:\n- pass { kinds: args.kinds, path: args.path } to resolve(); TraceArgs gains the field.\n- ambiguous payload gains candidates_total and candidates_shown straight from the Resolution; totals.candidates_total becomes candidates_total and a new totals.candidates_shown is added. One number per name: the summary line must agree with candidates_total.\n- every candidate gains next_call: { tool: \"trace\", query: <candidate.qn>, direction: <args.direction ?? \"all\"> }.\n- not_found near misses gain the same next_call shape.\n\nDo not change direction/kinds/depth semantics, budgets, or the candidate score model.\nA filtered not_found must stay not_found, and its near misses must already be path-filtered by resolve.",
+        "goal": "trace disambiguation: the caller can narrow by path, the answer reports matched and returned totals that agree with its own prose, and every candidate carries a call the agent can issue unchanged.",
+        "steps": [
+          "Add the path argument to the trace manifest and TraceArgs.",
+          "Pass kinds and path to resolve().",
+          "Emit candidates_total/candidates_shown from the Resolution and make the summary line use candidates_total.",
+          "Attach next_call to every candidate and near miss.",
+          "Extend tests/tools-trace.test.ts: an ambiguous name reports total equal to the N in every why and shown equal to candidates.length; path narrows to one candidate and answers ok; a path matching nothing answers not_found with only filtered near misses; every candidate has next_call.tool === \"trace\" and a query that resolves on its own.",
+          "Re-index this repo (~/.bun/bin/bun run bin/sangkar.ts index) and record the live trace 'messageOf' --json totals in the task progress."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-trace.test.ts tests/domain.test.ts  (all pass)\n~/.bun/bin/bun run bin/sangkar.ts trace 'messageOf' --json  (candidates_total equals the N in each why; candidates_shown equals the list length)\nDone when: no two fields in one ambiguous answer report different totals, and trace --path answers ok for a single-candidate prefix."
+      },
+      "files": [
+        "src/tools/trace/manifest.ts",
+        "src/tools/trace/handler.ts",
+        "tests/tools-trace.test.ts"
+      ],
+      "goal": "trace reports one honest candidate total, accepts a path filter, and hands back next_call for every candidate.",
+      "id": "TASK-007",
+      "pre_request": [],
+      "size": "M",
+      "title": "trace: path filter, honest totals, next_call",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "details": {
+        "contract": "payload.unresolved entries gain bucket: UnresolvedBucket from bucketOf(row) in #shared/domain/unresolved.ts.\n\nNew argument: unresolved: { type: \"enum\", values: [...UNRESOLVED_BUCKETS] } — imported from #shared/domain/unresolved.ts, never restated. When present it filters the listed rows to that bucket only.\n\nNew payload key: unresolved_census = { total, material, buckets } from bucketCensus(rows) over the SAME rows the answer's coverage.unresolved_edges was computed from, so total === coverage.unresolved_edges in every answer. It describes the unfiltered scope even when the unresolved argument filters the list.\n\nWhen the filter is active, the summary line says how many were filtered out, so a short list never reads as a complete one.\n\nDo not change coverage.unresolved_edges, its meaning, or its role in total_relation. Do not rename existing unresolved entry keys (file, line, name, evidence, tier).",
+        "goal": "trace's unresolved rows carry the bucket the store already knows, the payload carries a census that explains the flat count, and a caller can ask for one bucket only.",
+        "steps": [
+          "Add bucket to each unresolved entry using bucketOf.",
+          "Add the unresolved filter argument to the manifest and TraceArgs, filtered with the same predicate.",
+          "Add payload.unresolved_census via bucketCensus over the assembly's unresolved rows.",
+          "Extend tests/tools-trace.test.ts: entries carry a bucket from the closed set; a filter returns only that bucket and the census is unchanged; census.total equals coverage.unresolved_edges; buckets sum to total.",
+          "Record the live census on this repository in the task progress."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-trace.test.ts tests/unresolved.test.ts  (all pass)\n~/.bun/bin/bun run bin/sangkar.ts trace '<a file path>' --json  (unresolved_census.total equals coverage.unresolved_edges; buckets sum to total)\nDone when: no answer contains an unresolved number without its bucket breakdown, and a bucket filter cannot look like a complete list."
+      },
+      "files": [
+        "src/tools/trace/manifest.ts",
+        "src/tools/trace/handler.ts",
+        "tests/tools-trace.test.ts"
+      ],
+      "goal": "trace lists every unresolved row with its bucket, filters by bucket, and reports a census that explains the flat count.",
+      "id": "TASK-008",
+      "pre_request": [
+        "TASK-007"
+      ],
+      "size": "M",
+      "title": "trace: unresolved buckets, census and bucket filter",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "details": {
+        "contract": "manifest: add path: { type: \"string\" } to the input table. Description prose unchanged.\n\nhandler:\n- pass { path: args.path } to resolve(); ExpandArgs gains the field.\n- ambiguous payload gains candidates_total and candidates_shown from the Resolution, and totals reports both beside the existing total_relation.\n- every candidate gains next_call: { tool: \"expand\", target: <candidate.qn> }.\n\nThe path argument is a prefix filter with search's semantics, and it must not change how what= is inferred: inference runs on the resolved node as today.\nDo not change the what enum, the budget default, or the member/edge/coverage payloads.",
+        "goal": "expand accepts the same path filter trace and search accept, reports matched versus returned candidates, and gives every candidate a ready next_call.",
+        "steps": [
+          "Add the path argument to the expand manifest and ExpandArgs.",
+          "Pass path to resolve().",
+          "Emit candidates_total/candidates_shown from the Resolution.",
+          "Attach next_call to every candidate.",
+          "Extend tests/tools-expand.test.ts: an ambiguous target reports total > shown and shows every why with the same total; a path narrows to one candidate and answers ok; each candidate's next_call.target resolves on its own.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-expand.test.ts tests/domain.test.ts  (all pass)\nDone when: expand and trace answer the same totals for the same ambiguous name, and expand --path narrows identically."
+      },
+      "files": [
+        "src/tools/expand/manifest.ts",
+        "src/tools/expand/handler.ts",
+        "tests/tools-expand.test.ts"
+      ],
+      "goal": "expand accepts a path filter, reports honest ambiguity totals, and attaches next_call to its candidates.",
+      "id": "TASK-009",
+      "pre_request": [],
+      "size": "M",
+      "title": "expand: path filter, honest totals, next_call",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "details": {
+        "contract": "New argument: range: { type: \"array\", items: { type: \"integer\" } } — exactly two integers, [from, to], 1-based inclusive, meaningful only with what=source.\n\nBehaviour: clamp to the resolved node's own extent [startLine, endLine]; never throw for an out-of-extent or inverted range. from is clamped into [startLine, endLine]; to is clamped into [from, endLine]. The payload keeps a single effective window (the existing SourcePayload.window), and why names the clamp when it happened — for example \"range clamped to the node's extent 12-40\" — so the caller sees that the request was narrowed instead of silently answered.\n\nNew what value: \"outline\". Payload: { target, what: \"outline\", why, path, members: [{ qn, kind, lines: [start, end], signature }] } built from reader.members(node.id) for a class-like node and reader.nodesByFile(node.fileId) for a file node, in source order. No new reader method, no new query.\n\nIf argument parsing does not already coerce array items to integers, extend src/shared/cli/args.ts for the declared items type inside this task; the manifest table stays the source of truth.\nDo not change the window semantics for a plain what=source call, and do not touch source_drift.",
+        "goal": "expand what=source can be narrowed to a caller-chosen sub-span, and a new what=outline returns a file or class member list with signatures and line numbers.",
+        "steps": [
+          "Add range and the outline value to the manifest, plus any parser support the integer item type needs in src/shared/cli/args.ts.",
+          "Implement range clamping in the source branch, keeping window as the single effective span and stating the clamp in why.",
+          "Implement the outline branch over members()/nodesByFile().",
+          "Extend tests/tools-expand.test.ts: a range inside the node returns exactly those lines; a range crossing the node boundary is clamped and why says so; an inverted range yields an empty window without throwing; outline returns members in source order with signature and lines.",
+          "Run the task verification against this repository: expand AGENTS.md --what outline, then expand AGENTS.md --what source --range 1:5."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-expand.test.ts tests/cli-args.test.ts  (all pass)\nDone when: range is clamped and reported, outline lists members with signatures, and an out-of-bounds range never throws."
+      },
+      "files": [
+        "src/tools/expand/manifest.ts",
+        "src/tools/expand/handler.ts",
+        "src/shared/cli/args.ts",
+        "tests/tools-expand.test.ts"
+      ],
+      "goal": "expand returns a caller-chosen source sub-span and a member outline, both clamped to the node's real extent.",
+      "id": "TASK-010",
+      "pre_request": [
+        "TASK-009"
+      ],
+      "size": "M",
+      "title": "expand: source range and outline",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "details": {
+        "contract": "payload.project gains branch and remote from GraphMeta (null when unrecorded). name and root become non-null for a store published by this build; a pre-existing store keeps null and must still answer rather than throw.\n\nNew payload key: unresolved = { total, material, buckets } from bucketCensus over the SAME rows that produced coverage.unresolved_edges, so total === coverage.unresolved_edges in the answer. Buckets are scope-limited when paths were requested, matching skipped's existing scope rule.\n\nsrc/index.ts: when meta.projectRoot is null keep the current log.warn(\"store.identity_unrecorded\", ...); when it is recorded replace the warning with log.info(\"store.identity_recorded\", { projectRoot, branch }). No stdout writes.\n\nDo not change coverage.skipped semantics, the languages census, or health fields. Prepared statements only; a new read goes through prepared().",
+        "goal": "status reports where its graph came from and how its unresolved count is composed.",
+        "steps": [
+          "Read branch and remote from GraphMeta into payload.project.",
+          "Compute payload.unresolved with bucketCensus over the rows already fetched, and assert total equals coverage.unresolved_edges.",
+          "Switch the identity log line from warn to info when the store recorded its root.",
+          "Extend tests/tools-status.test.ts: a store with identity reports root, name and branch with no identity_unrecorded warning; a store without it still answers with nulls; payload.unresolved.buckets sums to total which equals coverage.unresolved_edges.",
+          "Re-index this repo and record the live status --json project and unresolved objects in the task progress."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-status.test.ts  (all pass)\n~/.bun/bin/bun run bin/sangkar.ts index, then: ~/.bun/bin/bun run bin/sangkar.ts status --json 2>&1 >/dev/null | grep -c identity_unrecorded  (expect 0)\nDone when: status --json shows a non-null root and branch, and the unresolved census sums to unresolved_edges."
+      },
+      "files": [
+        "src/tools/status/handler.ts",
+        "src/index.ts",
+        "tests/tools-status.test.ts"
+      ],
+      "goal": "status reports recorded repository identity and a bucket census for its unresolved count.",
+      "id": "TASK-011",
+      "pre_request": [],
+      "size": "M",
+      "title": "status: repository identity and unresolved census",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "details": {
+        "contract": "Both tools gain the same shape: totals.unresolved_material: number and payload.unresolved = { total, material, buckets }, sourced from bucketCensus(assembly.unresolved) — the rows assemble() already returned. Never recompute unresolved_edges separately: total must be literally the same value, and the test asserts equality.\n\nScope: summary's change and repo scopes, impact's change set. An empty scope reports total 0 because it measured nothing; a missing key is not acceptable.\n\nIssue #5's acceptance criterion applies here: no answer may carry an unexplained unresolved total, so a payload with a flat count and no material number is the failure to avoid.\nDo not change risk scoring, test_gaps accounting, or the changed_files lists.",
+        "goal": "summary and impact explain their unresolved counts with a bucket census instead of leaving a single flat number.",
+        "steps": [
+          "Add the census to summary's change scope payload and totals.",
+          "Add it to summary's repo scope payload.",
+          "Add it to impact's payload and totals.",
+          "Extend tests/tools-summary.test.ts and tests/tools-impact.test.ts: buckets sum to total, total equals coverage.unresolved_edges, material is less than or equal to total, and the change scope with no changed files still reports a census.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts  (all pass)\nDone when: both tools report material beside total and the equality with coverage.unresolved_edges is asserted."
+      },
+      "files": [
+        "src/tools/summary/handler.ts",
+        "src/tools/impact/handler.ts",
+        "tests/tools-summary.test.ts",
+        "tests/tools-impact.test.ts"
+      ],
+      "goal": "summary and impact carry the same unresolved census trace and status carry.",
+      "id": "TASK-012",
+      "pre_request": [],
+      "size": "M",
+      "title": "summary and impact: unresolved census in totals",
+      "status": "todo",
+      "progress": [],
+      "agent": "implement"
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "You own no files. Report observed output; never edit code or weaken a test to make a check pass.\n\nChecks:\n1. ~/.bun/bin/bun run typecheck and ~/.bun/bin/bun run lint\n2. ~/.bun/bin/bun run test tests/tools-trace.test.ts tests/tools-expand.test.ts tests/tools-status.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts\n3. Cross-tool consistency, run against a freshly indexed store (~/.bun/bin/bun run bin/sangkar.ts index):\n   - one ambiguous name through trace and through expand reports the same candidates_total\n   - in one answer, payload census total equals coverage.unresolved_edges, and the buckets sum to total\n   - trace --unresolved <bucket> lists only that bucket while the census is unchanged\n4. Confirm coverage.unresolved_edges still downgrades total_relation to gte when non-zero (acceptance-criterion 3 of the envelope contract).\n\nReport: exit status per command, the captured probe output, and the phase_1 task that owns each failure.",
+        "goal": "Phase 1's tool surfaces agree with each other and with the shared contracts before documentation is written.",
+        "steps": [
+          "Run typecheck and lint.",
+          "Run the five tool test files and capture failures by name.",
+          "Re-index and run the three cross-tool consistency probes.",
+          "Re-read one answer to confirm the gte downgrade is intact.",
+          "Report pass/fail with the owning task for every failure."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck && ~/.bun/bin/bun run lint && ~/.bun/bin/bun run test tests/tools-trace.test.ts tests/tools-expand.test.ts tests/tools-status.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts  (all exit 0)\nDone when: trace and expand agree on one candidate total, every census total equals its coverage count, and the downgrade is intact."
+      },
+      "files": [],
+      "goal": "Phase 1 gate: tool surfaces consistent with each other and the contracts.",
+      "id": "TASK-016",
+      "pre_request": [
+        "TASK-007",
+        "TASK-008",
+        "TASK-009",
+        "TASK-010",
+        "TASK-011",
+        "TASK-012"
+      ],
+      "size": "S",
+      "title": "Phase 1 gate",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

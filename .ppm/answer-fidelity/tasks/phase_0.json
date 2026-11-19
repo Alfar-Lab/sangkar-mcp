@@ -1,0 +1,137 @@
+{
+  "phase": "phase_0",
+  "title": "Foundation contracts",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "resolve: path filter and honest ambiguity totals",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/domain/resolve.ts",
+        "tests/domain.test.ts"
+      ],
+      "details": {
+        "goal": "resolve() accepts a path prefix filter applied before the candidate cap, and an ambiguous answer reports how many matched beside how many are returned, with every why built from the same total.",
+        "contract": "Exact shape to honour:\n\nexport interface ResolveOptions {\n  readonly kinds?: readonly string[];\n  readonly path?: string;\n}\n\nexport function resolve(source: ResolutionSource, query: string, options?: ResolveOptions): Resolution;\n\nAmbiguous variant gains two fields:\n  { status: \"ambiguous\"; step: ResolutionStep; candidates: ResolutionCandidate[]; candidates_total: number; candidates_shown: number }\n\nRules:\n- path filter = isUnderPrefix(node.file, path) from #shared/paths. Absent, empty or undefined path means no filter, and every existing caller keeps its current answer.\n- The filter applies inside every step (exact_qn, exact_name, dotted_tail, path, decorator) AND to near misses, so a filtered query never answers ok from outside the prefix and never lists a near miss from outside it.\n- candidates_total = number of tied winners BEFORE the CANDIDATE_CAP slice; candidates_shown = candidates.length. Cap stays 5.\n- Every \"index+1 of N candidates\" text uses candidates_total, so the phrase and the field can never disagree.\n- Do not change STEP_SCORE values, the step order, or the scoring model: an ambiguous set must still tie.\n- Report/report keys are a public contract: no renames of existing ResolutionCandidate fields.\n- Do not touch tests/domain.test.ts cases unrelated to resolution.",
+        "steps": [
+          "Add ResolveOptions, thread the path predicate through STEPS and nearMisses, defaulting to no filter.",
+          "Add candidates_total and candidates_shown to the ambiguous branch of decide().",
+          "Build the why text from the pre-cap total so both numbers agree.",
+          "Extend tests/domain.test.ts: path narrows three same-name candidates to one (status ok); path excludes all (status not_found with only filtered near misses); a capped tie reports candidates_total > candidates_shown and every why names candidates_total; no path behaves exactly as today.",
+          "Run the task verification and record the two counts observed on the capped-tie case."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/domain.test.ts  (all pass)\nDone when: the diff shows path filtering inside resolve, the capped-tie assertion prints candidates_total > candidates_shown, and no existing domain test was weakened."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-002",
+      "title": "Unresolved bucket classifier as a pure module",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/domain/unresolved.ts",
+        "tests/unresolved.test.ts"
+      ],
+      "details": {
+        "goal": "One pure classifier turns an unresolved row into a bucket, plus a census that sums the buckets and counts the rows that could still be a user-defined caller.",
+        "contract": "Exact shape to honour (new files only; import UnresolvedRef as a type from #shared/store/read/coverage):\n\nexport const UNRESOLVED_BUCKETS = [\"builtin_stdlib\",\"external_package\",\"internal_module\",\"dynamic_property_call\",\"receiver_type_unknown\",\"ambiguous\"] as const;\nexport type UnresolvedBucket = (typeof UNRESOLVED_BUCKETS)[number];\n\nexport const BUILTIN_RECEIVERS: ReadonlySet<string>;\nexport const BUILTIN_MEMBERS: ReadonlySet<string>;\n\nexport function bucketOf(row: UnresolvedRef): UnresolvedBucket;\nexport function bucketCensus(rows: readonly UnresolvedRef[]): { readonly buckets: Readonly<Record<UnresolvedBucket, number>>; readonly material: number };\n\nClassification rules, in order:\n1. evidence starts with \"import:\": the target after the prefix. Starts with \"./\" or \"../\" or \"#\" -> internal_module. Starts with \"node:\" or \"bun:\" or names a node/bun builtin -> builtin_stdlib. Anything else -> external_package.\n2. evidenceKind === \"ambiguous\" -> ambiguous (whatever the evidence says).\n3. evidence starts with \"call:\": split raw_target at the LAST dot into receiver and member (no dot -> receiver \"\", member = raw_target). Receiver in BUILTIN_RECEIVERS -> builtin_stdlib. Else member in BUILTIN_MEMBERS -> builtin_stdlib. Else evidenceKind === \"dynamic\" -> dynamic_property_call. Else -> receiver_type_unknown.\n4. Everything else (\"inherits\", a bare \"call\"/\"import\" with no colon) -> receiver_type_unknown.\n\nmaterial = buckets.ambiguous + buckets.receiver_type_unknown. dynamic_property_call is non-material by construction: the extractor records a call as dynamic exactly when no declared target exists.\n\nBUILTIN_RECEIVERS seed: Array, Object, Map, Set, Promise, Date, JSON, Math, String, Number, Boolean, RegExp, Error, console, fs, path, os, process, Buffer, URLSearchParams. BUILTIN_MEMBERS seed: push, pop, shift, unshift, splice, slice, join, map, filter, reduce, forEach, find, includes, indexOf, split, trim, toLowerCase, toUpperCase, toISOString, keys, values, entries, has, get, set, add, delete, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, isDirectory, isFile, resolve, dirname, join, basename. Both are data with a comment stating they are a recall trade-off, not a truth.\n\nNever import from src/tools or src/indexer (shared-isolation).",
+        "steps": [
+          "Create src/shared/domain/unresolved.ts with the bucket union, both allowlists and the two functions.",
+          "Create tests/unresolved.test.ts covering one row per bucket and the ordering rules (ambiguous wins over evidence; allowlisted member wins over dynamic).",
+          "Add a fixture reproducing the five rows reported at src/server/global/whatsapp/registry.ts (import:./types.js, call:Set, call:push twice, call:watchers.push) and assert buckets {builtin_stdlib: 3, dynamic_property_call: 1, internal_module: 1} with material 0.",
+          "Assert bucketCensus sums to rows.length for a mixed fixture.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/unresolved.test.ts  (all pass)\nDone when: the registry.ts-style fixture yields material 0 and the census sum equals the row count."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-005",
+      "title": "Record repository identity at publish time",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/indexer/worker.ts",
+        "src/indexer/persist.ts",
+        "src/shared/store/read/reader.ts",
+        "tests/persist.test.ts"
+      ],
+      "details": {
+        "goal": "A publish records project name, root, branch and remote in meta, and GraphMeta exposes branch and remote so status can report them.",
+        "contract": "meta keys written at publish time: project_name, project_root, project_branch, project_remote. meta is key/value, so there is no schema change, no migration, no drizzle edit.\n\nGraphMeta gains two fields:\n  readonly projectBranch: string | null;\n  readonly projectRemote: string | null;\nThe existing projectName/projectRoot stay as their current types. An absent or empty stored value maps to null; an empty string must never reach the reader.\n\nCapture:\n- root  = canonical repo root (AppConfig.repoRoot, already available to the worker)\n- name  = basename of that root\n- branch = `git symbolic-ref --short HEAD` result, empty on a detached HEAD\n- remote = `git config --get remote.origin.url` result, empty when no origin\nBoth git calls are best-effort in the publish path: a non-zero exit or a spawn failure records the empty string and never fails the publish, and never throws.\n\nDATABASE.md line 180 already specifies the first two keys; this task makes the implementation match the document.\nDo not change the warning in src/index.ts (the status task owns it), and do not touch src/shared/domain/freshness.ts.\nPrepared statements only: any new read goes through prepared() from #shared/store/db.",
+        "steps": [
+          "Add the branch and remote capture to the worker's publish path next to the existing revision capture, best-effort and non-throwing.",
+          "Write the four meta keys in persist at publish time, in the same transaction that sets meta.generation.",
+          "Extend GraphMeta and metaFor() in reader.ts, mapping absent values to null.",
+          "Extend tests/persist.test.ts: a publish writes all four keys; a missing remote records an empty value that metaFor() reports as null; a failed git call does not fail the publish.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/persist.test.ts  (all pass)\nDone when: metaFor() returns a branch and root after a publish in a fixture repo, and the same call returns null for a repo with no origin."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-006",
+      "title": "Runtime preflight for a non-Bun or too-old runtime",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/runtime.ts",
+        "bin/sangkar.ts",
+        "tests/runtime.test.ts"
+      ],
+      "details": {
+        "goal": "An invocation under a non-Bun runtime, or a Bun older than 1.4.4, prints exactly one JSON diagnostic on stderr naming the requirement and the resolved runtime, then exits non-zero with stdout untouched.",
+        "contract": "Exact shape to honour:\n\nexport const MIN_BUN = \"1.4.4\";\nexport function runtimeDiagnostic(runtime: { readonly bun: string | undefined; readonly node: string | undefined }): string | null;\n- returns null when runtime.bun is defined and >= MIN_BUN (numeric segment compare, no dependency)\n- returns a one-line JSON string otherwise, shaped like {\"level\":\"error\",\"msg\":\"runtime.unsupported\",\"required\":\"Bun >= 1.4.4\",\"found\":\"<bun version or node version>\",\"resolved\":\"<Bin path or 'not bun'>\",\"hint\":\"install Bun >= 1.4.4 and re-run\"}\n\nWiring in bin/sangkar.ts:\n- runs before the dynamic import of ../src/index, so nothing opens a database first\n- writes the line to process.stderr only; stdout must stay byte-empty\n- exits 70 (EX_SOFTWARE) after writing\n\nA missing `bun` binary itself cannot be caught here: the shebang fails before any line of this file runs. Say so in a comment above the guard instead of implying coverage.\nDo not add process.version parsing beyond a numeric compare, and do not add a dependency.",
+        "steps": [
+          "Create src/shared/runtime.ts with MIN_BUN, the compare and runtimeDiagnostic.",
+          "Create tests/runtime.test.ts with a table: 1.4.4 ok, 1.5.0 ok, 1.4.3 refused, 1.3.9 refused, undefined bun refused, and assert the refused payload parses as JSON and names Bun >= 1.4.4.",
+          "Wire the guard into bin/sangkar.ts before the dynamic import, writing to stderr and exiting 70.",
+          "Assert in the test that the guard writes nothing to stdout, and that a supported runtime produces a null diagnostic.",
+          "Run the task verification plus a manual probe: ~/.bun/bin/bun run bin/sangkar.ts status --json still answers."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/runtime.test.ts  (all pass)\n~/.bun/bin/bun run bin/sangkar.ts status --json  (answers normally: stdout is the JSON envelope, no diagnostic line)\nDone when: the refused cases produce one stderr line naming Bun >= 1.4.4 and the supported runtime is unchanged."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "You own no files. Report observed output; never edit code or weaken a test to make a check pass.\n\nChecks:\n1. ~/.bun/bin/bun run typecheck\n2. ~/.bun/bin/bun run lint\n3. ~/.bun/bin/bun run test tests/domain.test.ts tests/unresolved.test.ts tests/persist.test.ts tests/runtime.test.ts tests/boundary.test.ts\n4. Boundary rule check: the new module src/shared/domain/unresolved.ts imports nothing from src/tools or src/indexer, and src/shared/runtime.ts imports no store module.\n5. Confirm no schema artifact moved: git status shows no change under migrations/ and no drizzle meta edit.\n\nReport: exit status per command, failing test names, and the phase_0 task that owns each failure.",
+        "goal": "Phase 0's shared contracts are integrated and green before any tool consumes them.",
+        "steps": [
+          "Run typecheck and lint.",
+          "Run the five named test files and capture failures by name.",
+          "Check the two import-direction rules by reading the new modules' import lines.",
+          "Confirm migrations/ and drizzle meta are untouched.",
+          "Report pass/fail with the owning task for every failure."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck && ~/.bun/bin/bun run lint && ~/.bun/bin/bun run test tests/domain.test.ts tests/unresolved.test.ts tests/persist.test.ts tests/runtime.test.ts tests/boundary.test.ts  (all exit 0)\nDone when: every command's status is quoted and migrations/ is unmodified."
+      },
+      "files": [],
+      "goal": "Phase 0 gate: shared contracts integrated and green.",
+      "id": "TASK-003",
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-005",
+        "TASK-006"
+      ],
+      "size": "S",
+      "title": "Phase 0 gate",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

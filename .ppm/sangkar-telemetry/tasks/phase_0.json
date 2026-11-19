@@ -1,0 +1,201 @@
+{
+  "phase": "phase_0",
+  "title": "Shared telemetry module and config plumbing",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Capture the baseline before any edit",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "details": {
+        "goal": "Record the repository state and the pre-existing check results the plan is executed against, so a later failure is never mistaken for a regression and every diff has a named base.",
+        "contract": "Read-only. Create, edit and delete nothing, including under `.ppm/`. Do not run `bun install`. Bun is not on PATH: every command uses `$HOME/.bun/bin/bun`.",
+        "steps": [
+          "Run `git rev-parse HEAD` and `git status --porcelain` from the repository root and keep both outputs verbatim.",
+          "Run `$HOME/.bun/bin/bun run typecheck` and record the exit code.",
+          "Run `$HOME/.bun/bin/bun test` and record the pass/fail counts and the total (expected ≈564 tests, ≈47 s).",
+          "Run `$HOME/.bun/bin/bun run db:drift` and record the exit code.",
+          "Run `ls -a .sangkar/` and `git check-ignore -v .sangkar/graph.db` to confirm the data dir is already ignored.",
+          "Write all five results as one block into `ppm task_write_progress` for this task, naming any test that is already failing."
+        ],
+        "verify": "Done when the five outputs are recorded verbatim in this task's progress and every command exited 0 — or the non-zero ones are named as pre-existing with the failing test names. A non-empty `git status --porcelain` is reported to the orchestrator, never reverted."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-002",
+      "title": "Record types and the three pure record builders",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/telemetry/record.ts"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "One shared module declares the three record kinds with their exact field order and turns an already-resolved context plus an envelope into a record by copying an explicit whitelist, so a later sink or report cannot invent a shape.",
+        "contract": "Create `src/shared/telemetry/record.ts`. It imports only `#shared/envelope` (for `EnvelopeStatus`, `TotalRelation`, `TruncationReason`, `Envelope`), `#shared/budget` (for `BYTES_PER_TOKEN`), `#shared/cli/args` (for `ToolArgs`) and `#shared/domain/freshness` (for `STALE_REASONS` and `type StaleReason`, the closed stale union at `src/shared/domain/freshness.ts:61-67`). It does no IO, reads no clock and imports no `node:` module — callers inject `ts`.\n\nexport const RECORD_VERSION = 1;\nexport type TelemetryKind = \"call\" | \"index_run\" | \"session\";\nexport type RecordStatus = EnvelopeStatus | \"absent\";\nexport type RecordedStaleReason = StaleReason | \"other\";\nexport type SessionMode = \"mcp\" | \"cli\" | \"worker\";\nexport type RepoSizeBucket = \"none\" | \"xs\" | \"s\" | \"m\" | \"l\" | \"xl\";\nexport type RootKind = \"git\" | \"plain\";\nexport type TelemetryRecord = CallRecord | IndexRunRecord | SessionRecord;\n\nexport interface RecordContext { readonly ts: string; readonly installId: string; readonly sessionId: string; readonly seq: number; readonly serverVersion: string; readonly bunVersion: string; readonly os: string; readonly arch: string; readonly graphSchemaVersion: number }\nexport interface CallSpec { readonly tool: string; readonly args: ToolArgs; readonly suppliedNames: readonly string[]; readonly envelope: Envelope<unknown> | null; readonly status: RecordStatus; readonly errorCode: string | null; readonly durationMs: number }\nexport interface IndexRunSpec { readonly mode: \"full\" | \"fast\"; readonly exitCode: number; readonly durationMs: number; readonly wasForced: boolean; readonly filesSeen: number; readonly filesIndexed: number; readonly filesSkipped: number; readonly filesFailed: number; readonly nodesByKind: Readonly<Record<string, number>>; readonly edgesByKindTier: Readonly<Record<string, number>>; readonly unresolvedCount: number; readonly languages: Readonly<Record<string, number>>; readonly dbSizeBytes: number; readonly filesChangedInRun: number }\nexport interface SessionFacts { readonly sessionMode: SessionMode; readonly isFirstRun: boolean; readonly repoSizeBucket: RepoSizeBucket; readonly languages: readonly string[]; readonly rootKind: RootKind }\n\nexport function callRecordOf(ctx: RecordContext, spec: CallSpec): CallRecord;\nexport function indexRunRecordOf(ctx: RecordContext, spec: IndexRunSpec): IndexRunRecord;\nexport function sessionRecordOf(ctx: RecordContext, facts: SessionFacts): SessionRecord;\nexport function repoSizeBucketOf(bytes: number): RepoSizeBucket;\nexport function rootKindOf(hasGitMarker: boolean): RootKind;\n\n`CallRecord` fields in this exact order: ts, v, kind, install_id, session_id, seq, tool, status, error_code, duration_ms, arg_names_set, budget_tokens, payload_tokens, budget_used_ratio, truncated, truncation_reason, total_relation, coverage_complete, coverage_indexed, coverage_skipped, coverage_failed, unresolved_edges, stale, stale_reason, generation_age_ms, result_counts, server_version, bun_version, os, arch, graph_schema_version.\n`IndexRunRecord` fields in this exact order: ts, v, kind, install_id, session_id, mode, exit_code, duration_ms, was_forced, generation_advanced, files_seen, files_indexed, files_skipped, files_failed, nodes_by_kind, edges_by_kind_tier, unresolved_count, unresolved_ratio, languages, db_size_bytes, files_changed_in_run.\n`SessionRecord` fields in this exact order: ts, v, kind, install_id, session_id, session_mode, server_version, bun_version, os, arch, is_first_run, repo_size_bucket, languages, root_kind.\n\n`v` is `RECORD_VERSION` (the literal `1`) in all three kinds and sits directly after `ts`, so a reader checks the format version before it dispatches on `kind`. Adding a field keeps `v` at `1`; removing or renaming one is a version bump.\n\nDerivations, all from plan.approach.md §Design: `arg_names_set` = `[...new Set(spec.suppliedNames)].sort()` — the names the request supplied, **before** defaults, and nothing else. Never `Object.keys(spec.args)`: `spec.args` is the defaulted record (`parseArgs` fills every declared default at `src/shared/cli/args.ts:200-211`), so a bare `sangkar status` would record `[\"budget\",\"paths\"]`, the field would be a constant equal to the schema, and it would stop answering the only question it exists for — which arguments a caller actually reaches for. `[]` therefore means \"the caller sent no arguments\". `budget_tokens` = `Number(spec.args.budget)` when that key is a number, else 0 — the **effective** budget, i.e. after the manifest default; the asymmetry is deliberate, because the budget in force is a fact about the answer while the supplied names are a fact about the request. `status` = `spec.status` (`RecordStatus`): `envelope.status` when there is an envelope, `\"absent\"` only for a successful answer with no envelope (the CLI's no-graph `status` line), `\"error\"` when the process refused; a record's status and the process exit code never contradict each other.\n\n`stale`, `stale_reason` come from the envelope with the no-envelope fallback `true`/`null`, but `stale_reason` is recorded as a **closed enum**, never verbatim: `null` when the envelope is absent or its `read_status.stale_reason` is `undefined`; `\"other\"` when the envelope's string is not in `STALE_REASONS`; otherwise that value. Reason: the envelope types the field as plain `string` (`src/shared/envelope.ts:51`) and six tools write prose into it — `trace` builds `\"${node.path}\" has no indexed file row` / `… was last written by generation N` (`src/tools/trace/handler.ts:682-683`), `status` composes verdict words (`src/tools/status/handler.ts:252,298,303`), `search` writes a sentence with counts (`src/tools/search/handler.ts:221`), `expand` writes a fixed sentence (`src/tools/expand/handler.ts:539`), `index` writes two (`src/tools/index/handler.ts:282,291`) and `summary` writes two (`src/tools/summary/handler.ts:658,685`) — so a verbatim copy would put a repo path in every stale `call` record. The envelope itself is untouched; this is a recording rule.\n\n`error_code` = `spec.errorCode` (a closed-union `AppError.code`), never a message; `payload_tokens` = envelope === null ? 0 : `Math.ceil(Buffer.byteLength(JSON.stringify(spec.envelope), \"utf8\") / BYTES_PER_TOKEN)`; `budget_used_ratio` = budget_tokens === 0 ? null : rounded to 4 decimals; `truncated`/`truncation_reason`/`total_relation`/`coverage_*`/`unresolved_edges` come from the envelope with the no-envelope fallbacks false/null/\"gte\"/false/0/0/0/0; `generation_age_ms` = `Date.parse(ctx.ts) - Date.parse(read_status.indexed_at)` or null when either is unparseable; `result_counts` = for each top-level key of `envelope.payload` whose value is an array, `key -> array.length` (no payload value is ever copied). For `index_run`: `generation_advanced` = `spec.exitCode === 0`, `unresolved_ratio` = denominator 0 ? 0 : 4-dp ratio of unresolvedCount to unresolvedCount+edges. `repoSizeBucketOf`: bytes <= 0 -> \"none\", < 1 MiB -> \"xs\", < 10 MiB -> \"s\", < 100 MiB -> \"m\", < 1 GiB -> \"l\", else \"xl\". `tool` is copied from `spec.tool`, which the caller has already clamped to a registered name or `\"unknown\"`. Every field is always present; objects are built as literals in the field order above so a JSON line is diffable.\n\nDo not touch any file other than `src/shared/telemetry/record.ts`.",
+        "steps": [
+          "Declare `RECORD_VERSION`, the five type aliases, `RecordStatus`, `RecordedStaleReason` and the exported union `TelemetryRecord = CallRecord | IndexRunRecord | SessionRecord` (the one type `report.ts`, its tests and the CLI alias — none of them re-declares it), and the three record interfaces with the exact field order above; type `status`/`total_relation`/`truncation_reason` with the unions from `#shared/envelope` and `stale_reason` with `RecordedStaleReason`, so a typo is a compile error.",
+          "Declare `RecordContext`, `CallSpec` (with `suppliedNames`), `IndexRunSpec`, `SessionFacts` and the five exported functions.",
+          "Implement `callRecordOf` by copying the whitelist field by field — never spread `spec`, `spec.args`, `spec.suppliedNames` or `spec.envelope` — mapping `stale_reason` through the enum and taking the name set from `spec.suppliedNames` only.",
+          "Implement `indexRunRecordOf` including the two rounded ratios and `generation_advanced`.",
+          "Implement `sessionRecordOf`, `repoSizeBucketOf` and `rootKindOf`.",
+          "Run typecheck and lint, then confirm the file has no `node:` import and no clock read, and that `v: RECORD_VERSION` appears in all three builders."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck exits 0 and $HOME/.bun/bin/bun run lint exits 0. Done when both are green, `grep -c \"v: RECORD_VERSION\" src/shared/telemetry/record.ts` prints 3, `grep -c \"export type TelemetryRecord\" src/shared/telemetry/record.ts` prints 1, `git status --porcelain` lists no path outside `src/shared/telemetry/record.ts` (no commit happens between tasks, so the assertion is \"no diff reaches a file this task does not own\", not \"the tree holds only this file\"), and `grep -n \"stale_reason\" src/shared/telemetry/record.ts` shows no assignment that copies the envelope's string without the `STALE_REASONS` check. Note: `tests/telemetry.test.ts` (TASK-006) asserts this module's behaviour; this task does not create it."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-003",
+      "title": "Daily-rotating install id and per-process session id",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/telemetry/identity.ts"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "An install identifier that is stable inside one UTC day and unlinkable across days, plus a fresh per-process session identifier, both from `node:crypto` random bytes and neither derived from the repository.",
+        "contract": "Create `src/shared/telemetry/identity.ts`. It imports only `node:crypto`, `node:fs`, `node:path`.\n\nexport interface InstallIdentity { readonly installId: string; readonly isFirstRun: boolean }\nexport function resolveInstallId(dir: string, now: Date): InstallIdentity;\nexport function newSessionId(): string;\nexport function utcDateOf(date: Date): string;   // \"YYYY-MM-DD\", the file-name form\n\n`<dir>/install_id.json` holds `{\"install_id\": string, \"date\": \"YYYY-MM-DD\"}`. `resolveInstallId`: read the file; when it parses and its `date` equals `utcDateOf(now)`, return that id with `isFirstRun: false`; otherwise mint `randomBytes(16).toString(\"hex\")`, write the file with flag `\"wx\"` and `{recursive: true}` on the directory, and return `isFirstRun: true`. An `EEXIST` on the create means another process won the race: read the file back and return whatever it holds with `isFirstRun: false`. Any other read or parse failure is treated as \"no usable file\" and rotates. `newSessionId` is `randomBytes(16).toString(\"hex\")`.\n\nThe module must never throw for a filesystem problem: a write failure is swallowed (the caller's sink is already guarded) and the freshly minted id is returned. It reads no environment variable, no repo path, no hostname and no user identity.",
+        "steps": [
+          "Declare the interface and the three functions with the signatures above.",
+          "Implement `utcDateOf` from `toISOString().slice(0, 10)`.",
+          "Implement the read/parse/compare path so a same-day file is reused.",
+          "Implement rotation: mint 16 random bytes as hex and write with flag `\"wx\"`, falling back to a read on `EEXIST`.",
+          "Implement `newSessionId` and make every filesystem error non-fatal.",
+          "Run typecheck and lint."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/identity.ts` (`record.ts` from TASK-002 is still uncommitted and expected, because no commit happens between tasks), and the module contains no `process.env` read — check with `grep -n \"process\\.\" src/shared/telemetry/identity.ts` (no output)."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-004",
+      "title": "Read SANGKAR_TELEMETRY in config and expose AppConfig.telemetry",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/config.ts",
+        "tests/config.test.ts",
+        "tests/tools-index.test.ts"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "The consent switch is read in the one module allowed to read tool settings and travels as a value on `AppConfig`, so no other module ever reads the environment for it.",
+        "contract": "In `src/shared/config.ts` add:\n\nexport interface TelemetryConfig { readonly enabled: boolean; readonly dir: string }\n\nand add `readonly telemetry: TelemetryConfig;` to `AppConfig`. `loadConfig` returns `{ enabled: env.SANGKAR_TELEMETRY !== \"off\", dir: join(dataDir, \"telemetry\") }`. Semantics to encode exactly: unset or empty string means enabled; the exact lowercase string `off` disables; any other value is enabled (no \"0\"/\"false\"/\"OFF\" aliases — one spelling, documented). `dir` is always computed, so a caller can report where telemetry would go without a second path join.\n\nUpdate the doc comment above `loadConfig` (currently names `SANGKAR_CURSOR_KEY` as the one setting that comes from the environment) to name both variables, and keep the existing `SANGKAR_NO_WATCH` exception noted in `src/index.ts:590-597` worded as \"not a tool setting\".\n\n`tests/tools-index.test.ts:108` builds an `AppConfig` object literal; add the `telemetry` field there (`{ enabled: false, dir: join(dataDir, \"telemetry\") }`) so `tsc` stays green. Do not change that test's assertions.\n\n`tests/config.test.ts`: add a `describe(\"loadConfig telemetry\")` with four cases — unset yields `enabled: true`; `\"\"` yields `true`; `\"off\"` yields `false`; `dir` is `<dataDir>/telemetry` including when `--data-dir` is given. Test with an injected `env`, never the real environment.",
+        "steps": [
+          "Add `TelemetryConfig`, the `AppConfig` field and the two-line change in `loadConfig`.",
+          "Update the `loadConfig` doc comment to name both environment variables.",
+          "Add the `telemetry` field to the `AppConfig` literal in `tests/tools-index.test.ts` and change nothing else there.",
+          "Add the four `loadConfig telemetry` cases to `tests/config.test.ts`, each with an explicit injected `env`.",
+          "Run `$HOME/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts`.",
+          "Run typecheck and lint."
+        ],
+        "verify": "`$HOME/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts` passes with 0 failures, then `$HOME/.bun/bin/bun run typecheck` and `$HOME/.bun/bin/bun run lint` exit 0. Done when all three are green and `grep -rn \"SANGKAR_TELEMETRY\" src/` reports only `src/shared/config.ts`."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-005",
+      "title": "Buffered recorder with a bounded flush and a never-throw sink",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/telemetry/sink.ts",
+        "src/shared/telemetry/telemetry.ts"
+      ],
+      "pre_request": [
+        "TASK-002",
+        "TASK-003",
+        "TASK-004"
+      ],
+      "details": {
+        "goal": "One recorder owns the sink, the identity, the per-process `seq` and a bounded buffer, so a tool call only appends to an array and a broken or full disk can never fail a call.",
+        "contract": "Create `src/shared/telemetry/sink.ts` and `src/shared/telemetry/telemetry.ts`.\n\n`sink.ts` is the seam and owns no policy (Design 1/3). It exports exactly:\n\nexport interface TelemetrySink { write(date: string, lines: readonly string[]): void }\nexport function jsonlSink(dir: string): TelemetrySink;\nexport function nullSink(): TelemetrySink;\n\n`jsonlSink(dir)` appends `lines.join(\"\\n\") + \"\\n\"` to `<dir>/<date>.jsonl` with one `appendFileSync` call, creating `dir` with `mkdirSync(recursive)` on first use. `date` is a `YYYY-MM-DD` string the recorder derives from the record's own `ts`, so the sink does no date arithmetic and holds no clock. `nullSink` discards. Both are pure with respect to the record: the sink never parses, filters or re-serialises a line.\n\n`telemetry.ts` is the recorder. It imports `#shared/config` (type only), `#shared/log` (type only), `./identity`, `./record`, `./sink`, and `node:fs`/`node:path` for the one `statSync`.\n\nexport const FLUSH_AT_RECORDS = 32;\nexport const FLUSH_AT_MS = 5_000;\nexport interface TelemetryOptions { readonly dir: string; readonly repoRoot: string; readonly dataDir: string; readonly sessionMode: SessionMode; readonly serverVersion: string; readonly graphSchemaVersion: number; readonly sink?: TelemetrySink; readonly now?: () => Date; readonly log?: Logger }\nexport interface Telemetry { readonly installId: string; readonly sessionId: string; recordCall(spec: CallSpec): void; recordIndexRun(spec: IndexRunSpec): void; flush(): void; close(): void }\nexport function createTelemetry(options: TelemetryOptions): Telemetry;\nexport function nullTelemetry(): Telemetry;\n\nBehaviour: `createTelemetry` resolves the install id with `resolveInstallId(options.dir, now())`, mints a session id, builds `RecordContext` (`bunVersion: Bun.version`, `os: process.platform`, `arch: process.arch`, injected `serverVersion`/`graphSchemaVersion`), emits exactly one `session` record through `sessionRecordOf` (`repoSizeBucket: repoSizeBucketOf(statSync(join(dataDir, \"graph.db\")).size)` with a `0` fallback when the stat throws, `rootKind: rootKindOf(existsSync(join(repoRoot, \".git\")))`, `languages: []`), then returns the recorder. `recordCall`/`recordIndexRun` increment `seq` (starting at 1), append the built record to the buffer as its serialised line plus the UTC date of its own `ts` (`utcDateOf` from `./identity`, applied to `new Date(record.ts)`), and call `maybeFlush()`.\n\n`maybeFlush` flushes when the buffer holds >= `FLUSH_AT_RECORDS`, or when `now() - oldestBufferedAt >= FLUSH_AT_MS`; there is no interval timer, so nothing keeps the process alive. `flush` groups the buffer's entries by their date, preserving order, and calls `sink.write(date, lines)` **once per date group** — one append per flush in the normal case, two only for a flush that straddles UTC midnight. That is the concurrency contract: the server (`src/index.ts`) and the worker it spawns (`src/tools/index/handler.ts:155` passes the whole parent environment) hold separate recorders writing the same daily file, so a single `O_APPEND` write of at most 32 joined lines makes interleaving line-atomic and never mid-line. `close` flushes and marks the recorder closed (further records are dropped after one `debug` line).\n\nEvery sink call is inside a try/catch: on the first failure log exactly one `warn` (`log.warn(\"telemetry.sink_failed\", { reason })`) and set a `degraded` flag so no further write is attempted and no further warn is emitted for this process. A record is never dropped because of a bad line: the sink serialises what the builder returned, and `JSON.stringify` of a record cannot throw (no cycles, no `BigInt`).\n\n`nullTelemetry()` returns the same interface with empty ids and no-op methods, and is what a caller uses when `config.telemetry.enabled` is false or when no recorder was supplied.\n\n`FLUSH_AT_MS` must be injectable through `now` only — never `Date.now()` directly inside the module — so a test can prove the age trigger without sleeping.\n\nA torn final line (a process killed between `write` and the filesystem) is not repaired here: `report.ts`'s reader counts it `unparsed` and skips it (TASK-012), which is also what makes a lost tail a bounded, documented loss rather than a corrupted file.",
+        "steps": [
+          "Declare `TelemetrySink`, `jsonlSink` and `nullSink` in `sink.ts` — one `appendFileSync` of the joined lines, `mkdirSync(recursive)` on first use, no clock and no date arithmetic.",
+          "Declare `FLUSH_AT_RECORDS`, `FLUSH_AT_MS`, `TelemetryOptions`, `Telemetry` and the two factories in `telemetry.ts`.",
+          "Implement `createTelemetry`: identity, context, the single session record, the stat-based bucket and the git-marker root kind.",
+          "Implement `recordCall`/`recordIndexRun` with the `seq` counter, the buffered line plus its UTC date, and `maybeFlush`.",
+          "Implement `flush` (group by date, one `sink.write` per group) and `close`, plus the `degraded` on-first-failure path with exactly one warn.",
+          "Implement `nullTelemetry`, then run typecheck and lint."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/`, `src/shared/config.ts`, `tests/config.test.ts` and `tests/tools-index.test.ts` (phase_0's full whitelist is checked by TASK-007, and earlier phase_0 tasks have already created `record.ts` and `identity.ts`), and `grep -n \"setInterval\\|setTimeout\" src/shared/telemetry/telemetry.ts` prints nothing (no timer keeps the process alive)."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-006",
+      "title": "Telemetry unit suite: shapes, rotation, off switch, redaction, flush, stdout",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "tests/telemetry.test.ts"
+      ],
+      "pre_request": [
+        "TASK-002",
+        "TASK-003",
+        "TASK-004",
+        "TASK-005"
+      ],
+      "details": {
+        "goal": "The module's contract is executable: exact record shapes, daily id rotation, the off switch, a throwing sink, the privacy invariant, the bounded flush and the absence of stdout writes.",
+        "contract": "Create `tests/telemetry.test.ts` using `bun:test` and `mkdtemp` under the OS temp dir, removed in `afterAll`. Import from `#shared/telemetry/record`, `#shared/telemetry/telemetry`, `#shared/telemetry/identity`, `#shared/telemetry/sink` (`nullSink`, `type TelemetrySink`) and `#shared/config`. Build envelopes with `#shared/envelope`'s constructors and hand-written specs; never call a tool handler and never touch a real database.\n\nRequired cases:\n1. Shape per kind — `Object.keys(record)` equals the exact field list from plan.approach.md §3 for `call`, `index_run` and `session`, in that order (with `v` second), `v === 1` in all three, and the JSON round-trip is stable.\n2. Daily install-id rotation — `resolveInstallId(dir, day1)` then `resolveInstallId(dir, day1 later hour)` returns the same `install_id` with `isFirstRun: false`; `resolveInstallId(dir, day2)` returns a different `install_id` with `isFirstRun: true` and leaves one file.\n3. `SANGKAR_TELEMETRY=off` — `loadConfig({ env: { SANGKAR_TELEMETRY: \"off\" } }).telemetry.enabled === false`, while `env: {}`, `env: { SANGKAR_TELEMETRY: \"\" }` and `env: { SANGKAR_TELEMETRY: \"OFF\" }` all yield `true` (one spelling, case-sensitive), and `dir` is `<dataDir>/telemetry` in every case. The file-level off switch is deliberately **not** asserted here: `nullTelemetry()` takes no options and holds no path, so \"it creates no `telemetry/` directory\" could not fail — the real proof is TASK-010 Case B, which spawns the shipped CLI with `SANGKAR_TELEMETRY=off` and asserts the directory is absent after the child exits 0.\n4. Throwing sink — a `TelemetrySink` whose `write` throws does not reject: `recordCall` returns, `flush`/`close` return, and exactly one `warn` was logged. Assert nothing about the caller's envelope: a `void` method over a copied whitelist cannot mutate a frozen input, so such a case is a tautology.\n5. Redaction invariant — build a `CallSpec` whose `suppliedNames` are `[\"query\", \"file\"]` and whose `args` and payload contain `handleRequest` and `/home/x/secret-repo/src/core.ts`; take `JSON.stringify(callRecordOf(...))`, **parse the line**, and deep-walk every value except the `arg_names_set` array itself, asserting no value contains `handleRequest`, `/home/x/secret-repo`, `secret-repo` or `core.ts`; assert `arg_names_set` is exactly `[\"file\", \"query\"]`. A substring check on the whole line cannot express this, because those names are supposed to be present.\n6. `stale_reason` is an enum — build a `call` record from an envelope whose `read_status.stale_reason` is the `trace` wording, `'\"src/core.ts\" was last written by generation 3'`, and assert the record's `stale_reason` is `\"other\"` and that no value of the parsed line contains `src/core.ts`, `core.ts` or `generation`; a second record built with `stale_reason: \"root_mismatch\"` keeps that value verbatim, and a third with no envelope records `null`.\n7. Bounded flush — with 31 records appended and a fixed clock nothing is written; the 32nd writes one line per record in one append; separately, advancing the injected clock by 5 000 ms and recording once writes the buffer; `close()` always flushes, and a flush whose records straddle two UTC dates produces one file per date.\n8. No stdout — scope the spy to the telemetry calls only: install the `process.stdout.write` mock immediately before the `recordCall`/`flush`/`close` calls of that one test and restore it immediately after. Never wrap the suite body, because bun's own reporter writes to stdout during the run and the spy would capture it.\n\nDo not weaken a case to make it pass, and do not edit any other file.",
+        "steps": [
+          "Create the file with a `tempDir()` helper (`mkdtemp` + `rm` in `afterAll`) and the envelope/spec builders.",
+          "Write the three shape cases against the exact field lists, including `v === 1`.",
+          "Write the rotation and off-switch cases with two injected dates and an injected `env`.",
+          "Write the throwing-sink case and the bounded-flush case with an injected `now`.",
+          "Write the two redaction cases: the deep-walked values with `arg_names_set` excluded, and the `stale_reason` enum.",
+          "Write the scoped stdout-spy case, run `$HOME/.bun/bin/bun test tests/telemetry.test.ts`, then run lint."
+        ],
+        "verify": "`$HOME/.bun/bin/bun test tests/telemetry.test.ts` passes with 0 failures and at least 8 tests, then `$HOME/.bun/bin/bun run lint` exits 0. Done when all are green and `git status --porcelain` lists no path outside `tests/telemetry.test.ts` and nothing outside phase_0's own whitelist (the phase's module files are still uncommitted and expected — no commit happens between tasks)."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-007",
+      "title": "Phase 0 gate: module green and boundaries intact",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003",
+        "TASK-004",
+        "TASK-005",
+        "TASK-006"
+      ],
+      "details": {
+        "goal": "Prove the new shared module is complete, passes the whole suite without changing anything else, and did not weaken a module boundary.",
+        "contract": "Read-only review of the phase's diff plus command runs. Do not edit any file. `tests/boundary.test.ts` must pass unmodified: compare `git status --porcelain` for it.",
+        "steps": [
+          "Run `git status --porcelain` and confirm the phase touched only `src/shared/telemetry/{record,sink,identity,telemetry}.ts`, `src/shared/config.ts`, `tests/config.test.ts`, `tests/tools-index.test.ts` and `tests/telemetry.test.ts`.",
+          "Run `$HOME/.bun/bin/bun test tests/boundary.test.ts` and confirm 0 failures.",
+          "Run `$HOME/.bun/bin/bun run typecheck` and `$HOME/.bun/bin/bun run lint`; both must exit 0.",
+          "Run the full suite `$HOME/.bun/bin/bun test` and confirm 0 failures: `AppConfig` gained a required field and it is `ToolContext.config` (`src/shared/store/read/context.ts:54`), so every suite that builds a context reaches it — a green `tests/config.test.ts` alone proves nothing.",
+          "Run `grep -rn \"process.env\" src/` and confirm the four files named in TASK-001's baseline are the same four and no fifth appeared (`src/shared/config.ts`, `src/index.ts`, `src/indexer/watch.ts`, `src/tools/index/handler.ts`), and that `grep -rn \"SANGKAR_TELEMETRY\" src/` reports only `src/shared/config.ts`.",
+          "Record the six results in `ppm task_write_progress`."
+        ],
+        "verify": "Done when every command above exited 0, the full suite is green, `tests/boundary.test.ts` is unmodified, the changed-file list matches the whitelist exactly, and the `process.env` sweep shows the same four files as the baseline with no new one. Report any deviation to the orchestrator instead of fixing it here."
+      },
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

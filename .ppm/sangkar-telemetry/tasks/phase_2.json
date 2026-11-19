@@ -1,0 +1,197 @@
+{
+  "phase": "phase_2",
+  "title": "The telemetry verb, aggregation and the HTML report",
+  "tasks": [
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Create `src/shared/telemetry/report.ts`. It imports `./record` for `type TelemetryRecord`, `RECORD_VERSION` and the three record interfaces — the union is declared once in `record.ts` and is never re-declared here; `node:fs` (`readFileSync`, `readdirSync`, `existsSync`); and `node:path`. No clock, no `process.env`, no tool or indexer import.\n\nexport interface TelemetryReadResult { readonly files: readonly string[]; readonly records: readonly TelemetryRecord[]; readonly unparsed: number }\nexport interface ToolStats { readonly tool: string; readonly calls: number; readonly statuses: Readonly<Record<string, number>>; readonly error_codes: Readonly<Record<string, number>>; readonly duration_ms: { readonly p50: number; readonly p95: number; readonly mean: number; readonly max: number }; readonly truncated: number; readonly mean_budget_used_ratio: number | null; readonly eq: number; readonly gte: number }\nexport interface IndexRunRow { readonly ts: string; readonly mode: string; readonly exit_code: number; readonly duration_ms: number; readonly files_seen: number; readonly files_indexed: number; readonly files_skipped: number; readonly files_failed: number; readonly files_changed_in_run: number; readonly unresolved_ratio: number; readonly db_size_bytes: number; readonly generation_advanced: boolean }\nexport interface TrendPoint { readonly date: string; readonly ratio: number; readonly runs: number }\nexport interface ReportData { readonly totals: { readonly records: number; readonly calls: number; readonly index_runs: number; readonly sessions: number; readonly unparsed: number; readonly install_ids: number; readonly days: number }; readonly tools: readonly ToolStats[]; readonly status_mix: Readonly<Record<string, number>>; readonly error_mix: Readonly<Record<string, number>>; readonly truncation: { readonly count: number; readonly rate: number; readonly reasons: Readonly<Record<string, number>> }; readonly relations: { readonly eq: number; readonly gte: number; readonly eq_ratio: number }; readonly coverage: { readonly stale_calls: number; readonly mean_unresolved_edges: number }; readonly arg_names: readonly { readonly name: string; readonly calls: number }[]; readonly index_runs: readonly IndexRunRow[]; readonly unresolved_trend: readonly TrendPoint[]; readonly sessions: { readonly by_mode: Readonly<Record<string, number>>; readonly by_root_kind: Readonly<Record<string, number>>; readonly by_size_bucket: Readonly<Record<string, number>> }; readonly window: { readonly since: string | null; readonly first_ts: string | null; readonly last_ts: string | null } }\n\nexport function isSinceLiteral(raw: string): boolean;\nexport function parseSince(raw: string | undefined, now: Date): Date | null;\nexport function readRecords(dir: string, options: { readonly since: Date | null }): TelemetryReadResult;\nexport function aggregate(input: { readonly records: readonly TelemetryRecord[]; readonly unparsed: number; readonly files: readonly string[]; readonly since: string | null }): ReportData;\n\n`parseSince` accepts `YYYY-MM-DD` (calendar-valid, UTC midnight) or `Nd` with N an integer >= 1 (now minus N*24h, floored to the UTC day) and returns `null` for `undefined`; any other shape returns `null` **and** sets no error — `isSinceLiteral` is what the CLI refuses a malformed value with, before this function is called.\n\n`readRecords` reads only files ending in `.jsonl` in `dir`, sorted by name; a missing directory yields an empty result rather than an error; with a `since`, records with `ts < since` are dropped. Files are read as UTF-8 text, line by line.\n\n**The skip rule (forward compatibility).** A line is counted in `unparsed` and dropped — never thrown, never fatal, never partially folded into a ratio or a count — when any of these holds: it is not valid JSON; it is JSON but not an object; its `kind` is not one of the three; its `v` is not `1`; or it is a known kind missing a field the aggregator reads. A skipped line contributes to no counter except `unparsed`. The reason for each clause: a process killed mid-append leaves a torn final line, so the commonest failure must be cheap and silent; and the format's rule is that **adding** a field keeps `v` at `1` (readers ignore what they do not need) while **removing or renaming** one is a version bump, so a line stamped `v: 2` is one this reader must not guess at.\n\n`aggregate` is pure and deterministic and takes **no** injection point: every map is built with sorted keys, every ratio goes through one internal `round4` helper, percentiles use nearest-rank (`sorted[Math.min(n-1, Math.ceil(q*n)-1)]`), `tools` is sorted by tool name, `arg_names` by count descending then name, `index_runs` chronological, and `unresolved_trend` is grouped by the UTC date of `ts` with the mean of each run's `unresolved_ratio`. There is no `samples: () => number` parameter: a callback that receives no value cannot round one, and keeping the rounding inside the function is exactly what makes the determinism assertion in `tests/telemetry-report.test.ts` mean something. `totals.days` is the number of distinct UTC dates across all records; `totals.install_ids` is the number of distinct `install_id` values — the ids themselves never leave this function.",
+        "goal": "One pure module turns a telemetry directory into a fully aggregated, deterministically ordered data object — including per-tool counts, mixes, percentiles, truncation and eq/gte ratios, the index-run table and the unresolved trend.",
+        "steps": [
+          "Declare the read/aggregate interfaces and `ReportData` exactly as given, with `aggregate` taking the single `input` argument and no callback.",
+          "Implement `isSinceLiteral` and `parseSince` (two accepted shapes, UTC).",
+          "Implement `readRecords` with the `.jsonl` filter, the `since` filter, line-by-line parsing and the five-clause skip rule feeding one `unparsed` counter.",
+          "Implement `aggregate`'s totals, mixes, per-tool stats and the two ratio families through the internal `round4`.",
+          "Implement the index-run rows, the per-day unresolved trend and the session mixes.",
+          "Run typecheck and lint."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/report.ts` and phase_0's module files (still uncommitted and expected — no commit happens between tasks), `grep -n \"Date.now\" src/shared/telemetry/report.ts` prints nothing, and `grep -n \"samples\" src/shared/telemetry/report.ts` prints nothing (the rounding helper is internal)."
+      },
+      "files": [
+        "src/shared/telemetry/report.ts"
+      ],
+      "id": "TASK-012",
+      "pre_request": [],
+      "size": "M",
+      "title": "Read and aggregate the JSONL records into one deterministic data object",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Create `src/shared/telemetry/html.ts`. It imports `./report` for `type ReportData` only and nothing else; it performs no IO.\n\nexport function escapeHtml(value: string): string;\nexport function renderHtml(data: ReportData, meta: { readonly generated_at: string; readonly since: string | null }): string;\n\nThe output is one HTML document built by one template literal: a `<style>` block with all CSS inline, the panels below, then a single `<script>` block with inline JS (no framework, no import, no fetch) that draws the per-day unresolved-ratio bars from the embedded blob. The data is embedded once as `JSON.stringify(data)` with every `<` replaced by `\\\\u003c` so a `</script>` inside any string cannot close the tag; every other interpolated string goes through `escapeHtml` (`&`, `<`, `>`, `\"`, `'`).\n\nPanels, in this order: header (window: `since` or `all records`, `generated_at`, totals: records, calls, index runs, sessions, unparsed lines, install ids, days); per-tool table (tool, calls, status mix, error-code mix, p50/p95/mean/max `duration_ms`, truncation count, mean `budget_used_ratio`, eq/gte counts); truncation (count, rate, reasons); relations (`eq` count, `gte` count, `eq` ratio); coverage (stale calls, mean `unresolved_edges`); argument names (name, calls) with a one-line note that names only, never values, are recorded; the unresolved-ratio trend as one bar per day plus its numeric value; the index-run table (ts, mode, exit code, duration, files seen/indexed/skipped/failed/changed, unresolved ratio, db bytes, generation advanced); sessions (by mode, by root kind, by size bucket); and an empty-state panel that replaces every table body when `data.totals.records === 0`.\n\nHard constraints: no `http://`, no `https://`, no `src=`, no `<link`, no `@import`, no `url(` anywhere in the output — the file must render with the network off. No integer is rendered without its label, no absolute path is rendered, and `install_id`/`session_id` values are never printed (only their counts). Formatting goes through two small local helpers (`fmtInt` with `toLocaleString(\"en-US\")` replaced by a fixed grouping so output stays byte-stable, and `fmtRatio` with 2 decimals) — do not call `Date` or `Math.random`.\n\nDeterminism is a hard requirement: `renderHtml(data, meta)` called twice with the same arguments must be byte-identical.",
+        "goal": "One pure renderer turns the aggregated data into a single self-contained HTML file with inline CSS, inline JS and an embedded data blob, with every interpolated string escaped.",
+        "steps": [
+          "Declare `escapeHtml` and `renderHtml` with the signatures above.",
+          "Write the document skeleton: doctype, `<style>` block, header panel, and one container per panel.",
+          "Render the per-tool table, truncation, relations, coverage and argument-name panels from `data`.",
+          "Render the trend bars, the index-run table and the session panels; add the empty-state branch for zero records.",
+          "Add the inline `<script>` that draws the trend bars from the embedded `\\\\u003c`-escaped JSON blob.",
+          "Check the rendered output manually for the forbidden substrings and confirm two renders are byte-identical."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0, and a scratch render of a two-record fixture contains none of `http://`, `https://`, `src=`, `<link`, `@import`, `url(` — check with `grep -c` against a file written to a temp dir, which must be deleted. Done when typecheck/lint are green, `git status --porcelain` lists no path outside `src/shared/telemetry/html.ts` and `report.ts` from TASK-012 (still uncommitted — no commit happens between tasks), and `grep -n \"Math.random\\|new Date()\" src/shared/telemetry/html.ts` prints nothing."
+      },
+      "files": [
+        "src/shared/telemetry/html.ts"
+      ],
+      "id": "TASK-013",
+      "pre_request": [
+        "TASK-012"
+      ],
+      "size": "M",
+      "title": "Render one self-contained HTML report with inline CSS, JS and data",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Create `src/shared/telemetry/cli.ts`. It imports `#shared/config` (`loadConfig`, `flagValue`), `./report` (`aggregate`, `isSinceLiteral`, `parseSince`, `readRecords`), `./html` (`renderHtml`) and `node:fs`/`node:path`. It never imports `src/index`, a tool or the indexer, and never needs a graph.\n\nexport async function runTelemetry(argv: readonly string[]): Promise<number>;\n\nSemantics, all of which the doc and the tests repeat verbatim:\n- `argv` is the arguments after the `telemetry` token; `loadConfig({ argv })` resolves `repoRoot`, `dataDir` and `telemetry.dir` from `--repo-root`/`--data-dir` exactly like every other mode.\n- `--out <path>`: default `join(config.telemetry.dir, \"report.html\")`; a relative value resolves against `repoRoot` (the same rule as `--data-dir`); an existing file is overwritten; parent directories are created with `mkdirSync(dirname(out), { recursive: true })`.\n- `--since <YYYY-MM-DD | Nd>`: default = all records. A value that is neither shape is a usage error: the reason and the usage line go to stderr and the function returns 2 **without writing a file**. `--help`/`-h` prints the usage to stdout and returns 0 without writing a file.\n- Zero records is not an error: the report is still written (with its empty-state panel) and the exit code is 0.\n- A corrupt or partial line is skipped and counted, never fatal: the count reaches the report through `aggregate`'s `unparsed` and the stdout line.\n- Success writes exactly one stdout line: `wrote <absolute path> (<n> records, <m> unparsed lines)` followed by a newline, and returns 0. A write failure writes the message to stderr and returns 1.\n- The generated HTML never contains the output path or the data dir; only the stdout line names them.\n- `runTelemetry` is async for symmetry with `main` but performs only synchronous IO; it must not call `process.exit`.\n\n`meta.generated_at` for the render is `new Date().toISOString()` computed once, in this module — the renderer itself takes no clock, which is what keeps it byte-stable under test.",
+        "goal": "One function implements the verb: it resolves the config from the flags, reads the records, aggregates and renders them, writes exactly one file, prints one line, and maps every failure to the project's exit codes.",
+        "steps": [
+          "Declare `runTelemetry` and a local `usage` string naming the verb and its two flags.",
+          "Handle `--help`/`-h`, then read and validate `--out` and `--since` (missing value or malformed `--since` -> stderr + usage + return 2).",
+          "Resolve the output path (default `<telemetry.dir>/report.html`, relative against `repoRoot`), then `loadConfig` and `readRecords`.",
+          "Aggregate, render with a single `generated_at`, `mkdirSync` and `writeFileSync`; on a write error write the reason to stderr and return 1.",
+          "Write the one stdout line and return 0.",
+          "Run typecheck and lint."
+        ],
+        "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/cli.ts`, `report.ts` and `html.ts` (still uncommitted — no commit happens between tasks), and `grep -n \"process.exit\\|console\\.\" src/shared/telemetry/cli.ts` prints nothing."
+      },
+      "files": [
+        "src/shared/telemetry/cli.ts"
+      ],
+      "id": "TASK-014",
+      "pre_request": [
+        "TASK-012",
+        "TASK-013"
+      ],
+      "size": "M",
+      "title": "Implement the verb runner: flags, defaults, exit codes, one stdout line",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "`bin/sangkar.ts` is the only file this task changes. `telemetry` becomes a reserved verb with its own dispatch; `src/index.ts` is not touched (see plan.approach.md §Design 7).\n\n1. `RESERVED = [\"mcp\", \"worker\", \"index\", \"telemetry\"] as const` — the `Reserved` union follows automatically.\n2. `USAGE`: add one line to the `verbs` block — `  telemetry  write a self-contained HTML report of the recorded usage (local only)` — and one line to the `global flags` block is NOT needed (the verb's own flags are not global). Leave the `tools` block at seven entries and leave the `examples` block with one new example: `  sangkar telemetry --since 7d`.\n3. `VERB_USAGE.telemetry` = `\"usage: sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]\"`. The existing `--help` guard (which answers a reserved verb before anything loads) then covers `sangkar telemetry --help` with no new code.\n4. Dispatch: immediately after the `--help` guard and **before** `await import(\"../src/index\")`, add\n\nif (requested === \"telemetry\") {\n  const { runTelemetry } = await import(\"../src/shared/telemetry/cli\");\n  process.exit(await runTelemetry(argv.slice(1)));\n}\n\nso the verb never loads the kernel, the indexer or a tool module. Keep the module-scope `export {}` and the top-level await.\n5. `telemetry` must stay out of the tool surface: do not add it to `src/shared/instructions.ts`, `docs/INSTRUCTIONS.md` or any manifest, and do not touch `package.json` scripts.\n\nDo not renumber the exit codes, do not change the usage banner's existing lines, and do not add the verb to the `tools` block.",
+        "goal": "The verb is reserved, documented in the help text, and dispatches to the telemetry runner without loading the MCP kernel — and it can never be reached as a tool name.",
+        "steps": [
+          "Add `\"telemetry\"` to `RESERVED`.",
+          "Add the `verbs` line and the `examples` line to `USAGE`.",
+          "Add `VERB_USAGE.telemetry` with the verb's two flags plus the two global roots.",
+          "Add the narrow dispatch branch before the `../src/index` import, using `argv.slice(1)`.",
+          "Run `$HOME/.bun/bin/bun run bin/sangkar.ts telemetry --help` and confirm it prints the verb usage and writes no file.",
+          "Run typecheck and lint."
+        ],
+        "verify": "`$HOME/.bun/bin/bun run bin/sangkar.ts telemetry --help` prints `usage: sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] ...` and exits 0, and `$HOME/.bun/bin/bun --help`-equivalent (`$HOME/.bun/bin/bun run bin/sangkar.ts --help`) lists three verbs plus the new `telemetry` line, then `$HOME/.bun/bin/bun run typecheck` and lint exit 0. Done when all four hold and `git status --porcelain` lists no path outside `bin/sangkar.ts` — phase_0's module files and phase_2's three `src/shared/telemetry/` files are still uncommitted and expected, because no commit happens between tasks."
+      },
+      "files": [
+        "bin/sangkar.ts"
+      ],
+      "id": "TASK-015",
+      "pre_request": [
+        "TASK-014"
+      ],
+      "size": "S",
+      "title": "Reserve the telemetry verb in bin and dispatch it lazily",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Create `tests/telemetry-report.test.ts` with `bun:test`. Use `mkdtemp` temp dirs and hand-written fixtures typed as `TelemetryRecord`, imported as `type TelemetryRecord` from `#shared/telemetry/record` — the union is declared there and is never re-declared in a test — written with `writeFileSync`; delete every directory in `afterAll`. Import `aggregate`, `readRecords`, `parseSince`, `isSinceLiteral` from `#shared/telemetry/report` and `renderHtml`, `escapeHtml` from `#shared/telemetry/html`.\n\nRequired cases:\n1. Per-tool counts, status mix and error-code mix: three tools with known statuses and error codes produce the exact counts.\n2. Latency percentiles: `duration_ms` values 1..100 give `p50 = 50`, `p95 = 95`, `mean` and `max` as expected under nearest-rank.\n3. Truncation rate and eq-vs-gte: 2 truncated of 4 calls gives `rate 0.5`, and `relations.eq_ratio` matches the fixture.\n4. Unresolved-ratio trend: two index runs on two UTC dates produce two trend points with the per-day mean, in chronological order.\n5. Index-run table: the rows are chronological and carry exit code, mode and the file counters.\n6. Self-contained HTML: `renderHtml(data, meta)` contains none of `http://`, `https://`, `src=`, `<link`, `@import`, `url(` (assert each with its own `expect(...).not.toContain`).\n7. Escaping: `escapeHtml('<a href=\"x\">&')` returns the escaped form, and a report whose data contains a hostile `tool` value (e.g. `\"</script><img src=x>\"`) renders without that raw substring and without a second `<script`.\n8. Zero records: a report on an empty directory renders the empty-state panel and no table rows, and `readRecords` on a missing directory returns `{ records: [], unparsed: 0, files: [] }` without throwing.\n9. Skip rule: a file with two valid lines, one truncated (invalid JSON) line and one non-object line yields 2 records and `unparsed: 2`; a second file adds one line with an unknown `kind`, one with `v: 2` and one `call` line missing `arg_names_set`, and the counts only grow in `unparsed` — no skipped line reaches `tools`, `status_mix` or a ratio. The report still renders.\n10. Determinism: two `renderHtml` calls with identical `data` and `meta` are byte-identical, and two `aggregate` calls over the same input return deeply equal objects.\n11. `--since` parsing: `isSinceLiteral` accepts `2026-11-01` and `7d`, rejects `2026-13-01`, `0d`, `7`, `7days` and an empty string; `parseSince(\"7d\", now)` is `now - 7 days` floored to the UTC day and records before it are filtered out by `readRecords`.\n\nDo not weaken a case to make it pass, and do not edit any other file.",
+        "goal": "The aggregation arithmetic, the self-containment, the escaping, the zero-record and corrupt-line behaviour and the determinism are all pinned by tests.",
+        "steps": [
+          "Create the file with the fixture builders and `tempDir()` helpers.",
+          "Write the aggregation cases (per-tool, percentiles, truncation, eq/gte, trend, index-run table).",
+          "Write the self-containment and escaping cases, including the hostile-string case.",
+          "Write the zero-record case and the skip-rule case covering invalid JSON, a non-object, an unknown `kind`, `v: 2` and a missing field.",
+          "Write the determinism case and the `--since` parsing cases.",
+          "Run the file, then run lint."
+        ],
+        "verify": "`$HOME/.bun/bin/bun test tests/telemetry-report.test.ts` passes with 0 failures and at least 11 tests, then `$HOME/.bun/bin/bun run lint` exits 0. Done when both are green and `git status --porcelain` lists no path outside `tests/telemetry-report.test.ts` (phase_2's source files are still uncommitted and expected — no commit happens between tasks)."
+      },
+      "files": [
+        "tests/telemetry-report.test.ts"
+      ],
+      "id": "TASK-016",
+      "pre_request": [
+        "TASK-013"
+      ],
+      "size": "M",
+      "title": "Report suite: aggregation, self-containment, escaping, empty and corrupt input",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Two existing files, additive changes only.\n\n`tests/cli.test.ts` (spawns the real command, `cleanEnv()` already deletes every `SANGKAR_*` key): add three cases.\n1. `sangkar telemetry` in a fixture data dir that already holds one hand-written `telemetry/<date>.jsonl` with one `call` record: exit 0, stdout is exactly one line matching `/^wrote .*report\\.html \\(1 records, 0 unparsed lines\\)$/`, `<dataDir>/telemetry/report.html` exists and is non-empty, and stderr carries no error line.\n2. `sangkar telemetry --help`: exit 0, stdout contains `usage: sangkar telemetry`, and `report.html` does **not** exist (use a fresh data dir for this case).\n3. `sangkar telemetry --since nonsense`: exit 2, nothing on stdout, the reason and usage on stderr, and no `report.html` written.\nAlso add one assertion that the verb is not a tool: `sangkar telemetry` never prints an envelope (no `\"status\":` on stdout) and `TOOL_NAMES` (already imported in this file) does not contain `\"telemetry\"`.\n\n`tests/cli-args.test.ts`: add one case in the globals describe — `GLOBAL_VALUE_FLAGS` is still exactly `[\"repo-root\", \"data-dir\"]`, so `parseCliArgs(\"status\", statusInput, [\"--out\", \"x\"])` throws a `CliUsageError` naming `--out`, proving the verb's flags were not promoted to global tool flags.\n\nDo not change any existing case, do not weaken an assertion, and do not touch any other test file.",
+        "goal": "The verb's end-to-end behaviour and the fact that `telemetry` is a verb and not a tool are pinned at the CLI boundary, without promoting its flags to tool flags.",
+        "steps": [
+          "Add the three telemetry cases to `tests/cli.test.ts` with a fixture JSONL line and a 120 s spawn budget.",
+          "Add the not-a-tool assertion using the already imported `TOOL_NAMES`.",
+          "Add the `GLOBAL_VALUE_FLAGS` / `--out` refusal case to `tests/cli-args.test.ts`.",
+          "Run `$HOME/.bun/bin/bun test tests/cli.test.ts tests/cli-args.test.ts`.",
+          "Run typecheck and lint."
+        ],
+        "verify": "`$HOME/.bun/bin/bun test tests/cli.test.ts tests/cli-args.test.ts` passes with 0 failures, then `$HOME/.bun/bin/bun run typecheck` and `$HOME/.bun/bin/bun run lint` exit 0. Done when all three are green and `git status --porcelain` lists no path outside `tests/cli.test.ts` and `tests/cli-args.test.ts` — earlier tasks' `src/` changes and the other telemetry suites are still uncommitted and expected, but no other `tests/` file may appear (no commit happens between tasks)."
+      },
+      "files": [
+        "tests/cli.test.ts",
+        "tests/cli-args.test.ts"
+      ],
+      "id": "TASK-017",
+      "pre_request": [
+        "TASK-015"
+      ],
+      "size": "M",
+      "title": "CLI boundary tests for the verb and its flags",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "Read-only. Do not edit any file. Report deviations instead of fixing them.",
+        "goal": "The verb, the report and their tests are green together, the byte source is untouched, and the tool surface did not move.",
+        "steps": [
+          "Run `$HOME/.bun/bin/bun run typecheck` and `$HOME/.bun/bin/bun run lint`.",
+          "Run the full suite `$HOME/.bun/bin/bun test` and record pass/fail counts.",
+          "Run `$HOME/.bun/bin/bun run db:drift` and confirm no migration changed.",
+          "Generate a real report from this repository's own records if any exist: `$HOME/.bun/bin/bun run bin/sangkar.ts telemetry`, and confirm the printed path exists and contains no `http` reference.",
+          "Confirm `git diff --name-only HEAD -- src/tools package.json bun.lock tests/boundary.test.ts` is empty.",
+          "Record every result in `ppm task_write_progress`."
+        ],
+        "verify": "Done when typecheck, lint, the full suite and db:drift exit 0, the generated report is a single file with no external reference, and `src/tools/**`, `package.json`, `bun.lock` and `tests/boundary.test.ts` are unmodified."
+      },
+      "files": [],
+      "id": "TASK-018",
+      "pre_request": [
+        "TASK-012",
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016",
+        "TASK-017"
+      ],
+      "size": "S",
+      "title": "Phase 2 gate: verb and report green, surface unchanged",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}
