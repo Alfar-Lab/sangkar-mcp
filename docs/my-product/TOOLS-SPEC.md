@@ -60,6 +60,23 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
 
 `status` ∈ `ok | ambiguous | not_found | error | bootstrapping`.
 
+**`totals`.** Every list a payload carries gets one `<list>_total` key, and a total is
+`number | null`:
+
+| Value | Means |
+|---|---|
+| a number | the list applies to this scope, and this many items matched |
+| `null` | the list does not apply to this scope — an empty change set has no test gaps to count, which is a different answer from "zero gaps" |
+
+Every total stays exactly what the handler counted: `emit()` copies `totals` through unchanged,
+which is why no key here may be inferred from a payload length. Two further keys are optional
+because only some answers can honestly populate them: `unresolved_material` (the part of the
+unresolved census that could still be user-defined code — §2) and `candidates_shown` (how much
+of an ambiguity this answer served, beside `candidates_total`, the size of the tie — §3, §7).
+`emit()` remains the single truncation point: it preserves each `<list>_total` untouched, and
+when it cuts it downgrades `total_relation` from `eq` to `gte` itself. A handler neither restates
+a total nor widens a relation.
+
 ### 1.2 Why every tool carries these six things
 
 | Field | Why it must be in *every* response |
@@ -92,6 +109,43 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
 No `project`, no `verbose`, no `detail`. CBM's `verbose` + `diagnostics=none|summary|full` triple is
 three ways to ask for the same report at three sizes; `budget` and `paths` cover it with fewer axes.
 
+### `project` and the unresolved census
+
+`payload.project` carries `branch` and `remote` beside `name`, `root`, `commit` and `db_path`. Both
+are `null` when the publish could not record them — a graph written before these keys existed, or a
+working tree where git could not answer — and `null` is disclosed rather than guessed: `status`
+still answers.
+
+`payload.unresolved` explains the flat `coverage.unresolved_edges` count instead of restating it:
+
+| key | type | what it is |
+|---|---|---|
+| `total` | integer | the same measurement as `coverage.unresolved_edges`, read once from the row set that produced it, so the two can never disagree |
+| `material` | integer | the part of `total` that could still be user-defined code — the only part an absence claim has to answer for |
+| `buckets` | object | the closed six-bucket taxonomy the `trace` filter names (§3), every bucket present in its declared order, zeros included; `sum(buckets)` is `total` |
+
+The census is **repository-wide at every scope**: `coverage.unresolved_edges` in this tool is the
+repo-wide count, so a per-path census would make two numbers inside one answer describe two
+populations. `paths` scopes `payload.paths` and `coverage.not_indexed`; it does not scope
+`payload.unresolved`.
+
+An example of the census on its own:
+
+```json
+"unresolved": {
+  "total": 321,
+  "material": 188,
+  "buckets": {
+    "builtin_stdlib": 74,
+    "external_package": 31,
+    "internal_module": 18,
+    "dynamic_property_call": 40,
+    "receiver_type_unknown": 140,
+    "ambiguous": 18
+  }
+}
+```
+
 ### Example output
 
 ```json
@@ -113,9 +167,15 @@ three ways to ask for the same report at three sizes; `budget` and `paths` cover
     "unresolved_edges": 321,
     "not_indexed": []
   },
+  "totals": { "paths_total": 2, "total_relation": "gte" },
+  "truncated": false,
+  "truncation_reason": null,
+  "next": null,
+  "next_tools": ["expand"],
   "payload": {
-    "project": { "name": "acme-graph-7f3a", "root": "/work/acme-graph", "commit": "bbdda4b9" },
+    "project": { "name": "acme-graph-7f3a", "root": "/work/acme-graph", "branch": "staging", "remote": "origin", "commit": "bbdda4b9", "db_path": "~/.cache/<n>/acme-graph-7f3a/graph.db" },
     "graph": { "nodes": 13955, "edges": 130044, "size_bytes": 208666624, "db_path": "~/.cache/<n>/acme-graph-7f3a/graph.db" },
+    "unresolved": { "total": 321, "material": 188, "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 } },
     "languages": [
       { "language": "python", "files": 408, "parsed": 408, "failed": 0 },
       { "language": "xslt", "files": 4, "parsed": 0, "failed": 4, "note": "grammar_unavailable" }
@@ -141,6 +201,10 @@ three ways to ask for the same report at three sizes; `budget` and `paths` cover
   difference between a census and a claim.
 - **`unresolved_edges` at top level, not buried** — it is the number that decides whether any later
   absence claim can be `eq`.
+- **`payload.unresolved` beside it, not instead of it** — the count and its breakdown are one
+  measurement, so the bucket that makes the number actionable is a census over the same rows. A
+  repo-wide total with a scope-limited breakdown would be worse than a bare number, because the two
+  could not be added up.
 - **`health.indexer`** — without it, a stuck watcher looks exactly like an idle one.
 
 ---
@@ -161,9 +225,16 @@ three ways to ask for the same report at three sizes; `budget` and `paths` cover
 | `query` | string | **required** | — | One free-form input is the whole point: the measured 884-vs-0 result says a constrained, single-entry API beats a structured one. Accepting name, dotted name, path and `@decorator` removes the "which tool do I use for this shape" decision entirely. |
 | `direction` | enum `all`\|`in`\|`out` | optional | `all` | Callers and callees are different questions but overwhelmingly asked together; `in`/`out` exist for when the agent knows. Making it required would be a second required arg for no gain. |
 | `kinds` | array\<enum> | optional | inferred | Narrowing is occasionally needed when a name collides across kinds (`File` vs `Class` vs `Function`). Left optional because inference handles ≥90 % of cases and a wrong `kinds` silently hides the answer. |
+| `path` | string | optional | repo root | Repo-relative prefix with `search`'s rule (§5): the path itself and everything under it. It narrows resolution and the near misses, so a tie entirely inside the prefix can resolve and a miss inside it never answers from outside. Optional because the prefix is a narrowing, not a question. |
 | `depth` | integer | optional | `2`, clamped `1–4` | Hop budget is what stops the 275 KB explosion. Clamped rather than required because "how deep" is the server's judgement, not the agent's. |
 | `budget` | integer | optional | `3200` | The CRG `detect_changes` budget. Large enough for 2 hops of a dense symbol. |
+| `unresolved` | enum `builtin_stdlib`\|`external_package`\|`internal_module`\|`dynamic_property_call`\|`receiver_type_unknown`\|`ambiguous` | optional | all buckets | Narrows the `payload.unresolved` evidence list to one bucket of the closed taxonomy the store already records. Optional because the taxonomy's whole job is explaining a total, and asking for one reason is a drill-down, not the question. |
 | `cursor` | string | optional | `null` | Continuation of *this* query. Replaces `limit`/`offset`/`max_results`. |
+
+The `unresolved` value set is the taxonomy itself (`#shared/domain/unresolved.ts`), spread into the
+schema rather than restated, so a bucket added to the taxonomy is filterable in the same commit. It
+narrows **what is listed only**: `payload.unresolved_census` and `coverage` always describe the
+unfiltered scope, because a filter chooses what to read, not which call sites failed to bind.
 
 Deliberately absent: `include_tests`, `include_overrides`, `edge_types`, `parameter_name`,
 `mode=calls|dataflow|deploy`, `include_evidence`. CBM's `trace_path` has all six and got 11 calls.
@@ -212,8 +283,13 @@ are separate products.
       { "edge": "calls", "tier": "inferred", "items": [ { "id": 11002, "qn": "builtins.dict", "external": true, "hop": 1 } ] }
     ],
     "unresolved": [
-      { "file": "src/parser.py", "line": 8123, "name": "resolve_bare_call_targets", "evidence": "receiver type unknown", "tier": "unresolved" }
+      { "file": "src/parser.py", "line": 8123, "name": "resolve_bare_call_targets", "bucket": "receiver_type_unknown", "evidence": "receiver type unknown", "tier": "unresolved" }
     ],
+    "unresolved_census": {
+      "total": 321,
+      "material": 188,
+      "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 }
+    },
     "not_indexed": []
   }
 }
@@ -239,6 +315,64 @@ are separate products.
   table). Naming the *reason* the binding failed lets the agent decide whether to read the file.
 - **`totals` with `gte`** because one call site is unresolved: 2 callers *as far as binding goes*.
   Reporting `eq: 2` here would be a lie the agent would repeat to the user.
+- **`unresolved_census` beside the evidence list** — `total` is copied from the scope's own
+  `coverage.unresolved_edges` over the same rows, so the count and its breakdown cannot disagree.
+  `material` is the narrower population that could still be user-defined code, which is the part an
+  absence claim actually has to answer for.
+- **`bucket` on every unresolved row** — `evidence` is the store's prose and may be reworded; the
+  bucket is the closed value the filter accepts, so the agent can widen or narrow the list on the
+  next call without parsing a sentence.
+- **The `unresolved` filter never narrows the census.** A filtered answer's summary says so:
+  `; 12 unresolved call sites in src/parser.py, 3 filtered out (unresolved: receiver_type_unknown).`
+  An evidence list of three under a scope total of twelve is otherwise exactly the kind of partial
+  number this protocol exists to prevent.
+
+### Example output — `status: "ambiguous"`
+
+```json
+{
+  "status": "ambiguous",
+  "summary": "build: 7 candidates matched, none preferred",
+  "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
+  "coverage": { "complete": false, "indexed": 0, "skipped": 0, "failed": 0, "unresolved_edges": 0, "not_indexed": [] },
+  "totals": { "total_relation": "gte", "candidates_total": 7, "candidates_shown": 5 },
+  "truncated": false,
+  "truncation_reason": null,
+  "next": null,
+  "next_tools": ["search", "status"],
+  "payload": {
+    "candidates": [
+      {
+        "id": 8842,
+        "qn": "src/parser.py::CodeParser.build",
+        "kind": "method",
+        "file": "src/parser.py",
+        "lines": [8024, 8385],
+        "score": 0.61,
+        "why": "exact name, 7 of 7 candidates",
+        "next_call": { "tool": "trace", "query": "src/parser.py::CodeParser.build", "direction": "all" }
+      }
+    ],
+    "candidates_total": 7,
+    "candidates_shown": 5
+  }
+}
+```
+
+A near miss (`status: "not_found"`) carries the same `next_call` on each entry of `near_misses`,
+because a miss and a tie differ in whether an answer was preferred, not in whether an address was
+produced.
+
+**How a tie is counted.** `candidates_total` is the size of the tie *before* the five-candidate cap,
+and `candidates_shown` is the width the cap allowed; both are copied from the resolution, so the
+summary line and the payload cannot disagree. They appear in `totals` and in the payload because
+`candidates_shown` counts what was served rather than what matched — folding it into a
+`<list>_total` name would make that name lie. A miss reports `near_misses_total` instead.
+
+**`next_call`** is the call that turns one candidate into an answer: `query` is the candidate's own
+`qn` and `direction` echoes the caller's choice, so the agent issues it unchanged instead of
+reassembling a query from `file` and `lines` — which is how a confident answer about the wrong
+node happens.
 
 ---
 
@@ -272,13 +406,17 @@ uniformly.
   "summary": "3 files changed, 5 symbols touched, risk 0.62 (medium). Top impact: GraphStore (41 dependents). 2 untested changes.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": true, "stale_reason": "3 files changed since index" },
   "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "changed_files_total": 3, "changed_symbols_total": 5, "impacted_total": 41, "total_relation": "eq" },
+  "totals": { "changed_files_total": 3, "changed_symbols_total": 5, "test_gaps_total": 2, "removed_symbols_total": 0, "impacted_total": 41, "unresolved_material": 188, "total_relation": "eq" },
   "truncated": false,
   "next": null,
   "next_tools": ["impact", "trace", "expand"],
   "payload": {
     "base": "bbdda4b9",
-    "changed_files": ["src/graph.py", "src/postprocessing.py", "tests/test_graph.py"],
+    "changed_files": [
+      { "path": "src/graph.py", "state": "modified", "symbols": 3, "entry_point": true },
+      { "path": "src/postprocessing.py", "state": "added", "symbols": 2, "entry_point": false },
+      { "path": "src/legacy.py", "state": "deleted", "symbols": 0, "entry_point": false }
+    ],
     "changed_symbols": [
       { "id": 3211, "qn": "src/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "change": "modified", "lines": [3201, 3216], "risk": 0.71 },
       { "id": 3233, "qn": "src/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "change": "added", "risk": 0.34 }
@@ -286,7 +424,8 @@ uniformly.
     "risk": { "score": 0.62, "band": "medium", "drivers": ["41 dependents", "2 changed symbols without tests", "1 changed entry point"] },
     "test_gaps": [ { "qn": "src/postprocessing.py::_resolve_bare_endpoints", "reason": "no tested_by edge within 2 hops" } ],
     "removed_symbols": [],
-    "suggested_next": [ { "tool": "impact", "why": "41 dependents on GraphStore" }, { "tool": "trace", "query": "GraphStore.resolve_bare_call_targets", "why": "changed entry point" } ]
+    "suggested_next": [ { "tool": "impact", "why": "41 dependents on GraphStore" }, { "tool": "trace", "query": "GraphStore.resolve_bare_call_targets", "why": "changed entry point" } ],
+    "unresolved": { "total": 321, "material": 188, "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 } }
   }
 }
 ```
@@ -309,10 +448,36 @@ uniformly.
       { "qn": "src/graph.py::GraphStore", "in": 41, "out": 88 }
     ],
     "flows": [ { "name": "build", "steps": 39, "files": 8 } ],
-    "not_indexed": [ { "path": "docs/legacy.xslt", "reason": "grammar_unavailable" } ]
+    "not_indexed": [ { "path": "docs/legacy.xslt", "reason": "grammar_unavailable" } ],
+    "unresolved": { "total": 321, "material": 188, "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 } }
   }
 }
 ```
+
+### `changed_files` rows: `state`, `from` and `symbols`
+
+Every row is `{ path, state, from?, symbols, entry_point }`, and `state` is one of `modified`,
+`added`, `deleted`, `renamed`:
+
+| state | what it says | `from` | `symbols` |
+|---|---|---|---|
+| `modified` | different bytes at a path the graph already holds | absent | declarations the graph has for that path |
+| `added` | a path the graph does not hold, or did not parse; a git copy reports `added` too | absent | `0` when nothing indexed it |
+| `deleted` | the path was indexed and its bytes are gone | absent | `0` — its symbols are history, not part of the change to review |
+| `renamed` | one move, reported once | the path it came from | declarations the graph has for the new path |
+
+A rename is one row, not two: `{ "path": "src/graph.py", "state": "renamed", "from": "src/old_graph.py", "symbols": 3, "entry_point": true }`.
+`changed_files_total` counts rows, so a rename contributes one. A deleted row keeps its place in
+the list with `symbols: 0` — a reviewer who cannot see the deletion cannot see the change — while
+`removed_symbols_total` still counts the symbols that went with it.
+
+### `test_gaps_total`: `null` is not `0`
+
+An empty change set has no symbols to assess, so it has no test gaps to count. `test_gaps_total` is
+`null` there and a number otherwise: `0` would be the claim "every changed symbol has a test", which
+the answer never measured. The same holds in the risk drivers — the test-coverage sentence is
+emitted only when there are changed symbols, so no "every changed symbol has a test" line appears
+for an empty set. `null` means *not applicable to this scope*; unknown never appears as a total.
 
 ### Why this output
 
@@ -322,6 +487,12 @@ uniformly.
 - **`risk.drivers` as sentences, not a bare number.** A score of 0.62 is unusable for deciding what to
   do; "41 dependents" and "2 changed symbols without tests" are actionable, and they are what the agent
   quotes to the user.
+- **`changed_files` rows carry `state` and `from`** — a list of bare paths makes a rename look like a
+  deletion plus an addition, and hides that a deleted path contributed no symbols. The label is the
+  difference between "three files touched" and "one modified, one added, one removed".
+- **`payload.unresolved` and `totals.unresolved_material`** — the same census as `status` (§2): the
+  count beside its breakdown, and the material part in `totals` so a caller reading only the counts
+  still knows how much of the absence claim is user code.
 - **`test_gaps` carries `reason`** ("no `tested_by` edge within 2 hops"). Both parents report gaps as a
   flat list, which reads as "untested" when it may only mean "test found through a caller". The reason
   is the difference between a claim and a pointer.
@@ -355,6 +526,14 @@ uniformly.
 
 No `provider`, no `model`, no `regex`, no `context`/`source_max_lines`. CBM's `search_code` alone has
 five source-shaping knobs; those are file-reader features, not graph features.
+
+**The `path` rule, shared by the other tools.** `path` is a repo-relative prefix: it matches the path
+itself and every path under it, so `src` matches `src/a.ts` and `src/graph.py` but not `src-old/a.ts`
+(the subtree range is `path === prefix || (path > prefix + "/" && path < prefix + "0")`, because `-`
+sorts below `/`). Paths are normalised to forward slashes and empty or `.` segments are dropped
+before comparing. An absent `path` means the whole graph. `trace` (§3) and `expand` (§7) take the
+identical argument with the identical rule — `trace` applies it to resolution, `expand` to the
+target it resolves — so one sentence describes all three tools.
 
 ### Example output
 
@@ -416,21 +595,23 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
   "summary": "3 changed files reach 41 nodes in 12 files. 2 entry points affected. 6 of 41 covered by tests.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": true },
   "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "impacted_total": 41, "total_relation": "gte" },
+  "totals": { "impacted_total": 41, "unresolved_material": 188, "total_relation": "gte" },
   "truncated": true,
   "truncation_reason": "budget",
   "next": "cur_31be07",
   "next_tools": ["trace", "expand"],
   "payload": {
     "changed": [
-      { "path": "src/graph.py", "symbols": 3, "entry_point": false }
+      { "path": "src/graph.py", "state": "modified", "symbols": 3, "entry_point": false },
+      { "path": "src/legacy.py", "state": "renamed", "from": "src/old_legacy.py", "symbols": 1, "entry_point": false }
     ],
     "impacted": [
       { "id": 3233, "qn": "src/postprocessing.py::_resolve_bare_endpoints", "kind": "function", "hop": 1, "via": "calls", "tier": "extracted", "tested": true },
       { "id": 1180, "qn": "src/cli.py::_handle_build_update", "kind": "function", "hop": 2, "via": "calls", "tier": "inferred", "tested": false, "entry_point": true }
     ],
     "unmatched_files": [ { "path": "CHANGELOG.md", "reason": "no symbols" } ],
-    "risk": { "score": 0.62, "band": "medium", "drivers": ["2 entry points affected", "6 of 41 impacted nodes tested"] }
+    "risk": { "score": 0.62, "band": "medium", "drivers": ["2 entry points affected", "6 of 41 impacted nodes tested"] },
+    "unresolved": { "total": 321, "material": 188, "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 } }
   }
 }
 ```
@@ -447,6 +628,15 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
   `test_gaps` because that is the review-oriented view.
 - **`unmatched_files`** — CRG has this and it matters: a changed file with no nodes (docs, config,
   generated) silently disappears from an impact analysis, and the agent will assume it was analysed.
+- **`changed` rows carry the same `state`/`from` as `summary`** — one row shape across the two tools
+  that report a change set, so a rename is visible as a move and a deletion keeps its place with
+  `symbols: 0`. A path with no node at all stays out of `changed` and into `unmatched_files`, where
+  the reason is stated.
+- **`totals.unresolved_material` and `payload.unresolved`** — the count and its breakdown come from
+  the one row set `coverage.unresolved_edges` counted, and the material part is in `totals` because
+  it is the part of the blast radius the indexer may simply have failed to see. An explicit change
+  set that matched nothing reports zeros: it measured nothing, and an absent census would read as
+  "nothing unresolved".
 - **`gte` on the total, not `eq`** — the list is truncated *and* 321 call sites are unresolved. Two
   independent reasons for the total to be a lower bound; the envelope says so once.
 
@@ -464,7 +654,9 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
 | name | type | required | default | why |
 |---|---|---|---|---|
 | `target` | string | **required** | — | A single opaque handle copied verbatim from a prior payload. This is the whole reason the other tools can stay small: detail is addressable instead of pre-shipped. |
-| `what` | enum `members`\|`edges`\|`source`\|`coverage` | optional | inferred from kind | Inference keeps the common case to one argument; explicit because sometimes you know. The chosen value is echoed in `payload.what` — inference is never silent. |
+| `what` | enum `members`\|`edges`\|`source`\|`coverage`\|`outline` | optional | inferred from kind | Inference keeps the common case to one argument; explicit because sometimes you know. The chosen value is echoed in `payload.what` — inference is never silent. `outline` is the one value never inferred: it is a table of contents for a container whose default detail is already `members`, so the flatter shape has to be asked for by name. |
+| `path` | string | optional | repo root | Repo-relative prefix with `search`'s rule (§5), applied to resolution: "the `Widget` under `tests/`" is a handle collision the agent can already meet and has no other way to express. Optional because an unprefixed target is the common case. |
+| `range` | array\<integer> | optional | the node's whole extent | `[from, to]`, 1-based and inclusive. Only `what: "source"` reads it. A source view is priced in lines, so a caller that already knows which lines matter should not pay for the rest — and the tool should not grow a second window argument beside it. |
 | `budget` | integer | optional | `2500` | Detail is by definition the expensive part, so a larger default than `summary`. |
 
 Inference table (disclosed in the response, documented in the instructions):
@@ -474,6 +666,24 @@ Inference table (disclosed in the response, documented in the instructions):
 | `file`, `class` | `members` |
 | `function`, `method` | `edges` |
 | `folder` | `coverage` |
+| anything else | none — `not_found` with a hint to pass `what` |
+
+`outline` is never inferred (see the `what` row above). A bare numeric id is not an address: it is
+answered `not_found` with a hint naming the `qn` form rather than reinterpreted as a name.
+
+**The `range` clamp.** A source window is read inside the node's own extent, and nothing else:
+
+- both ends clamp into the extent and `why` says so — `requested: source; range 8-9999 clamped to the node's extent 1006-5859`;
+- an inverted pair (`to < from`) selects no lines and says so — `range 8-5 is inverted, so no lines were selected` — rather than being silently reordered into a window the caller never asked for;
+- a range that is not exactly two integers is ignored, with a note in `why`;
+- none of these throws or returns `error`: a line the node does not occupy is a request this answer cannot honour, not a malformed call.
+
+The effective window is echoed as `payload.window`, so there is one place to read what was returned,
+and the clamp lives in `why` rather than in a second field.
+
+A target nothing answers for is `not_found` with `{ target, why, hint }`: the reason it could not be
+resolved, and the address forms that would have been accepted. A folder prefix is answered only by
+`what: "coverage"`, and the hint says so instead of returning an empty expansion.
 
 ### Example output
 
@@ -499,6 +709,100 @@ Inference table (disclosed in the response, documented in the instructions):
 }
 ```
 
+### Example output — `what: "outline"`
+
+```json
+{
+  "status": "ok",
+  "summary": "outline of src/graph.py: 26.",
+  "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
+  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "members_total": 26, "total_relation": "eq" },
+  "truncated": false,
+  "truncation_reason": null,
+  "next": null,
+  "next_tools": ["trace", "status"],
+  "payload": {
+    "target": { "id": 1003, "qn": "src/graph.py", "kind": "file", "lines": [1, 5859] },
+    "what": "outline",
+    "why": "requested: outline",
+    "path": "src/graph.py",
+    "members": [
+      { "qn": "src/graph.py::parse_args", "kind": "function", "lines": [1, 40], "signature": "def parse_args(argv: list[str]) -> Args" },
+      { "qn": "src/graph.py::GraphStore", "kind": "class", "lines": [1006, 5859], "signature": "class GraphStore" }
+    ]
+  }
+}
+```
+
+The outline is the graph-only answer to "what does this container declare": `members` for a
+class-like node, the file's own declarations for a file node, in the store's source order. Each
+member carries `qn`, `kind`, `lines` and `signature` so a caller can choose the next target without
+opening the file; `signature` is `null` when the grammar gave none, which is not an empty signature.
+The row names the member by `qn` rather than by the bare `name` the `members` payload uses: an
+outline is read to pick an address, and two methods of one class can share a name while differing in
+arity.
+
+### Example output — `what: "source"` with `range`
+
+```json
+{
+  "status": "ok",
+  "summary": "lines 3201-3216 of src/graph.py.",
+  "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false, "stale_checked_at": "2026-11-17T14:02:00Z" },
+  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "lines_total": 16, "total_relation": "eq" },
+  "truncated": false,
+  "truncation_reason": null,
+  "next": null,
+  "next_tools": ["trace", "status"],
+  "payload": {
+    "target": { "id": 3211, "qn": "src/graph.py::GraphStore.resolve_bare_call_targets", "kind": "method", "lines": [3201, 3216] },
+    "what": "source",
+    "why": "requested: source",
+    "path": "src/graph.py",
+    "source_drift": false,
+    "window": [3201, 3216],
+    "content": [ { "line": 3201, "text": "    def resolve_bare_call_targets(self) -> int:" } ]
+  }
+}
+```
+
+`source_drift: true` with `content: null` is the other source answer: the file's `sha256` no longer
+matches the indexed row, so returning bytes would be returning a stale line the agent could quote as
+current.
+
+### Example output — `status: "ambiguous"`
+
+```json
+{
+  "status": "ambiguous",
+  "summary": "\"Widget\" matches 7 nodes, showing 5; pass the qn of the one you meant",
+  "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
+  "coverage": { "complete": false, "indexed": 0, "skipped": 0, "failed": 0, "unresolved_edges": 0, "not_indexed": [] },
+  "totals": { "total_relation": "gte", "candidates_total": 7, "candidates_shown": 5 },
+  "truncated": false,
+  "truncation_reason": null,
+  "next": null,
+  "next_tools": ["trace", "status"],
+  "payload": {
+    "target": "Widget",
+    "candidates": [
+      { "id": 4102, "qn": "src/widgets.ts::Widget", "kind": "class", "file": "src/widgets.ts", "lines": [12, 88], "score": 0.58, "why": "exact name, 7 of 7 candidates", "next_call": { "tool": "expand", "target": "src/widgets.ts::Widget" } }
+    ],
+    "candidates_total": 7,
+    "candidates_shown": 5,
+    "hint": "pass the qn of the item you meant; expand never picks one of a tie"
+  }
+}
+```
+
+A tie is never answered with a guess: the payload carries `candidates_total` (the tie before the
+five-candidate cap) and `candidates_shown` (how much of it this answer holds), in the payload and in
+`totals`, both copied from the resolution so the summary and the numbers cannot disagree. Each
+candidate's `next_call` restates its `qn` as an `expand` `target`, which is what turns "5 of 7
+shown" into one call instead of a reassembly from `file` and `lines`.
+
 ### Why this output
 
 - **`what` + `why` echoed** — the contract "inference is disclosed" only holds if the model can see what
@@ -511,7 +815,11 @@ Inference table (disclosed in the response, documented in the instructions):
   reading the file.
 - **`source` exists but is not the default** — measured demand for source-in-payload was ~0. It stays
   available for the case where the agent genuinely wants 20 lines without a file read, but defaults
-  point at structure.
+  point at structure. `range` is what makes it affordable when it is wanted, and the clamp rule above
+  is what keeps a bad window an answer instead of an error.
+- **`outline` is asked for, never inferred** — it is the cheapest way to choose the next target from a
+  container (one row per declaration, with signature), and it stays explicit because inferring a
+  flatter shape than `members` would hide the detail the caller did ask for.
 
 ---
 
@@ -587,11 +895,11 @@ budget and points at `depth: 1`, since that is a smaller query rather than a sma
 | Tool | required | optional | total |
 |---|---|---|---|
 | `status` | 0 | 2 | 2 |
-| `trace` | 1 | 5 | 6 |
-| `summary` | 0 | 4 | 5 |
+| `trace` | 1 | 7 | 8 |
+| `summary` | 0 | 5 | 5 |
 | `search` | 1 | 4 | 5 |
-| `impact` | 0 | 4 | 4 |
-| `expand` | 1 | 2 | 3 |
+| `impact` | 0 | 5 | 5 |
+| `expand` | 1 | 4 | 5 |
 | `index` | 0 | 2 | 2 |
 
 **Seven tools, three required arguments in total.** For comparison: the two parents ship 47 tools and

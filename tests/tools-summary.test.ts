@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
+import { UNRESOLVED_BUCKETS } from "#shared/domain/unresolved";
 import { log } from "#shared/log";
 import type { ToolContext } from "#shared/store/read/context";
 import type {
@@ -11,12 +12,16 @@ import type {
   IndexedFileRow,
   NeighbourEdge,
   NodeRow,
+  TombstoneRow,
+  UnresolvedRef,
 } from "#shared/store/read/reader";
 import {
   type AreaPayload,
+  type ChangedFileRow,
   type ChangePayload,
   handle,
   type RepoPayload,
+  type UnresolvedCensus,
 } from "../src/tools/summary/handler";
 
 /**
@@ -35,19 +40,164 @@ import {
 const ROOT = mkdtempSync(join(tmpdir(), "sangkar-summary-"));
 const FIXTURE_PATH = "src/a.ts";
 const FIXTURE_BYTES = "export function alpha(): number {\n  return 1;\n}\n";
+/** Where the git fixture moves {@link FIXTURE_PATH}, so the rename has a destination to report. */
+const RENAMED_PATH = "src/c.ts";
+/** An indexed path the fixture leaves no bytes for: the change set's `deleted` entry. */
+const DELETED_PATH = "src/gone.ts";
+const gitDirs: string[] = [];
+
+function git(root: string, ...args: readonly string[]): string {
+  const result = Bun.spawnSync({
+    cmd: ["git", "--no-pager", "-C", root, ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  }
+  return result.stdout.toString();
+}
 
 mkdirSync(join(ROOT, "src"), { recursive: true });
 writeFileSync(join(ROOT, FIXTURE_PATH), FIXTURE_BYTES, "utf8");
 
 afterAll(() => {
+  for (const dir of gitDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
   rmSync(ROOT, { recursive: true, force: true });
 });
+
+/**
+ * A committed repository whose only indexed file has just been renamed. Rename detection is the one
+ * fact only git can supply, so the pair `diff` builds from `changed ∪ removed` — a `renamed`
+ * destination plus the hash comparison's `deleted` source — can only be produced against a real
+ * repository. Returns the root and the commit the rename is measured against.
+ */
+function renamedRepo(): { root: string; base: string } {
+  const root = mkdtempSync(join(tmpdir(), "sangkar-summary-git-"));
+  gitDirs.push(root);
+  mkdirSync(join(root, "src"), { recursive: true });
+  writeFileSync(join(root, FIXTURE_PATH), FIXTURE_BYTES, "utf8");
+  git(root, "init", "-q", "-b", "main");
+  git(root, "add", "-A");
+  git(
+    root,
+    "-c",
+    "user.name=summary fixture",
+    "-c",
+    "user.email=summary@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "init",
+  );
+  const base = git(root, "rev-parse", "HEAD").trim();
+  git(root, "mv", FIXTURE_PATH, RENAMED_PATH);
+  git(
+    root,
+    "-c",
+    "user.name=summary fixture",
+    "-c",
+    "user.email=summary@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "rename",
+  );
+  return { root, base };
+}
 
 const GENERATION = "g-2";
 const OLD_GENERATION = "g-1";
 const INDEXED_AT = "2026-01-03T00:00:00Z";
 const CURSOR_KEY = "k".repeat(32);
 const EMPTY_SHA = "0".repeat(64);
+
+function sha256Of(bytes: string): string {
+  return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+}
+
+/**
+ * An empty scope measured nothing, and the answer says so bucket by bucket rather than omitting
+ * the key: a missing `unresolved` would read as "nothing unresolved".
+ */
+function zeroCensus(): UnresolvedCensus {
+  return {
+    total: 0,
+    material: 0,
+    buckets: {
+      builtin_stdlib: 0,
+      external_package: 0,
+      internal_module: 0,
+      dynamic_property_call: 0,
+      receiver_type_unknown: 0,
+      ambiguous: 0,
+    },
+  };
+}
+
+/** The census must account for every row it counted, and for no row twice. */
+function summed(buckets: Readonly<Record<string, number>>): number {
+  return Object.values(buckets).reduce((total, count) => total + count, 0);
+}
+
+/**
+ * One row per rule, so a census assertion can name a bucket instead of a total: a stdlib call, a
+ * missing package, a relative import that bound nothing, and two call sites the resolver could not
+ * type. Only the last two could be user-defined code, which is what `material` counts.
+ */
+const UNRESOLVED_ROWS: readonly UnresolvedRef[] = [
+  {
+    id: 1,
+    fileId: 1,
+    path: FIXTURE_PATH,
+    line: 1,
+    rawTarget: "fs",
+    evidenceKind: "dynamic",
+    evidence: "import:fs",
+  },
+  {
+    id: 2,
+    fileId: 1,
+    path: FIXTURE_PATH,
+    line: 2,
+    rawTarget: "lodash",
+    evidenceKind: null,
+    evidence: "import:lodash",
+  },
+  {
+    id: 3,
+    fileId: 1,
+    path: FIXTURE_PATH,
+    line: 3,
+    rawTarget: "./missing.js",
+    evidenceKind: null,
+    evidence: "import:./missing.js",
+  },
+  {
+    id: 4,
+    fileId: 1,
+    path: FIXTURE_PATH,
+    line: 4,
+    rawTarget: "obj[0]",
+    evidenceKind: "dynamic",
+    evidence: "call:obj[0]",
+  },
+  {
+    id: 5,
+    fileId: 1,
+    path: FIXTURE_PATH,
+    line: 5,
+    rawTarget: "render",
+    evidenceKind: "receiver_type_unknown",
+    evidence: "call:render",
+  },
+];
 
 /** Long enough that a 1200-token budget is plenty and a small one cuts mid-list. */
 const NAMES = [
@@ -91,6 +241,19 @@ interface ReaderOptions {
   readonly indexedGeneration?: string;
   /** Reach the reader's entry-point statement bound, which is what `item_cap` reports. */
   readonly entryPointsAtLimit?: boolean;
+  /** Store the working tree's real digest, so the degraded diff reports no changed file. */
+  readonly cleanTree?: boolean;
+  /** Report no test gap for the changed symbols, so the change set is fully covered. */
+  readonly noTestGaps?: boolean;
+  /** The unresolved rows `unresolvedForFiles` answers, scoped by file id like the reader's. */
+  readonly unresolvedRows?: readonly UnresolvedRef[];
+  /**
+   * An indexed path whose bytes are gone from the working tree: the change set's `deleted` entry.
+   * The graph still holds its row and its nodes, which is exactly what the payload must not count.
+   */
+  readonly deletedPath?: string;
+  /** The tombstones `removedSymbolsFor` answers, which is what `removed_symbols` renders. */
+  readonly removedSymbols?: readonly TombstoneRow[];
 }
 
 /** A hand-written reader: every method present, types only from `#shared/*`. */
@@ -100,19 +263,45 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
     path: FIXTURE_PATH,
     language: "typescript",
     // Deliberately not the digest of the bytes on disk: the hash comparison reports it changed.
-    sha256: EMPTY_SHA,
+    sha256: options.cleanTree === true ? sha256Of(FIXTURE_BYTES) : EMPTY_SHA,
     size: Buffer.byteLength(FIXTURE_BYTES, "utf8"),
     lineCount: 3,
     parseStatus: "ok",
     parseErrorRanges: null,
     indexedGeneration: options.indexedGeneration ?? GENERATION,
   };
+  // A second indexed path whose bytes no longer exist on disk, so the hash comparison calls it
+  // removed and the payload has to say what happened to it.
+  const deleted: IndexedFileRow | null =
+    options.deletedPath === undefined
+      ? null
+      : {
+          ...file,
+          id: 2,
+          path: options.deletedPath,
+          sha256: EMPTY_SHA,
+          indexedGeneration: options.indexedGeneration ?? GENERATION,
+        };
+  const files = deleted === null ? [file] : [file, deleted];
+  const goneNodes: readonly NodeRow[] =
+    deleted === null
+      ? []
+      : [
+          {
+            ...node(90, "vanished"),
+            fileId: deleted.id,
+            path: deleted.path,
+            qn: `${deleted.path}::vanished`,
+            isTest: false,
+          },
+        ];
 
   return {
     findByQn: () => null,
     findByName: () => [],
     members: () => [],
-    nodesByFile: (fileId) => (fileId === file.id ? [...NODES] : []),
+    nodesByFile: (fileId) =>
+      fileId === file.id ? [...NODES] : goneNodes.filter((row) => row.fileId === fileId),
     inbound: () => [],
     outbound: (): NeighbourEdge[] => [],
     metricsFor: (nodeId) => ({
@@ -124,7 +313,7 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
       reachableCount: nodeId === 1 ? 14 : null,
     }),
     rowsForPaths: () => ({
-      indexed: [file],
+      indexed: files,
       notIndexed: [
         {
           id: 1,
@@ -135,9 +324,10 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
         },
       ],
     }),
-    unresolvedForFiles: () => [],
-    fileByPath: (path) => (path === FIXTURE_PATH ? file : null),
-    allFiles: () => [file],
+    unresolvedForFiles: (fileIds) =>
+      (options.unresolvedRows ?? []).filter((row) => fileIds.includes(row.fileId)),
+    fileByPath: (path) => files.find((row) => row.path === path) ?? null,
+    allFiles: () => [...files],
     censusByLanguage: () => [{ language: "typescript", files: 1, parsed: 1, failed: 0 }],
     metaFor: () => ({
       projectName: "fake",
@@ -153,14 +343,14 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
       publishedAt: INDEXED_AT,
       baseCommit: null,
       worktreeDirty: false,
-      filesIndexed: 1,
+      filesIndexed: files.length,
       nodes: NODES.length,
       edges: 5,
       durationMs: 12,
       mode: "full",
       status: "ok",
     }),
-    removedSymbolsFor: () => [],
+    removedSymbolsFor: () => [...(options.removedSymbols ?? [])],
     entryPoints: (limit) => {
       const rows = (options.entryPointsAtLimit === true ? NAMES : [NAMES[0] ?? ""]).map(
         (name, index) => ({
@@ -187,8 +377,9 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
         },
       ].slice(0, limit),
     testGaps: (ids) =>
-      ids.includes(2)
-        ? [
+      options.noTestGaps === true || !ids.includes(2)
+        ? []
+        : [
             {
               id: 2,
               qn: `${FIXTURE_PATH}::${NAMES[1] ?? ""}`,
@@ -197,20 +388,24 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
               lines: [2, 4] as const,
               testedDepth: null,
             },
-          ]
-        : [],
+          ],
     readNodeFts: () => [],
   };
 }
 
 function contextWith(reader: GraphReader): ToolContext {
+  return contextWithRoot(reader, ROOT);
+}
+
+/** The repository root is the one filesystem fact a handler takes from `ctx.config`. */
+function contextWithRoot(reader: GraphReader, root: string): ToolContext {
   return {
     reader,
     cursor: createCursors({ key: CURSOR_KEY }),
     log,
     now: () => new Date("2026-01-03T00:00:05Z"),
     config: loadConfig({
-      argv: ["--repo-root", ROOT],
+      argv: ["--repo-root", root],
       env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
     }),
   };
@@ -230,10 +425,19 @@ describe("summary: change", () => {
       "risk",
       "suggested_next",
       "test_gaps",
+      "unresolved",
     ]);
     // The diff degraded to the hash comparison, so the file with a wrong stored digest is the
-    // change set — the same answer the integration fixture gets in a plain directory.
-    expect(payload.changed_files).toEqual([FIXTURE_PATH]);
+    // change set — the same answer the integration fixture gets in a plain directory. A plain
+    // modification is labelled `modified`; the counts are the file's own rows, not a second read.
+    expect(payload.changed_files).toEqual([
+      {
+        path: FIXTURE_PATH,
+        state: "modified",
+        symbols: NODES.length,
+        entry_point: true,
+      } satisfies ChangedFileRow,
+    ]);
     expect(payload.changed_symbols).toHaveLength(NODES.length);
     expect(payload.changed_symbols[0]?.risk).toBeGreaterThanOrEqual(
       payload.changed_symbols[1]?.risk ?? 0,
@@ -258,6 +462,9 @@ describe("summary: change", () => {
 
     expect(env.totals.changed_files_total).toBe(1);
     expect(env.totals.changed_symbols_total).toBe(NODES.length);
+    // This fixture carries no unresolved row: the census is present and zero, never absent.
+    expect(payload.unresolved).toEqual(zeroCensus());
+    expect(env.totals.unresolved_material).toBe(0);
     expect(env.totals.total_relation).toBe("gte");
     expect(env.next_tools).toEqual(["impact", "trace", "expand"]);
     // The default 1200-token budget carries this payload whole; only a smaller one pages it.
@@ -271,6 +478,167 @@ describe("summary: change", () => {
     expect(env.read_status.stale).toBe(true);
     expect(env.read_status.stale_reason).toBe("1 file changed since index");
     expect(env.read_status.indexed_at).toBe(INDEXED_AT);
+  });
+
+  test("the census explains the unresolved total, even with no changed files", async () => {
+    const reader = makeReader({ cleanTree: true, unresolvedRows: UNRESOLVED_ROWS });
+    const env = await handle(contextWith(reader), {});
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    // Nothing changed, which is exactly when a flat unresolved count would go unexplained.
+    expect(payload.changed_files).toEqual([]);
+
+    expect(Object.keys(payload.unresolved.buckets).sort()).toEqual([...UNRESOLVED_BUCKETS].sort());
+    expect(payload.unresolved.total).toBe(UNRESOLVED_ROWS.length);
+    // One number, not two counts of the same rows: the payload and coverage cannot disagree.
+    expect(payload.unresolved.total).toBe(env.coverage.unresolved_edges);
+    expect(summed(payload.unresolved.buckets)).toBe(payload.unresolved.total);
+    expect(payload.unresolved.buckets.builtin_stdlib).toBe(1);
+    expect(payload.unresolved.buckets.external_package).toBe(1);
+    expect(payload.unresolved.buckets.internal_module).toBe(1);
+    expect(payload.unresolved.buckets.dynamic_property_call).toBe(1);
+    expect(payload.unresolved.buckets.receiver_type_unknown).toBe(1);
+    expect(payload.unresolved.buckets.ambiguous).toBe(0);
+    // `obj[0]` is recorded exactly when no declared target exists, so only `render` is material.
+    expect(payload.unresolved.material).toBe(1);
+    expect(payload.unresolved.material).toBeLessThanOrEqual(payload.unresolved.total);
+    expect(env.totals.unresolved_material).toBe(payload.unresolved.material);
+
+    // `repo` reads the same rows through the same assembly, so the two scopes cannot disagree.
+    const repo = await handle(contextWith(reader), { scope: "repo" });
+    expect((repo.payload as RepoPayload).unresolved).toEqual(payload.unresolved);
+    expect(repo.totals.unresolved_material).toBe(payload.unresolved.material);
+  });
+
+  /**
+   * An empty change set has nothing to assess, so it may not claim test coverage of anything: the
+   * driver list is the sentence an agent quotes, and "every changed symbol has a test" over zero
+   * symbols is a claim about work nobody did (#10). `test_gaps_total` follows the same rule and
+   * says not-applicable (`null`), never zero. Asserted through the fixture because the checkout
+   * this runs in is dirty and cannot serve as a clean-tree probe.
+   */
+  test("an empty change set claims no test coverage", async () => {
+    const env = await handle(contextWith(makeReader({ cleanTree: true })), {});
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    expect(payload.changed_files).toEqual([]);
+    expect(payload.changed_symbols).toEqual([]);
+    expect(payload.test_gaps).toEqual([]);
+    expect(payload.risk.drivers.length).toBeGreaterThan(0);
+    for (const driver of payload.risk.drivers) {
+      expect(driver).not.toMatch(/test|coverage/i);
+    }
+    // A fact, not a coverage claim, and no untested-changes sentence either.
+    expect(env.summary).toContain("no changed symbols to assess");
+    expect(env.summary).not.toMatch(/test|coverage/i);
+    // Not applicable is null; zero would read as "assessed, nothing missing".
+    expect(env.totals.test_gaps_total).toBeNull();
+  });
+
+  test("one changed file keeps the gap driver and a numeric test-gap total", async () => {
+    const env = await handle(contextWith(makeReader()), {});
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    expect(payload.changed_files).toEqual([
+      { path: FIXTURE_PATH, state: "modified", symbols: NODES.length, entry_point: true },
+    ]);
+    expect(payload.risk.drivers).toContain(
+      `${payload.test_gaps.length} changed symbols have no reachable test`,
+    );
+    expect(
+      payload.risk.drivers.some((driver) => driver.includes("every changed symbol has a test")),
+    ).toBe(false);
+    expect(env.summary).toContain(`${payload.test_gaps.length} untested changes.`);
+    expect(env.totals.test_gaps_total).toBe(payload.test_gaps.length);
+  });
+
+  test("a covered change set keeps the success sentence and a zero total", async () => {
+    const env = await handle(contextWith(makeReader({ noTestGaps: true })), {});
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    expect(payload.changed_files).toEqual([
+      { path: FIXTURE_PATH, state: "modified", symbols: NODES.length, entry_point: true },
+    ]);
+    expect(payload.test_gaps).toEqual([]);
+    expect(payload.risk.drivers).toContain(
+      "every changed symbol has a test within the tested-depth limit",
+    );
+    expect(env.summary).toContain("every changed symbol has a test within the tested-depth limit.");
+    // Zero gaps over a non-empty change set is a measurement, so it stays a number.
+    expect(env.totals.test_gaps_total).toBe(0);
+    expect(env.totals.test_gaps_total).not.toBeNull();
+  });
+
+  /**
+   * A deleted path used to vanish from the change scope: it was in `removed`, which the payload
+   * never rendered, so a summary over a deletion described a tree nobody had. It is now an entry
+   * with `state: "deleted"` and zero symbols — the graph's surviving rows for it are history, not a
+   * change to review — while `removed_symbols` keeps counting what the path used to declare.
+   */
+  test("a deleted tracked file is an entry with state deleted and no symbols to rank", async () => {
+    const env = await handle(
+      contextWith(
+        makeReader({
+          deletedPath: DELETED_PATH,
+          removedSymbols: [
+            {
+              qn: `${DELETED_PATH}::vanished`,
+              kind: "function",
+              fileId: 2,
+              lastSeenGeneration: OLD_GENERATION,
+              removedInGeneration: GENERATION,
+              hadCallers: true,
+            },
+          ],
+        }),
+      ),
+      {},
+    );
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    expect(payload.changed_files).toEqual([
+      { path: FIXTURE_PATH, state: "modified", symbols: NODES.length, entry_point: true },
+      { path: DELETED_PATH, state: "deleted", symbols: 0, entry_point: false },
+    ]);
+    // The graph still holds a node for the deleted path, and the payload still counts none of it.
+    expect(payload.changed_symbols.every((symbol) => symbol.qn.startsWith(FIXTURE_PATH))).toBe(
+      true,
+    );
+    // The symbols are gone from the tree, not from the review: the tombstone is what counts them.
+    expect(payload.removed_symbols).toEqual([
+      { qn: `${DELETED_PATH}::vanished`, kind: "function", had_callers: true },
+    ]);
+    expect(env.totals.removed_symbols_total).toBe(1);
+    // Both entries are files the change set named, so the total counts both of them.
+    expect(env.totals.changed_files_total).toBe(2);
+  });
+
+  /**
+   * A rename is one fact with two paths: the git half reports the destination with a `from`, and the
+   * hash comparison reports the source as `deleted` because its bytes are gone. Rendering both would
+   * count one move as two changed files, which is what a "rename empties the diff" answer looked
+   * like from the outside.
+   */
+  test("a rename is one entry carrying from, and counts as one changed file", async () => {
+    const { root, base } = renamedRepo();
+    const env = await handle(contextWithRoot(makeReader(), root), { base });
+    expect(env.status).toBe("ok");
+
+    const payload = env.payload as ChangePayload;
+    // The destination has no `file` row in this fixture, so it has no symbols yet — a count of 0
+    // rather than a guess — but it is still one entry with the path it came from.
+    expect(payload.changed_files).toEqual([
+      { path: RENAMED_PATH, state: "renamed", from: FIXTURE_PATH, symbols: 0, entry_point: false },
+    ]);
+    // The `deleted` half of the pair is what would double-count the move.
+    expect(payload.changed_files.some((row) => row.path === FIXTURE_PATH)).toBe(false);
+    expect(env.totals.changed_files_total).toBe(1);
+    expect(env.summary).toContain("1 files changed");
   });
 });
 
@@ -287,6 +655,7 @@ describe("summary: repo", () => {
       "languages",
       "not_indexed",
       "size",
+      "unresolved",
     ]);
     expect(payload.size).toEqual({ files: 1, nodes: NODES.length, edges: 5 });
     expect(payload.languages).toEqual([{ language: "typescript", files: 1 }]);
@@ -301,6 +670,8 @@ describe("summary: repo", () => {
       { path: "docs/legacy.xslt", reason: "grammar_unavailable" },
     ]);
     expect(env.totals.not_indexed_total).toBe(1);
+    expect(payload.unresolved).toEqual(zeroCensus());
+    expect(env.totals.unresolved_material).toBe(0);
   });
 
   test("a bounded entry-point list is reported as an item cap", async () => {

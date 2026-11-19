@@ -290,6 +290,9 @@ describe("resolve: ambiguity", () => {
     const result = ambiguousResult(resolve(source, "alpha"));
     expect(result.step).toBe("exact_name");
     expect(result.candidates.length).toBe(2);
+    // Nothing was cut, so the tie size and the shown size are both two.
+    expect(result.candidates_total).toBe(2);
+    expect(result.candidates_shown).toBe(2);
 
     const first = at(result.candidates, 0);
     const second = at(result.candidates, 1);
@@ -322,6 +325,89 @@ describe("resolve: ambiguity", () => {
     const result = ambiguousResult(resolve(fakeResolutionSource(many), "dup"));
     expect(result.candidates.length).toBe(5);
     expect(new Set(result.candidates.map((candidate) => candidate.qn)).size).toBe(5);
+    // The cap hides rows, never the size of the tie: the totals come from the winners before the
+    // slice, and every `why` is built from that same number, so phrase and field cannot disagree.
+    expect(result.candidates_total).toBe(7);
+    expect(result.candidates_shown).toBe(result.candidates.length);
+    expect(result.candidates_total).toBeGreaterThan(result.candidates_shown);
+    expect(at(result.candidates, 0).why).toBe("exact name, 1 of 7 candidates");
+    expect(at(result.candidates, 4).why).toBe("exact name, 5 of 7 candidates");
+    for (const candidate of result.candidates) {
+      expect(candidate.why).toContain(`of ${result.candidates_total} candidates`);
+    }
+  });
+});
+
+describe("resolve: path prefix filter", () => {
+  const DUP_A = nodeOf({ id: 40, name: "dup", qn: "src/a.ts::dup", path: "src/a.ts" });
+  const DUP_NESTED = nodeOf({
+    id: 41,
+    name: "dup",
+    qn: "src/nested/b.ts::dup",
+    path: "src/nested/b.ts",
+  });
+  const DUP_LIB = nodeOf({ id: 42, name: "dup", qn: "lib/c.ts::dup", path: "lib/c.ts" });
+  const source = fakeResolutionSource([DUP_A, DUP_NESTED, DUP_LIB]);
+
+  test("path narrows three same-name candidates to one", () => {
+    expect(ambiguousResult(resolve(source, "dup")).candidates_total).toBe(3);
+    const result = okResult(resolve(source, "dup", { path: "src/nested" }));
+    expect(result.step).toBe("exact_name");
+    expect(result.node.id).toBe(DUP_NESTED.id);
+    // The survivor counts the filtered total, not the unfiltered one.
+    expect(result.why).toBe("exact name, 1 of 1 candidate");
+  });
+
+  test("path keeps a tie that is still a tie inside the prefix", () => {
+    const result = ambiguousResult(resolve(source, "dup", { path: "src" }));
+    expect(result.candidates.map((candidate) => candidate.qn)).toEqual([
+      "src/a.ts::dup",
+      "src/nested/b.ts::dup",
+    ]);
+    expect(result.candidates_total).toBe(2);
+  });
+
+  test("path that excludes every candidate is not_found with only filtered near misses", () => {
+    // `dup.nope` is no step's match, and unfiltered its miss lists all three `dup` symbols.
+    expect(notFoundResult(resolve(source, "dup.nope")).near_misses.length).toBe(3);
+    const excluded = notFoundResult(resolve(source, "dup.nope", { path: "nowhere" }));
+    expect(excluded.near_misses).toEqual([]);
+    // A prefix that holds one of them keeps exactly that one, inside it.
+    const inside = notFoundResult(resolve(source, "dup.nope", { path: "lib" }));
+    expect(inside.near_misses.map((candidate) => candidate.qn)).toEqual(["lib/c.ts::dup"]);
+  });
+
+  test("path filters the dotted-tail, path and decorator steps too", () => {
+    const alpha = fakeResolutionSource(RESOLVE_NODES);
+    expect(okResult(resolve(alpha, "Beta.alpha", { path: "src" })).node.id).toBe(ALPHA_METHOD.id);
+    expect(resolve(alpha, "Beta.alpha", { path: "lib" }).status).toBe("not_found");
+
+    expect(okResult(resolve(alpha, "src/a.ts", { path: "src" })).step).toBe("path");
+    expect(resolve(alpha, "src/a.ts", { path: "lib" }).status).toBe("not_found");
+
+    const decorated = fakeResolutionSource(RESOLVE_NODES, () => [BETA]);
+    expect(okResult(resolve(decorated, "@Injectable", { path: "src/a.ts" })).node.id).toBe(BETA.id);
+    expect(resolve(decorated, "@Injectable", { path: "lib" }).status).toBe("not_found");
+  });
+
+  test("a filtered exact qn never answers from outside the prefix", () => {
+    const alpha = fakeResolutionSource(RESOLVE_NODES);
+    expect(okResult(resolve(alpha, "src/b.ts::zeta", { path: "src/b.ts" })).node.id).toBe(ZETA.id);
+    expect(resolve(alpha, "src/b.ts::zeta", { path: "src/a.ts" }).status).toBe("not_found");
+  });
+
+  test("no path, an empty path and an empty options object answer as before", () => {
+    const alpha = fakeResolutionSource(RESOLVE_NODES);
+    const plain = ambiguousResult(resolve(alpha, "alpha"));
+    expect(ambiguousResult(resolve(alpha, "alpha", {})).candidates).toEqual(plain.candidates);
+    expect(ambiguousResult(resolve(alpha, "alpha", { path: "" })).candidates).toEqual(
+      plain.candidates,
+    );
+    expect(ambiguousResult(resolve(alpha, "alpha", { path: "   " })).candidates).toEqual(
+      plain.candidates,
+    );
+    // The pre-options call shape still means `{ kinds }`.
+    expect(okResult(resolve(alpha, "alpha", ["function"])).node.id).toBe(ALPHA_FUNCTION.id);
   });
 });
 

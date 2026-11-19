@@ -1,7 +1,19 @@
 #!/usr/bin/env bun
 
-// Module scope: the dispatch below uses top-level await.
-export {};
+import { guardRuntime, readRuntime } from "../src/shared/runtime";
+
+/**
+ * The runtime preflight, first statement of the process: nothing that opens a database has been
+ * loaded yet, so a refusal costs no connection and no store. The one case it cannot catch is a
+ * missing `bun` binary — the shebang fails before this file is parsed, so that error is the
+ * shell's, not ours, and no line here can report it.
+ */
+const refusal = guardRuntime(readRuntime());
+
+// Checked before `--help`: an interpreter that cannot run the product cannot print its help either.
+if (refusal !== null) {
+  process.exit(refusal);
+}
 
 /**
  * The verbs this process owns; every other first token is a tool name. `index` is both on purpose:

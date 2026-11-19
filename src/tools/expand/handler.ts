@@ -11,7 +11,8 @@
  * `findByName`, `fileByPath`, `members` and `nodesByFile`, and inventing an id index here would
  * be a query shape the store does not have). So:
  *
- * - a qualified name (`path::scope.name`) or a bare name resolves through `#shared/domain/resolve`;
+ * - a qualified name (`path::scope.name`) or a bare name resolves through `#shared/domain/resolve`,
+ *   narrowed by the optional `path` prefix the same way `trace` and `search` narrow it;
  * - a repo-relative path resolves to the file node that owns it, or to a symbol declared in it;
  * - a folder prefix resolves to nothing at all — it is answered from coverage rows;
  * - a bare numeric id is refused with a hint naming the qn form. It is not silently reinterpreted
@@ -28,6 +29,17 @@
  * observed drift in the bytes it read, and `stale_checked_at` is present exactly when a check ran.
  * A mode that read no bytes omits it rather than claiming a working-tree verdict it did not
  * compute — `status` owns the repo-wide check.
+ *
+ * The window of a source answer. The node's own extent is the single effective span: `range`
+ * narrows inside it and never adds a second window field, so a caller reads `payload.window` and
+ * nothing else. A `range` that leaves the extent clamps and says so in `why`; one that arrives
+ * inverted selects nothing. Neither is an error, because a line the node does not occupy is a
+ * request this answer cannot honour, not a malformed call.
+ *
+ * `outline` is the graph-only answer to "what does this container declare": the reader's
+ * `members` for a class-like node, `nodesByFile` for a file, in the store's own source order, with
+ * each member's signature so a caller can choose without opening the file (the same reason
+ * `members` ships degrees).
  */
 import { isAbsolute, relative, resolve as resolvePath } from "node:path";
 import { budgetFloorOf, emit } from "#shared/budget";
@@ -37,7 +49,11 @@ import {
   expand as expandNeighbours,
   type NeighbourGroup,
 } from "#shared/domain/neighbors";
-import { type ResolutionCandidate, resolve as resolveTarget } from "#shared/domain/resolve";
+import {
+  type ResolutionCandidate,
+  type ResolveOptions,
+  resolve as resolveTarget,
+} from "#shared/domain/resolve";
 import {
   ambiguous,
   bootstrapping,
@@ -61,8 +77,10 @@ import { DEFAULT_BUDGET_TOKENS, input } from "./manifest";
 export const TOOL_NAME = "expand";
 
 /**
- * The four detail modes, in the order `TOOLS-SPEC.md` §7 lists them. Taken from the manifest's own
- * enum so the declared schema and the inference table cannot drift apart.
+ * The five detail modes, in the order `TOOLS-SPEC.md` §7 lists them. Taken from the manifest's own
+ * enum so the declared schema and the inference table cannot drift apart. `outline` is the one
+ * mode that is never inferred: it is a table of contents for a container whose default detail is
+ * already `members`, so the caller has to ask for the flatter shape by name.
  */
 export const EXPAND_WHATS = input.what.values;
 export type ExpandWhat = (typeof EXPAND_WHATS)[number];
@@ -73,6 +91,14 @@ export type LineWindow = readonly [start: number, end: number];
 export interface ExpandArgs {
   target: string;
   what?: ExpandWhat;
+  /** A repo-relative prefix the resolved node must sit under; absent means the whole graph. */
+  path?: string;
+  /**
+   * `[from, to]` lines of a `what: "source"` answer, 1-based and inclusive. `readonly number[]`
+   * rather than a tuple because the manifest declares an array — the schema cannot say "exactly
+   * two" — so the handler defends itself instead of trusting the parser's width.
+   */
+  range?: readonly number[];
   budget?: number;
 }
 
@@ -174,10 +200,72 @@ export interface SourcePayload {
   readonly content: SourceLine[] | null;
 }
 
-/** A target that matched more than one node; the envelope carries no answer body beside these. */
+/**
+ * One member of an outline: the address, where it sits, and what it takes. `signature` rather than
+ * `name` because an outline is read to choose a symbol, and two methods of one class can share a
+ * name while differing in arity (`TOOLS-SPEC.md` §7's member list with signatures). It is `null`
+ * when the grammar gave none, which is not the same as an empty signature.
+ */
+export interface OutlineMember {
+  readonly qn: string;
+  readonly kind: string;
+  readonly lines: LineWindow;
+  readonly signature: string | null;
+}
+
+/**
+ * A container's table of contents. `members` is a different list from {@link MembersPayload} on
+ * purpose: that one is the expansion's answer body with degrees, this one is what a file or class
+ * declares, read to pick the next target.
+ */
+export interface OutlinePayload {
+  readonly target: TargetRef;
+  readonly what: "outline";
+  readonly why: string;
+  readonly path: string;
+  readonly members: OutlineMember[];
+}
+
+/**
+ * The follow-up a candidate carries, ready to send back verbatim. A tie leaves the agent holding
+ * several addresses and no way to pick one; restating each candidate's `qn` as an `expand`
+ * `target` is what turns "5 of 7 shown" into one call rather than a reassembly from `file` and
+ * `lines`.
+ */
+export interface NextCall {
+  readonly tool: "expand";
+  readonly target: string;
+}
+
+/** One tied match, plus the call that expands exactly it. */
+export interface Candidate extends ResolutionCandidate {
+  readonly next_call: NextCall;
+}
+
+/**
+ * The per-list counts of an expansion, plus the two an ambiguous one needs. `Totals` types every
+ * list count as `<name>_total`, which is why `candidates_shown` — how much of the tie was served,
+ * not how much the tie held — is declared beside it rather than folded into a name that would lie.
+ */
+export interface ExpandTotals extends Totals {
+  readonly candidates_total: number;
+  readonly candidates_shown: number;
+}
+
+/**
+ * A target that matched more than one node; the envelope carries no answer body beside these.
+ *
+ * `candidates_total` is the size of the tie *before* the contract cap, so an answer that shows
+ * five of seven says so; `candidates_shown` is the width the cap allowed. Both are copied from the
+ * `Resolution` rather than recounted here, which is what keeps one tool from disagreeing with
+ * another about the same ambiguous name. A budget cut inside the cap is a separate fact and the
+ * envelope states it itself (`truncated`, `next`).
+ */
 export interface AmbiguousPayload {
   readonly target: string;
-  readonly candidates: readonly ResolutionCandidate[];
+  readonly candidates: readonly Candidate[];
+  readonly candidates_total: number;
+  readonly candidates_shown: number;
   readonly hint: string;
 }
 
@@ -192,6 +280,7 @@ export type ExpandPayload =
   | MembersPayload
   | EdgesPayload
   | CoveragePayload
+  | OutlinePayload
   | SourcePayload
   | AmbiguousPayload
   | MissingPayload;
@@ -280,6 +369,16 @@ function isExpandWhat(value: unknown): value is ExpandWhat {
 }
 
 /**
+ * The narrowing `resolve` takes, or `undefined` when the caller sent no `path`. Built rather than
+ * spread so an absent prefix stays absent: `exactOptionalPropertyTypes` makes `{ path: undefined }`
+ * a different (and here illegal) value from the absence of the filter, which is the answer the
+ * caller would have got before the argument existed.
+ */
+function resolveOptionsOf(path: string | undefined): ResolveOptions | undefined {
+  return path === undefined ? undefined : { path };
+}
+
+/**
  * `stale_checked_at` is the difference between "we looked" and "we assume": it is stamped only
  * when this call actually compared bytes against the index, so its absence means "not checked by
  * this tool", never "checked and fresh".
@@ -362,6 +461,30 @@ function memberRowsOf(reader: GraphReader, node: NodeRow): MemberRow[] {
   }));
 }
 
+/**
+ * A container's outline: what it declares, in source order.
+ *
+ * A file's outline is every node the file holds (`nodesByFile`), which is the flat table of
+ * contents a caller reads to find a symbol without opening the file. Everything else is a
+ * container whose outline is its direct children (`members`), so a class lists its methods and a
+ * callable lists nothing. Both store queries sort by `start_line, qn`, so this maps and does not
+ * re-sort: one source order, not two that could disagree. The node's own row is dropped from a
+ * file's list — `target` already states the address and the whole file's extent, and repeating it
+ * as its own member would read as a child.
+ */
+function outlineRowsOf(reader: GraphReader, node: NodeRow): OutlineMember[] {
+  const rows =
+    node.kind === "file"
+      ? reader.nodesByFile(node.fileId).filter((row) => row.id !== node.id)
+      : reader.members(node.id);
+  return rows.map((row) => ({
+    qn: row.qn,
+    kind: row.kind,
+    lines: [row.startLine, row.endLine],
+    signature: row.signature,
+  }));
+}
+
 function fileRowsOf(rows: readonly IndexedFileRow[]): CoverageFileRow[] {
   return rows.map((row) => ({
     id: row.id,
@@ -433,6 +556,51 @@ function windowLines(text: string, from: number, to: number): SourceLine[] {
   return lines;
 }
 
+function clamp(value: number, low: number, high: number): number {
+  return Math.min(Math.max(value, low), high);
+}
+
+/** The node's own line span, `[start, end]`, never inverted: a caller's `range` is read inside it. */
+function extentOf(node: NodeRow): LineWindow {
+  const start = Math.max(1, node.startLine);
+  return [start, Math.max(start, node.endLine)];
+}
+
+/**
+ * The window a `what: "source"` answer reads, plus the sentence `why` gains when the caller's
+ * `range` was not honoured as written.
+ *
+ * Both ends clamp into the node's own extent: a line outside the node is not part of the answer
+ * this node can give, so the request narrows instead of failing. A pair that arrives inverted
+ * selects nothing rather than being silently reordered — the caller asked for a span that cannot
+ * exist, and an empty `content` says so where a reordered window would look like an answer.
+ * Neither case throws: a caller's bad input is answered and disclosed (`DESIGN.md` §10).
+ */
+function sourceWindowOf(
+  node: NodeRow,
+  range: readonly number[] | undefined,
+): { readonly window: LineWindow; readonly note: string | null } {
+  const extent = extentOf(node);
+  const [start, end] = extent;
+  if (range === undefined) {
+    return { window: extent, note: null };
+  }
+  const from = range[0];
+  const to = range[1];
+  if (range.length !== 2 || from === undefined || to === undefined) {
+    return { window: extent, note: "range ignored: pass exactly two integers, [from, to]" };
+  }
+  const asked = `range ${from}-${to}`;
+  const window: LineWindow = [clamp(from, start, end), clamp(to, start, end)];
+  if (to < from) {
+    return { window, note: `${asked} is inverted, so no lines were selected` };
+  }
+  if (window[0] === from && window[1] === to) {
+    return { window, note: null };
+  }
+  return { window, note: `${asked} clamped to the node's extent ${start}-${end}` };
+}
+
 /** A cursor `argsHash` in the shape `tests/cursor.test.ts` already uses: `sha256:<hex>`. */
 function argsHashOf(target: string, what: ExpandWhat | null): string {
   const digest = new Bun.CryptoHasher("sha256")
@@ -445,6 +613,13 @@ function membersSummary(payload: MembersPayload, totals: Totals, truncated: bool
   const shown = payload.members.length;
   const total = totals.members_total ?? shown;
   const head = `members of ${labelOf(payload.target)}`;
+  return truncated ? `${head}, showing ${shown} of ${total}.` : `${head}: ${total}.`;
+}
+
+function outlineSummary(payload: OutlinePayload, totals: Totals, truncated: boolean): string {
+  const shown = payload.members.length;
+  const total = totals.members_total ?? shown;
+  const head = `outline of ${labelOf(payload.target)}`;
   return truncated ? `${head}, showing ${shown} of ${total}.` : `${head}: ${total}.`;
 }
 
@@ -469,6 +644,11 @@ function coverageSummary(payload: CoveragePayload, totals: Totals, truncated: bo
 function sourceSummary(payload: SourcePayload): string {
   if (payload.source_drift) {
     return `${payload.path} changed since the index: no source returned.`;
+  }
+  // An inverted range or a window past the end of the file selects nothing. Saying so beats
+  // "lines 8-5", and an empty list must read as an answer rather than as a missing one.
+  if (payload.content !== null && payload.content.length === 0) {
+    return `no lines of ${payload.path} in ${payload.window[0]}-${payload.window[1]}.`;
   }
   return `lines ${payload.window[0]}-${payload.window[1]} of ${payload.path}.`;
 }
@@ -578,19 +758,32 @@ export async function handle(
     );
   }
 
-  const resolution = resolveTarget(ctx.reader, target);
+  const resolution = resolveTarget(ctx.reader, target, resolveOptionsOf(args.path));
 
   if (resolution.status === "ambiguous") {
-    const candidates = resolution.candidates;
+    const candidates: Candidate[] = resolution.candidates.map((candidate) => ({
+      ...candidate,
+      next_call: { tool: TOOL_NAME, target: candidate.qn },
+    }));
     const payload: AmbiguousPayload = {
       target,
       candidates,
+      candidates_total: resolution.candidates_total,
+      candidates_shown: resolution.candidates_shown,
       hint: "pass the qn of the item you meant; expand never picks one of a tie",
+    };
+    const totals: ExpandTotals = {
+      candidates_total: resolution.candidates_total,
+      candidates_shown: resolution.candidates_shown,
+      total_relation: "gte",
     };
     const spec = {
       ...base,
-      summary: `"${target}" matches ${candidates.length} nodes; pass the qn of the one you meant`,
-      totals: { candidates_total: candidates.length, total_relation: "gte" as const },
+      summary:
+        resolution.candidates_total === resolution.candidates_shown
+          ? `"${target}" matches ${resolution.candidates_total} nodes; pass the qn of the one you meant`
+          : `"${target}" matches ${resolution.candidates_total} nodes, showing ${resolution.candidates_shown}; pass the qn of the one you meant`,
+      totals,
     };
     return sized(
       ctx,
@@ -634,6 +827,7 @@ export async function handle(
       node,
       what: chosen,
       why,
+      ...(args.range === undefined ? {} : { range: args.range }),
     });
   }
 
@@ -697,6 +891,8 @@ interface AnswerRequest {
   readonly node: NodeRow;
   readonly what: ExpandWhat;
   readonly why: string;
+  /** Only `what: "source"` reads it; every other mode is answerable from the graph alone. */
+  readonly range?: readonly number[];
 }
 
 /** Dispatches one resolved node to its detail mode. Each mode is its own answer. */
@@ -704,7 +900,7 @@ async function answerFor(
   ctx: ToolContext,
   request: AnswerRequest,
 ): Promise<Envelope<ExpandPayload | null>> {
-  const { generation, indexedAt, now, budget, target, node, what, why } = request;
+  const { generation, indexedAt, now, budget, target, node, what, why, range } = request;
 
   if (what === "members") {
     const scope = scopeOf(ctx.reader, generation, indexedAt, [node.path], FRESH, now);
@@ -783,6 +979,35 @@ async function answerFor(
     });
   }
 
+  if (what === "outline") {
+    const scope = scopeOf(ctx.reader, generation, indexedAt, [node.path], FRESH, now);
+    const payload: OutlinePayload = {
+      target: targetRefOf(node),
+      what: "outline",
+      why,
+      path: node.path,
+      members: outlineRowsOf(ctx.reader, node),
+    };
+    const totals: Totals = {
+      members_total: payload.members.length,
+      total_relation: scope.relation,
+    };
+    return sized(
+      ctx,
+      generation,
+      { target, what },
+      budget,
+      ok(payload, {
+        summary: outlineSummary(payload, totals, false),
+        read_status: scope.read_status,
+        coverage: scope.coverage,
+        next_tools: NEXT_TOOLS,
+        totals,
+      }),
+      (env) => outlineSummary(env.payload, env.totals, env.truncated),
+    );
+  }
+
   // `source`: the only mode that reads bytes, and therefore the only one that can report drift.
   const file = ctx.reader.fileByPath(node.path);
   if (file === null) {
@@ -821,17 +1046,20 @@ async function answerFor(
   const drifted = bytes === null || sha256Of(bytes) !== file.sha256.toLowerCase();
   const freshness: Freshness = drifted ? { stale: true, reason: driftReason } : FRESH;
   const scope = scopeOf(ctx.reader, generation, indexedAt, [node.path], freshness, now);
-  const from = Math.max(1, node.startLine);
-  const to = Math.max(from, node.endLine);
+  // The node's extent is the single effective span, `range` narrows inside it, and the clamp is
+  // disclosed in `why` rather than in a second window field: one window, one place to read it.
+  const plan = sourceWindowOf(node, range);
   const content =
-    drifted || bytes === null ? null : windowLines(new TextDecoder().decode(bytes), from, to);
+    drifted || bytes === null
+      ? null
+      : windowLines(new TextDecoder().decode(bytes), plan.window[0], plan.window[1]);
   const payload: SourcePayload = {
     target: targetRefOf(node),
     what: "source",
-    why,
+    why: plan.note === null ? why : `${why}; ${plan.note}`,
     path: node.path,
     source_drift: drifted,
-    window: [from, to],
+    window: plan.window,
     content,
   };
   const totals: Totals = {

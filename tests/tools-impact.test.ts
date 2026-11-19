@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { BYTES_PER_TOKEN } from "#shared/budget";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
+import { UNRESOLVED_BUCKETS } from "#shared/domain/unresolved";
 import type { Envelope } from "#shared/envelope";
 import { log } from "#shared/log";
 import { isUnderPrefix } from "#shared/paths";
@@ -17,7 +18,12 @@ import type {
   NodeRow,
   UnresolvedRef,
 } from "#shared/store/read/reader";
-import { handle, type ImpactPayload } from "../src/tools/impact/handler";
+import {
+  handle,
+  type ImpactPayload,
+  type ImpactTotals,
+  type UnresolvedCensus,
+} from "../src/tools/impact/handler";
 import { input, manifest } from "../src/tools/impact/manifest";
 
 /**
@@ -46,6 +52,30 @@ const TS_A_CHANGED = "export const alpha = 2;\n";
 const README = "# fixture\n";
 
 const CURSORS = createCursors({ key: CURSOR_KEY });
+
+/**
+ * An empty scope measured nothing, and the answer says so bucket by bucket rather than omitting
+ * the key: a missing `unresolved` would read as "nothing unresolved".
+ */
+function zeroCensus(): UnresolvedCensus {
+  return {
+    total: 0,
+    material: 0,
+    buckets: {
+      builtin_stdlib: 0,
+      external_package: 0,
+      internal_module: 0,
+      dynamic_property_call: 0,
+      receiver_type_unknown: 0,
+      ambiguous: 0,
+    },
+  };
+}
+
+/** The census must account for every row it counted, and for no row twice. */
+function summed(buckets: Readonly<Record<string, number>>): number {
+  return Object.values(buckets).reduce((total, count) => total + count, 0);
+}
 
 const dirs: string[] = [];
 
@@ -350,6 +380,37 @@ function gitRepo(): string {
   return root;
 }
 
+/** A commit id, so a rename can be measured against the tree that predates it. */
+function rev(root: string, ref: string): string {
+  const result = Bun.spawnSync({
+    cmd: ["git", "--no-pager", "-C", root, "rev-parse", ref],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`git rev-parse ${ref} failed: ${result.stderr.toString()}`);
+  }
+  return result.stdout.toString().trim();
+}
+
+/** `git mv` plus a commit: only git can report a move as one rename record. */
+function renameInRepo(root: string, from: string, to: string): void {
+  git(root, "mv", from, to);
+  git(
+    root,
+    "-c",
+    "user.name=impact fixture",
+    "-c",
+    "user.email=impact@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "rename",
+  );
+}
+
 /** The description the model sees, lifted from the spec so the two cannot drift silently. */
 function specDescription(): string {
   const spec = readFileSync(
@@ -391,9 +452,17 @@ describe("impact handler: an explicit change set", () => {
 
     expect(result.status).toBe("ok");
     const payload = payloadOf(result);
-    expect(Object.keys(payload).sort()).toEqual(["changed", "impacted", "risk", "unmatched_files"]);
+    expect(Object.keys(payload).sort()).toEqual([
+      "changed",
+      "impacted",
+      "risk",
+      "unmatched_files",
+      "unresolved",
+    ]);
 
-    expect(payload.changed).toEqual([{ path: "src/a.ts", symbols: 1, entry_point: false }]);
+    expect(payload.changed).toEqual([
+      { path: "src/a.ts", state: "modified", symbols: 1, entry_point: false },
+    ]);
     expect(payload.unmatched_files).toEqual([{ path: "docs/notes.md", reason: "not_indexed" }]);
 
     expect(payload.impacted).toEqual([
@@ -426,7 +495,11 @@ describe("impact handler: an explicit change set", () => {
     // An explicit change set was never compared to the working tree, so freshness is not claimed.
     expect(result.read_status.stale).toBe(true);
     expect(result.read_status.stale_reason).toContain("explicitly");
-    expect(result.totals).toEqual({ impacted_total: 2, total_relation: "gte" });
+    expect(result.totals as ImpactTotals).toEqual({
+      impacted_total: 2,
+      unresolved_material: 0,
+      total_relation: "gte",
+    });
     expect(result.truncated).toBe(false);
     expect(result.next).toBeNull();
     expect(result.next_tools).toEqual(["trace", "expand"]);
@@ -475,13 +548,35 @@ describe("impact handler: an explicit change set", () => {
           evidenceKind: null,
           evidence: null,
         },
+        {
+          id: 8,
+          fileId: 1,
+          path: "src/a.ts",
+          line: 13,
+          rawTarget: "obj[0]",
+          evidenceKind: "dynamic",
+          evidence: "call:obj[0]",
+        },
       ],
     });
     const result = await handle(contextOf(reader, tempDir("cg-impact-unresolved-")), {
       paths: ["src/a.ts"],
     });
-    expect(result.coverage.unresolved_edges).toBe(1);
+    expect(result.coverage.unresolved_edges).toBe(2);
     expect(result.totals.total_relation).toBe("gte");
+
+    // The flat count is explained: which rows exist, and which of them could still be user code.
+    const payload = payloadOf(result);
+    expect(Object.keys(payload.unresolved.buckets).sort()).toEqual([...UNRESOLVED_BUCKETS].sort());
+    expect(payload.unresolved.buckets.receiver_type_unknown).toBe(1);
+    expect(payload.unresolved.buckets.dynamic_property_call).toBe(1);
+    expect(summed(payload.unresolved.buckets)).toBe(payload.unresolved.total);
+    // One number, not two counts of the same rows: the payload and coverage cannot disagree.
+    expect(payload.unresolved.total).toBe(result.coverage.unresolved_edges);
+    // `obj[0]` is recorded exactly when no declared target exists, so only `mystery` is material.
+    expect(payload.unresolved.material).toBe(1);
+    expect(payload.unresolved.material).toBeLessThanOrEqual(payload.unresolved.total);
+    expect((result.totals as ImpactTotals).unresolved_material).toBe(payload.unresolved.material);
   });
 });
 
@@ -505,11 +600,14 @@ describe("impact handler: the working-tree diff", () => {
       impacted: [],
       unmatched_files: [],
       risk: { score: 0, band: "low", drivers: expect.any(Array) as unknown as string[] },
+      // An empty change set measured nothing, so the census is present and zero, never absent.
+      unresolved: zeroCensus(),
     });
     expect(result.read_status.stale).toBe(false);
     expect(result.read_status.stale_reason).toBeUndefined();
     expect(result.summary).toBe("no changed files against HEAD: nothing to impact");
     expect(result.totals.impacted_total).toBe(0);
+    expect((result.totals as ImpactTotals).unresolved_material).toBe(0);
     expect(result.truncated).toBe(false);
     expect(result.next).toBeNull();
   });
@@ -527,12 +625,83 @@ describe("impact handler: the working-tree diff", () => {
 
     expect(result.status).toBe("ok");
     expect(payloadOf(result).changed).toEqual([
-      { path: "src/a.ts", symbols: 1, entry_point: false },
+      { path: "src/a.ts", state: "modified", symbols: 1, entry_point: false },
     ]);
     expect(idsOf(result)).toEqual([2]);
     expect(result.read_status.stale).toBe(true);
     expect(result.read_status.stale_reason).toBe("1 file changed since index");
     expect(result.summary).toContain("1 changed files reach 1 nodes in 1 files");
+  });
+
+  /**
+   * A deleted file was counted only as a number before (`changeSet.removed.length`), so an impact
+   * report over a deletion named a blast radius with the deletion itself invisible. The row is now
+   * an entry — with zero symbols, because its bytes are gone — and it seeds nothing: the graph's
+   * surviving rows for that path are history, and walking them would invent a blast radius.
+   */
+  test("a deleted tracked file is one entry with state deleted and no symbols to rank", async () => {
+    const root = tempDir("cg-impact-deleted-");
+    write(root, "src/a.ts", TS_A);
+    const alpha = nodeOf({ id: 1, fileId: 1, path: "src/a.ts", name: "alpha" });
+    const beta = nodeOf({ id: 2, fileId: 2, path: "src/b.ts", name: "beta" });
+    const gamma = nodeOf({ id: 3, fileId: 3, path: "src/c.ts", name: "gamma" });
+    const reader = makeReader({
+      // `src/a.ts` matches its stored digest; `src/b.ts` has no bytes left to match.
+      files: [fileRow(1, "src/a.ts", sha256(TS_A)), fileRow(2, "src/b.ts")],
+      nodes: new Map([
+        [1, [alpha]],
+        [2, [beta]],
+      ]),
+      // A dependant behind the deleted file: nothing may be reached from a path that is gone.
+      inbound: new Map([
+        [2, [inboundEdge({ id: 20, from: gamma, toId: 2, kind: "calls", tier: "extracted" })]],
+      ]),
+      metrics: new Map([
+        [1, metricsOf({ nodeId: 1, testedDepth: 0 })],
+        [2, metricsOf({ nodeId: 2, inDegree: 1, testedDepth: 0 })],
+      ]),
+    });
+
+    const result = await handle(contextOf(reader, root), {});
+
+    const payload = payloadOf(result);
+    expect(payload.changed).toEqual([
+      { path: "src/b.ts", state: "deleted", symbols: 0, entry_point: false },
+    ]);
+    expect(payload.impacted).toEqual([]);
+    // A deletion is a changed file the graph can explain, not an unmatched one.
+    expect(payload.unmatched_files).toEqual([]);
+    expect(result.read_status.stale_reason).toBe("1 path removed since index");
+    expect(result.summary).toContain("1 changed files reach no dependents within 2 hops");
+  });
+
+  /**
+   * A rename arrives as two entries from the diff — the git half's `renamed` destination and the
+   * hash comparison's `deleted` source — and a payload that rendered both would count one move as
+   * two changed files. The fixture holds a row for both paths because that is the state that
+   * produces the pair; the assertion is that only the rename survives.
+   */
+  test("a rename is one entry carrying from, not a rename plus a deletion", async () => {
+    const root = gitRepo();
+    const base = rev(root, "HEAD");
+    renameInRepo(root, "src/a.ts", "src/c.ts");
+    const delta = nodeOf({ id: 2, fileId: 2, path: "src/c.ts", name: "alpha" });
+    const reader = makeReader({
+      files: [fileRow(1, "src/a.ts", sha256(TS_A)), fileRow(2, "src/c.ts", sha256(TS_A))],
+      nodes: new Map([[2, [delta]]]),
+      metrics: new Map([[2, metricsOf({ nodeId: 2, testedDepth: 0 })]]),
+    });
+
+    const result = await handle(contextOf(reader, root), { base });
+
+    const payload = payloadOf(result);
+    expect(payload.changed).toEqual([
+      { path: "src/c.ts", state: "renamed", from: "src/a.ts", symbols: 1, entry_point: false },
+    ]);
+    // The `deleted` half of the pair is exactly what would double-count the move.
+    expect(payload.changed.some((row) => row.path === "src/a.ts")).toBe(false);
+    expect(payload.unmatched_files).toEqual([]);
+    expect(result.summary).toContain("1 changed files reach no dependents within 2 hops");
   });
 
   test("a changed markdown file appears in unmatched_files with the diff's reason", async () => {
@@ -583,7 +752,11 @@ describe("impact handler: paging", () => {
     const firstIds = idsOf(first);
     expect(first.truncated).toBe(true);
     expect(first.truncation_reason).toBe("budget");
-    expect(first.totals).toEqual({ impacted_total: 80, total_relation: "gte" });
+    expect(first.totals as ImpactTotals).toEqual({
+      impacted_total: 80,
+      unresolved_material: 0,
+      total_relation: "gte",
+    });
     // A partial page, not an empty one: the fixture is large enough that the budget cuts it.
     expect(firstIds.length).toBeGreaterThan(0);
     expect(firstIds.length).toBeLessThan(80);

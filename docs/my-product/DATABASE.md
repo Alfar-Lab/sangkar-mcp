@@ -49,7 +49,7 @@ erDiagram
 
     meta {
         text key PK
-        text value "schema_version, generation, project_name, project_root"
+        text value "schema_version, generation, project_name, project_root, project_branch, project_remote"
     }
     generation {
         text id PK "g-7f3a91"
@@ -175,13 +175,27 @@ it instead of leaving an orphan in a cache.
 ### 3.1 Identity, generation, health
 
 There is no `project` table. A one-row table with `CHECK (id = 1)` is a smell, and the database's own
-location already supplies most of what it would hold. What must persist is **three keys in `meta`**:
+location already supplies most of what it would hold. What must persist is **four identity keys in
+`meta`**, written by the publisher (§5) from the tree it indexed:
 
 | key | value | why it cannot be derived |
 |---|---|---|
 | `project_name` | repo basename at first index | display identity; a later rename should not rewrite it |
-| `project_root` | absolute path at first index | the only guard against answering about the wrong tree after a `--data-dir` override, a copied database, or a moved checkout |
-| `created_at` | ISO timestamp | diagnostics |
+| `project_root` | absolute repo root at first index | the only guard against answering about the wrong tree after a `--data-dir` override, a copied database, or a moved checkout |
+| `project_branch` | `git symbolic-ref --short HEAD` at publish | the branch the answer was built on; `""` when `HEAD` is detached or git cannot answer |
+| `project_remote` | `git config --get remote.origin.url` at publish | which clone this is; `""` when the clone has no origin |
+
+`project_name` and `project_root` are written **once**: the name is display identity, and the root is
+the `root_mismatch` guard, so a re-index of a moved checkout has to report the mismatch rather than
+erase it. `project_branch` and `project_remote` describe what the tree is on *now*, so each publish
+refreshes them. Both git reads are **best-effort**: a non-zero exit, a missing binary or a timeout
+records the empty string, and an identity the tree cannot supply never costs the generation.
+
+A store published by a build that predates these keys keeps no identity row at all, so every one of
+them reads as absent, and a reader maps absent **and** empty to `null` — never `""`, which would read
+like a name that is blank rather than a fact the graph does not have. `status.project.branch` and
+`.remote` answer `null` for such a store, and opening it logs `store.identity_unrecorded` instead of
+failing: the guard has no root to compare, so the graph is served and the gap is named.
 
 `project_root` is a *check*, not a lookup: on open it is compared against the database's location and the
 current working directory, and a disagreement becomes `root_mismatch` in `read_status.stale_reason`
@@ -194,10 +208,11 @@ CREATE TABLE meta (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
--- keys: schema_version, generation, generation_seq, indexer_state,
---       last_publish_ms, consecutive_failures, last_stale_check_at,
---       fts_synced (mirror-shape version), embed_dim (NULL when no vectors),
---       project_name, project_root, created_at
+-- keys: schema_version, generation, generation_seq, indexer_state, rebuild_required,
+--       consecutive_failures, project_name, project_root, project_branch, project_remote
+-- not written by this build: last_publish_ms (derived from generation.duration_ms at read time),
+-- last_stale_check_at, fts_synced, embed_dim — none of them is recorded state; §3.5 and §3.6
+-- describe the paths that would write the last two.
 
 -- publish history; the current generation is meta.generation (eq: MAX(seq))
 CREATE TABLE generation (
@@ -253,7 +268,7 @@ CREATE TABLE unresolved (
     file_id       INTEGER NOT NULL REFERENCES file(id) ON DELETE CASCADE,
     line          INTEGER NOT NULL,
     raw_target    TEXT    NOT NULL,
-    evidence_kind TEXT,         -- receiver_type_unknown | dynamic | ambiguous
+    evidence_kind TEXT,         -- receiver_type_unknown | ambiguous | dynamic | missing_module (§7.1)
     evidence      TEXT,
     UNIQUE (file_id, line, raw_target)
 );
@@ -438,6 +453,7 @@ write:  BEGIN IMMEDIATE
           update node_fts_state + node_fts (delta, or rebuild past 35 % of rows)
           append tombstones for nodes that disappeared
           insert generation row; set meta.generation
+          write the project_* identity keys (§3.1)
         COMMIT
 seal:   PRAGMA wal_checkpoint(TRUNCATE); journal_mode=DELETE; synchronous=FULL
         PRAGMA quick_check(1)
@@ -452,7 +468,13 @@ Rules carried over from CBM because they are the ones that survived concurrency:
   `read_write_lock_holder` semantics so a contended caller can report *who* holds it (CRG's
   `{status: contended, holder_pid}` — the pattern that made its build failures diagnosable at all);
 - `meta.indexer_state` + `consecutive_failures` are written even on failure, which is what
-  `status.health` reports.
+  `status.health` reports;
+- the identity keys are written **inside the publish transaction**, in the same transaction that sets
+  `meta.generation` — not when the database is opened. A publish is the only moment the tree's name,
+  root, branch and remote are all known at once, and writing them there means a store carries the
+  identity of the generation it serves or carries none of it: a stage that is discarded cannot leave
+  a branch name behind that belongs to no publish. Opening the store *reads* them (§3.1, and the
+  guard below); it never writes.
 
 On open, before anything else:
 
@@ -515,6 +537,30 @@ aggregate over more than two tables, which is what keeps the p95 latency target 
 The `total_relation` field is therefore *derivable* from the tables, not a number the code decides to
 print. That is the property that makes the invariant testable: a CI test can assert that every
 `total_relation = "eq"` response has an empty `unresolved` set and complete coverage for the same scope.
+
+### 7.1 The evidence kinds this build writes
+
+`evidence_kind` is the bind pass's claim about *why* a site stayed unbound, and it is a closed set of
+four (`BIND_EVIDENCE_KINDS`). Each one asserts something different about the site, which is what lets
+the read side bucket the row without re-reading the source:
+
+| `evidence_kind` | what the kind claims |
+|---|---|
+| `receiver_type_unknown` | the site wrote a receiver, and the bind pass could not establish its type — the candidates may differ by type, which is exactly the fact that is missing |
+| `ambiguous` | more than one node fits the name, and nothing in the site chooses between them; a spurious edge is worse than a missing one, so the row is recorded instead of a guess |
+| `dynamic` | the site offers nothing a static resolver can bind: an extractor site with no name at all, or an import specifier this resolver was never meant to see (a bare package, a `node:`/`bun:` builtin, a `#` tsconfig alias) |
+| `missing_module` | a **relative** specifier matched no file in the tree — a broken import, not a module from outside it; recording it as `dynamic` made a real defect indistinguishable from an out-of-tree import |
+
+An `ambiguous` **import** row keeps the competing paths in `evidence`, after the specifier token:
+
+```text
+import:./x.js candidates: src/x.ts | src/x/index.ts
+```
+
+The reader cuts the specifier at the first space, so the appended list can never be read as part of the
+module path; a `missing_module` row appends `(no file matched)` the same way. The specifier alone
+decides an import's read-side bucket (`src/shared/domain/unresolved.ts`), so changing the evidence
+kind can move a row into the `material` count but never into a different bucket.
 
 ## 8. Cursors without a table
 

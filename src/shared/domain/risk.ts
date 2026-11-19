@@ -90,8 +90,10 @@ function bandOf(score: number): RiskBand {
  * is declared here rather than sorted by contribution: a caller that reordered drivers would be
  * re-ranking risk, which is not a display decision.
  *
- * At least one driver is always produced — the changed-symbols sentence is unconditional — so a
- * risk answer can never be a bare number.
+ * Drivers are gated on the change set, never on a census: an empty change set has nothing to
+ * assess, so it earns no test-coverage sentence — "every changed symbol has a test" would be a
+ * claim about zero symbols (#10). At least one driver is still always produced: the
+ * changed-symbols sentence is unconditional, so a risk answer can never be a bare number.
  */
 function driversOf(changed: ChangedFacts, impacted: ImpactedFacts): string[] {
   const dependents = count(impacted.nodes);
@@ -115,11 +117,13 @@ function driversOf(changed: ChangedFacts, impacted: ImpactedFacts): string[] {
 
   drivers.push(`${symbols} changed symbols span ${files} files`);
 
-  drivers.push(
-    untested === 0
-      ? "every changed symbol has a test within the tested-depth limit"
-      : `${untested} changed symbols have no reachable test`,
-  );
+  if (symbols > 0) {
+    drivers.push(
+      untested === 0
+        ? "every changed symbol has a test within the tested-depth limit"
+        : `${untested} changed symbols have no reachable test`,
+    );
+  }
 
   if (entryPoints > 0) {
     drivers.push(`${entryPoints} changed symbols are entry points`);

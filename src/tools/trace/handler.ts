@@ -25,7 +25,12 @@
  * - **a truncated page always advances.** The continuation token is minted past the rows served; the
  *   only zero-row page is a terminal one, which says so and points at the cheaper query;
  * - **a direction that was not walked is not a zero.** `callers_total` is omitted for
- *   `direction: "out"` rather than reported as `0`.
+ *   `direction: "out"` rather than reported as `0`;
+ * - **an unresolved count is never bare.** Each evidence row carries the bucket the store already
+ *   knows and the payload carries the census over the same rows `coverage.unresolved_edges`
+ *   counted, so a flat number always arrives with its breakdown. The `unresolved` argument narrows
+ *   the list and never the census, and the summary says how many rows the filter hid — a bucket
+ *   answer must not read as the whole scope's evidence.
  *
  * Never source text: nothing here reads a file, and `emit` is the only place the payload shrinks.
  */
@@ -43,8 +48,10 @@ import {
   type Resolution,
   type ResolutionCandidate,
   type ResolutionStep,
+  type ResolveOptions,
   resolve,
 } from "#shared/domain/resolve";
+import { bucketCensus, bucketOf, type UnresolvedBucket } from "#shared/domain/unresolved";
 import {
   ambiguous,
   type Coverage,
@@ -192,8 +199,38 @@ export interface TraceUnresolved {
   readonly file: string;
   readonly line: number;
   readonly name: string;
+  /** Why the row exists, from the closed taxonomy — never a second guess at the store's answer. */
+  readonly bucket: UnresolvedBucket;
   readonly evidence: string;
   readonly tier: string;
+}
+
+/**
+ * The scope's unresolved call sites, explained instead of totalled (#5). `total` is copied from
+ * `coverage.unresolved_edges` over the same rows, so the two cannot disagree, and the census
+ * describes the *unfiltered* scope: the `unresolved` argument chooses what to read, not which call
+ * sites failed to bind.
+ */
+export interface TraceUnresolvedCensus {
+  readonly total: number;
+  readonly material: number;
+  readonly buckets: Readonly<Record<UnresolvedBucket, number>>;
+}
+
+/**
+ * The call that turns one candidate into an answer, so the agent issues it unchanged instead of
+ * re-assembling a query from `qn` and this call's arguments. `direction` is echoed because it is
+ * the caller's own choice and dropping it would answer a different question than the one asked.
+ */
+export interface TraceNextCall {
+  readonly tool: "trace";
+  readonly query: string;
+  readonly direction: TraceDirection;
+}
+
+/** A candidate plus its next call: the resolution contract's row, widened by the tool's own shape. */
+export interface TraceCandidate extends ResolutionCandidate {
+  readonly next_call: TraceNextCall;
 }
 
 export interface TracePayload {
@@ -202,17 +239,33 @@ export interface TracePayload {
   readonly in: readonly TraceGroup[];
   readonly out: readonly TraceGroup[];
   readonly unresolved: readonly TraceUnresolved[];
+  /** The unfiltered census the flat counts above need in order to be actionable. */
+  readonly unresolved_census: TraceUnresolvedCensus;
   readonly not_indexed: readonly NotIndexedEntry[];
 }
 
 /** An ambiguous answer is candidates only: no node, no neighbours (`DESIGN.md` §8). */
 export interface TraceCandidates {
-  readonly candidates: readonly ResolutionCandidate[];
+  readonly candidates: readonly TraceCandidate[];
+  /** The size of the tie before the `CANDIDATE_CAP` slice, straight from the resolution. */
+  readonly candidates_total: number;
+  /** How many candidates this payload carries; the summary line and this cannot disagree. */
+  readonly candidates_shown: number;
 }
 
 /** Nothing matched: near misses instead of a bare zero. */
 export interface TraceNearMisses {
-  readonly near_misses: readonly ResolutionCandidate[];
+  readonly near_misses: readonly TraceCandidate[];
+}
+
+/**
+ * The per-list counts of a trace, plus the two an ambiguous one needs. `Totals` types every list
+ * count as `<name>_total`, which is why `candidates_shown` — a count of what was served, not of what
+ * matched — is carried here instead of folded into a name that would then lie.
+ */
+export interface TraceTotals extends Totals {
+  readonly candidates_total: number;
+  readonly candidates_shown: number;
 }
 
 /** Every shape this tool returns; `status` tells the client which payload it got. */
@@ -228,6 +281,8 @@ function effectiveArgs(args: TraceArgs): Record<string, unknown> {
     query: typeof args.query === "string" ? args.query : "",
     direction: directionOf(args),
     kinds: args.kinds ?? null,
+    path: args.path ?? null,
+    unresolved: args.unresolved ?? null,
     depth: args.depth ?? DEFAULT_DEPTH,
     budget: budgetOf(args),
   };
@@ -255,6 +310,21 @@ function budgetOf(args: TraceArgs): number {
 
 function directionOf(args: TraceArgs): TraceDirection {
   return args.direction ?? "all";
+}
+
+/**
+ * The candidates of an ambiguous or missing answer, each carrying the call that resolves it. `qn` is
+ * a unique qualified name, so the offered query is answered by the resolution's first step rather
+ * than by the tie that produced the candidate — that is what makes "issue it unchanged" true.
+ */
+function withNextCall(
+  candidates: readonly ResolutionCandidate[],
+  direction: TraceDirection,
+): TraceCandidate[] {
+  return candidates.map((candidate) => ({
+    ...candidate,
+    next_call: { tool: TOOL, query: candidate.qn, direction },
+  }));
 }
 
 /** `expand` clamps too; clamping here keeps the hop count in the summary honest. */
@@ -521,9 +591,19 @@ function unresolvedOf(rows: readonly UnresolvedRef[]): TraceUnresolved[] {
     file: row.path,
     line: row.line,
     name: row.rawTarget,
+    bucket: bucketOf(row),
     evidence: row.evidence ?? row.evidenceKind ?? NO_EVIDENCE,
     tier: UNRESOLVED_TIER,
   }));
+}
+
+/**
+ * The census of the rows `assemble` already returned, never a second query: `total` is that array's
+ * own coverage count, so `unresolved_census.total` and `coverage.unresolved_edges` cannot disagree.
+ */
+function censusOf(assembly: CoverageAssembly): TraceUnresolvedCensus {
+  const { buckets, material } = bucketCensus(assembly.unresolved);
+  return { total: assembly.coverage.unresolved_edges, material, buckets };
 }
 
 /**
@@ -560,6 +640,7 @@ function payloadOf(
   resolution: Extract<Resolution, { status: "ok" }>,
   page: readonly FlatEntry[],
   unresolved: readonly TraceUnresolved[],
+  census: TraceUnresolvedCensus,
   notIndexed: readonly NotIndexedEntry[],
 ): TracePayload {
   return {
@@ -582,6 +663,7 @@ function payloadOf(
     in: groupsOf(page, "in"),
     out: groupsOf(page, "out"),
     unresolved,
+    unresolved_census: census,
     not_indexed: notIndexed,
   };
 }
@@ -641,20 +723,41 @@ function headOf(
       : `${node.name}: ${counts.in} callers, ${counts.out} callees`;
 }
 
+/**
+ * The unresolved evidence as a summary must state it: the scope's count, the bucket it was filtered
+ * to, and how many rows that filter hid.
+ */
+interface EvidenceFacts {
+  readonly total: number;
+  readonly bucket: UnresolvedBucket | null;
+  readonly hidden: number;
+}
+
+/**
+ * The evidence sentence every trace summary ends with. A shortened list may never read as a complete
+ * one: when the `unresolved` filter is active the line names the bucket and the number of rows it
+ * removed, so `3 unresolved call sites` on a filtered answer is not taken for the scope's total.
+ */
+function evidenceSentence(node: NodeRow, facts: EvidenceFacts): string {
+  if (facts.total === 0) {
+    return ".";
+  }
+  const count = `; ${facts.total} unresolved call site${facts.total === 1 ? "" : "s"} in ${node.path}`;
+  return facts.bucket === null
+    ? `${count}.`
+    : `${count}, ${facts.hidden} filtered out (unresolved: ${facts.bucket}).`;
+}
+
 function summaryOf(
   node: NodeRow,
   counts: { in: number; out: number },
   direction: TraceDirection,
   page: { shown: number; available: number } | null,
-  unresolvedCount: number,
+  evidence: EvidenceFacts,
 ): string {
   const head = headOf(node, counts, direction);
   const paged = page === null ? "" : ` (${page.shown} of ${page.available} neighbours shown)`;
-  const gap =
-    unresolvedCount === 0
-      ? "."
-      : `; ${unresolvedCount} unresolved call site${unresolvedCount === 1 ? "" : "s"} in ${node.path}.`;
-  return `${head}${paged}${gap}`;
+  return `${head}${paged}${evidenceSentence(node, evidence)}`;
 }
 
 /**
@@ -778,6 +881,8 @@ function noNeighbourFits(page: {
   readonly coverage: Coverage;
   readonly totals: Totals;
   readonly unresolved: readonly TraceUnresolved[];
+  readonly census: TraceUnresolvedCensus;
+  readonly evidence: EvidenceFacts;
   readonly notIndexed: readonly NotIndexedEntry[];
   readonly budgetTokens: number;
   readonly remaining: number;
@@ -787,7 +892,9 @@ function noNeighbourFits(page: {
       ? `a single neighbour does not fit budget ${page.budgetTokens} tokens`
       : `the remaining page does not fit budget ${page.budgetTokens} tokens`;
   const spec: EnvelopeSpec = {
-    summary: `${headOf(page.node, page.counts, page.direction)}; ${gap}, re-run trace with depth: 1`,
+    summary:
+      `${headOf(page.node, page.counts, page.direction)}; ${gap}, re-run trace with depth: 1` +
+      evidenceSentence(page.node, page.evidence),
     read_status: page.readStatus,
     coverage: page.coverage,
     totals: page.totals,
@@ -798,7 +905,15 @@ function noNeighbourFits(page: {
   };
   const served = emit(
     ok(
-      payloadOf(page.node, page.query, page.resolution, [], page.unresolved, page.notIndexed),
+      payloadOf(
+        page.node,
+        page.query,
+        page.resolution,
+        [],
+        page.unresolved,
+        page.census,
+        page.notIndexed,
+      ),
       spec,
     ),
     page.budgetTokens,
@@ -851,14 +966,23 @@ function traced(
   const allowance = allowanceOf(budgetTokens);
   const evidenceAllowance = Math.floor(allowance / EVIDENCE_SHARE);
   const notIndexed = capRows(assembly.coverage.not_indexed, Math.floor(evidenceAllowance / 2));
+  const census = censusOf(assembly);
   const unresolvedAll = unresolvedOf(assembly.unresolved);
-  const unresolved = capRows(
-    unresolvedAll,
-    Math.max(0, evidenceAllowance - serialisedBytes(notIndexed)),
-  );
+  // The filter narrows what is listed, never what was counted: the census above and `coverage` both
+  // describe the scope, so a bucket answer says "some of N" and the summary says how many it hid.
+  const listed =
+    args.unresolved === undefined
+      ? unresolvedAll
+      : unresolvedAll.filter((row) => row.bucket === args.unresolved);
+  const unresolved = capRows(listed, Math.max(0, evidenceAllowance - serialisedBytes(notIndexed)));
+  const evidence: EvidenceFacts = {
+    total: census.total,
+    bucket: args.unresolved ?? null,
+    hidden: unresolvedAll.length - listed.length,
+  };
   const coverage: Coverage = { ...assembly.coverage, not_indexed: notIndexed };
   const spec: EnvelopeSpec = {
-    summary: summaryOf(node, counts, direction, null, unresolvedAll.length),
+    summary: summaryOf(node, counts, direction, null, evidence),
     read_status: readStatus,
     coverage,
     totals,
@@ -877,7 +1001,7 @@ function traced(
         counts,
         direction,
         truncated ? { shown: entries.length, available: remaining } : null,
-        unresolvedAll.length,
+        evidence,
       ),
       truncated,
       truncation_reason: truncated ? "budget" : null,
@@ -886,7 +1010,10 @@ function traced(
         : null,
     };
     return emit(
-      ok(payloadOf(node, args.query, resolution, entries, unresolved, notIndexed), pageSpec),
+      ok(
+        payloadOf(node, args.query, resolution, entries, unresolved, census, notIndexed),
+        pageSpec,
+      ),
       budgetTokens,
       { mint: mintAt(ctx, identity, end) },
     );
@@ -896,14 +1023,14 @@ function traced(
   // resolution block, the evidence and the continuation token all have to fit first, and the summary
   // is taken at its longest (every neighbour shown) so its digits cannot make the page overshoot.
   const floor = serialisedBytes(
-    ok(payloadOf(node, args.query, resolution, [], unresolved, notIndexed), {
+    ok(payloadOf(node, args.query, resolution, [], unresolved, census, notIndexed), {
       ...spec,
       summary: summaryOf(
         node,
         counts,
         direction,
         { shown: remaining, available: remaining },
-        unresolvedAll.length,
+        evidence,
       ),
       truncated: true,
       truncation_reason: "budget",
@@ -922,6 +1049,8 @@ function traced(
       coverage,
       totals,
       unresolved,
+      census,
+      evidence,
       notIndexed,
       budgetTokens,
       remaining,
@@ -960,6 +1089,21 @@ function traced(
 }
 
 /**
+ * The narrowing `resolve` applies. Each half is omitted when absent, so `exactOptionalPropertyTypes`
+ * sees an option that was not passed rather than one passed as `undefined`.
+ */
+function resolveOptionsOf(args: TraceArgs): ResolveOptions {
+  const options: { kinds?: readonly string[]; path?: string } = {};
+  if (args.kinds !== undefined) {
+    options.kinds = args.kinds;
+  }
+  if (args.path !== undefined) {
+    options.path = args.path;
+  }
+  return options;
+}
+
+/**
  * One free-text query in, one envelope out (`TECH-SPEC.md` §6: handlers return envelopes, never
  * throw, never read the environment and never open a database).
  */
@@ -981,14 +1125,22 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<TraceRe
     start = verified.position;
   }
 
-  const resolution = resolve(ctx.reader, query, args.kinds);
+  const resolution = resolve(ctx.reader, query, resolveOptionsOf(args));
   switch (resolution.status) {
     case "ambiguous": {
+      const direction = directionOf(args);
+      // One number per name: the summary says how wide the tie was, `candidates_shown` how much of
+      // it this payload carries, and the two cannot disagree because both come from the resolution.
+      const totals: TraceTotals = {
+        total_relation: "gte",
+        candidates_total: resolution.candidates_total,
+        candidates_shown: resolution.candidates_shown,
+      };
       const spec: EnvelopeSpec = {
-        summary: `${query}: ${resolution.candidates.length} candidates matched, none preferred`,
+        summary: `${query}: ${resolution.candidates_total} candidates matched, none preferred`,
         read_status: unscopedReadStatus(meta),
         coverage: unscopedCoverage(),
-        totals: { total_relation: "gte", candidates_total: resolution.candidates.length },
+        totals,
         next_tools: NEXT_TOOLS_AFTER_MISS,
       };
       // The candidate list is capped at `CANDIDATE_CAP` by the resolution contract, so `emit` has
@@ -997,7 +1149,11 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<TraceRe
       return noRepeat(
         emit(
           ambiguous<TraceCandidates>(
-            { candidates: resolution.candidates.slice(0, CANDIDATE_CAP) },
+            {
+              candidates: withNextCall(resolution.candidates.slice(0, CANDIDATE_CAP), direction),
+              candidates_total: resolution.candidates_total,
+              candidates_shown: resolution.candidates_shown,
+            },
             spec,
           ),
           budgetOf(args),
@@ -1013,10 +1169,17 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<TraceRe
         totals: { total_relation: "gte", near_misses_total: resolution.near_misses.length },
         next_tools: NEXT_TOOLS_AFTER_MISS,
       };
+      // A miss stays a miss however narrow the filter: the near misses are the ones `resolve` kept
+      // under the same prefix, so a narrowed answer never points outside it.
       return noRepeat(
         emit(
           notFound<TraceNearMisses>(
-            { near_misses: resolution.near_misses.slice(0, CANDIDATE_CAP) },
+            {
+              near_misses: withNextCall(
+                resolution.near_misses.slice(0, CANDIDATE_CAP),
+                directionOf(args),
+              ),
+            },
             spec,
           ),
           budgetOf(args),

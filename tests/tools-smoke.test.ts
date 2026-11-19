@@ -584,8 +584,13 @@ describe("the seven tools over MCP against a published generation", () => {
     const payload = asRecord(envelope.payload);
     expect(asString(payload.base)).toBe(head);
 
-    const changed = asArray(payload.changed_files).map(asString);
-    expect(changed).toContain(REPORT_PATH);
+    // `changed_files` renders one row per change-set entry since the state/from additions, so the
+    // path is a field of the row rather than the row itself.
+    const changed = asArray(payload.changed_files).map((row) => asRecord(row));
+    expect(changed.map((row) => asString(row.path))).toContain(REPORT_PATH);
+    for (const row of changed) {
+      expect(["modified", "added", "deleted", "renamed"]).toContain(asString(row.state));
+    }
     // A deletion would be a tombstone, and this fixture has none.
     expect(asArray(payload.removed_symbols)).toEqual([]);
 

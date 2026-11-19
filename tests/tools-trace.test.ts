@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
+import { CANDIDATE_CAP } from "#shared/domain/resolve";
+import { UNRESOLVED_BUCKETS } from "#shared/domain/unresolved";
 import { log } from "#shared/log";
 import type { ToolContext } from "#shared/store/read/context";
 import type {
@@ -13,8 +15,11 @@ import type {
 import {
   argsHashOf,
   handle,
+  type TraceCandidates,
+  type TraceNearMisses,
   type TracePayload,
   type TraceResponse,
+  type TraceTotals,
 } from "../src/tools/trace/handler";
 import { DEFAULT_BUDGET_TOKENS, input, manifest } from "../src/tools/trace/manifest";
 
@@ -104,6 +109,36 @@ const HELPERS: readonly NodeRow[] = Array.from({ length: 8 }, (_, index) =>
   }),
 );
 
+/**
+ * Seven same-named symbols in seven files: wider than `CANDIDATE_CAP`, which is the case where the
+ * matched total and the returned count are different numbers and both have to be reported.
+ */
+const DUPS: readonly NodeRow[] = Array.from({ length: 7 }, (_, index) =>
+  makeNode({ id: 300 + index, qn: `src/dup${index}.ts::dup`, kind: "function", name: "dup" }),
+);
+
+/**
+ * Every row by qualified name. `next_call.query` is a `qn`, so the fake reader has to answer the
+ * exact-qualified-name step for any candidate the tool offers, not just for the fixture's seed.
+ */
+const BY_QN = new Map<string, NodeRow>(
+  [
+    ALPHA,
+    RUN_B,
+    RUN_C,
+    GHOST,
+    CALLER,
+    TEST_CALLER,
+    CALLEE,
+    BUILTIN,
+    DEEP,
+    REFERENCED,
+    IMPORTED,
+    ...HELPERS,
+    ...DUPS,
+  ].map((node) => [node.qn, node]),
+);
+
 function edge(
   id: number,
   srcId: number,
@@ -166,6 +201,54 @@ const UNBOUND: UnresolvedRef = {
   evidence: "receiver type unknown",
 };
 
+/**
+ * One row per bucket of `UNRESOLVED_BUCKETS`, all in the traced file: a census and a bucket filter
+ * need a scope where the breakdown and the flat count are different numbers.
+ */
+const MIXED_UNBOUND: readonly UnresolvedRef[] = [
+  { ...UNBOUND, id: 1, line: 11, rawTarget: "fs", evidenceKind: "dynamic", evidence: "import:fs" },
+  {
+    ...UNBOUND,
+    id: 2,
+    line: 12,
+    rawTarget: "lodash",
+    evidenceKind: "dynamic",
+    evidence: "import:lodash",
+  },
+  {
+    ...UNBOUND,
+    id: 3,
+    line: 13,
+    rawTarget: "./util.js",
+    evidenceKind: "dynamic",
+    evidence: "import:./util.js",
+  },
+  {
+    ...UNBOUND,
+    id: 4,
+    line: 14,
+    rawTarget: "obj[0]",
+    evidenceKind: "dynamic",
+    evidence: "call:obj[0]",
+  },
+  {
+    ...UNBOUND,
+    id: 5,
+    line: 15,
+    rawTarget: "render",
+    evidenceKind: "receiver_type_unknown",
+    evidence: "call:render",
+  },
+  {
+    ...UNBOUND,
+    id: 6,
+    line: 16,
+    rawTarget: "messageOf",
+    evidenceKind: "ambiguous",
+    evidence: "call:messageOf",
+  },
+];
+
 interface FakeOptions {
   /** Omit the unbound call site, so the scope may claim an exact total. */
   readonly clean?: boolean;
@@ -173,6 +256,8 @@ interface FakeOptions {
   readonly indexedGeneration?: string;
   /** How many unbound call sites the file scope holds; enough of them out-bid a page. */
   readonly unresolvedRows?: number;
+  /** Verbatim rows, for a fixture whose buckets have to differ from one another. */
+  readonly unresolvedSet?: readonly UnresolvedRef[];
 }
 
 function makeReader(options: FakeOptions = {}): GraphReader {
@@ -181,17 +266,19 @@ function makeReader(options: FakeOptions = {}): GraphReader {
     indexedGeneration: options.indexedGeneration ?? GENERATION,
   };
   const unresolved: UnresolvedRef[] =
-    options.clean === true
-      ? []
-      : options.unresolvedRows === undefined
-        ? [UNBOUND]
-        : Array.from({ length: options.unresolvedRows }, (_, index) => ({
-            ...UNBOUND,
-            id: index + 1,
-            line: 7 + index,
-          }));
+    options.unresolvedSet !== undefined
+      ? [...options.unresolvedSet]
+      : options.clean === true
+        ? []
+        : options.unresolvedRows === undefined
+          ? [UNBOUND]
+          : Array.from({ length: options.unresolvedRows }, (_, index) => ({
+              ...UNBOUND,
+              id: index + 1,
+              line: 7 + index,
+            }));
   return {
-    findByQn: (qn) => (qn === ALPHA.qn ? ALPHA : null),
+    findByQn: (qn) => BY_QN.get(qn) ?? null,
     findByName: (name, kinds) => {
       const matches = (nodes: readonly NodeRow[]): NodeRow[] =>
         kinds === undefined || kinds.length === 0
@@ -202,8 +289,12 @@ function makeReader(options: FakeOptions = {}): GraphReader {
           return matches([ALPHA]);
         case "run":
           return matches([RUN_B, RUN_C]);
+        case "dup":
+          return matches(DUPS);
         case "missing":
           return matches([GHOST]);
+        case "caller":
+          return matches([CALLER]);
         default:
           return [];
       }
@@ -275,7 +366,7 @@ describe("manifest", () => {
     expect(manifest.description).toContain('returns `status: "ambiguous"` with candidates');
   });
 
-  test("the six-argument schema carries the documented defaults", () => {
+  test("the argument schema carries the documented defaults", () => {
     expect(input.query).toEqual({ type: "string", required: true });
     expect(input.direction.values).toEqual(["all", "in", "out"]);
     expect(input.direction.default).toBe("all");
@@ -284,6 +375,10 @@ describe("manifest", () => {
     expect(DEFAULT_BUDGET_TOKENS).toBe(3200);
     expect(input.cursor).toEqual({ type: "string" });
     expect("kinds" in input).toBe(true);
+    // The bucket filter's values are the taxonomy's own list, never a copy that could fall behind.
+    expect(input.unresolved.type).toBe("enum");
+    expect(input.unresolved.values).toEqual([...UNRESOLVED_BUCKETS]);
+    expect("default" in input.unresolved).toBe(false);
   });
 });
 
@@ -354,6 +449,7 @@ describe("trace: a unique name resolves and its neighbours are grouped", () => {
         file: "src/a.ts",
         line: 7,
         name: "mystery",
+        bucket: "receiver_type_unknown",
         evidence: "receiver type unknown",
         tier: "unresolved",
       },
@@ -431,6 +527,77 @@ describe("trace: direction narrows the walk without inventing zeros", () => {
   });
 });
 
+/** The mixed scope: one unbound call site per bucket, all of them in the traced file. */
+const censusCtx = makeContext(makeReader({ unresolvedSet: MIXED_UNBOUND }));
+
+describe("trace: the unresolved census explains the flat count", () => {
+  test("every entry carries the bucket the store names, from the closed set", async () => {
+    const payload = payloadOf(await handle(censusCtx, { query: "alpha" }));
+    expect(payload.unresolved.length).toBe(MIXED_UNBOUND.length);
+    for (const row of payload.unresolved) {
+      expect(UNRESOLVED_BUCKETS).toContain(row.bucket);
+    }
+    expect(payload.unresolved.map((row) => row.bucket)).toEqual([
+      "builtin_stdlib",
+      "external_package",
+      "internal_module",
+      "dynamic_property_call",
+      "receiver_type_unknown",
+      "ambiguous",
+    ]);
+  });
+
+  test("the census total is coverage.unresolved_edges and its buckets sum to it", async () => {
+    const envelope = await handle(censusCtx, { query: "alpha" });
+    const payload = payloadOf(envelope);
+    const census = payload.unresolved_census;
+    expect(census.total).toBe(envelope.coverage.unresolved_edges);
+    const sum = UNRESOLVED_BUCKETS.reduce((total, bucket) => total + census.buckets[bucket], 0);
+    expect(sum).toBe(census.total);
+    expect(census.total).toBe(MIXED_UNBOUND.length);
+    // `material` is the taxonomy's own predicate, not a bucket name: the unknown receiver and the
+    // ambiguous row are the two a user-defined symbol could still be hiding behind.
+    expect(census.material).toBe(2);
+  });
+
+  test("a bucket filter lists that bucket only and leaves the census whole", async () => {
+    const unfiltered = payloadOf(await handle(censusCtx, { query: "alpha" }));
+    const envelope = await handle(censusCtx, { query: "alpha", unresolved: "external_package" });
+    const payload = payloadOf(envelope);
+    expect(payload.unresolved.map((row) => row.bucket)).toEqual(["external_package"]);
+    // The filter chooses what to read, not which call sites failed to bind.
+    expect(payload.unresolved_census).toEqual(unfiltered.unresolved_census);
+    expect(envelope.coverage.unresolved_edges).toBe(unfiltered.unresolved_census.total);
+  });
+
+  test("a filtered answer says how many rows the filter hid", async () => {
+    const envelope = await handle(censusCtx, { query: "alpha", unresolved: "internal_module" });
+    expect(envelope.summary).toContain(`${MIXED_UNBOUND.length} unresolved call sites`);
+    expect(envelope.summary).toContain(`${MIXED_UNBOUND.length - 1} filtered out`);
+    expect(envelope.summary).toContain("unresolved: internal_module");
+  });
+
+  test("a filter that matches nothing still reports the scope's total", async () => {
+    const envelope = await handle(ctx, { query: "alpha", unresolved: "ambiguous" });
+    const payload = payloadOf(envelope);
+    expect(payload.unresolved).toEqual([]);
+    expect(payload.unresolved_census.total).toBe(1);
+    expect(payload.unresolved_census.buckets.ambiguous).toBe(0);
+    // An empty list under a filter must never read as "nothing was unresolved".
+    expect(envelope.summary).toContain("1 unresolved call site in src/a.ts, 1 filtered out");
+    expect(envelope.summary).toContain("unresolved: ambiguous");
+  });
+
+  test("the filter is part of the call identity, so a page cannot resume under another", () => {
+    expect(argsHashOf({ query: "alpha", unresolved: "ambiguous" })).not.toBe(
+      argsHashOf({ query: "alpha" }),
+    );
+    expect(argsHashOf({ query: "alpha", unresolved: "ambiguous" })).not.toBe(
+      argsHashOf({ query: "alpha", unresolved: "internal_module" }),
+    );
+  });
+});
+
 describe("trace: ambiguity and absence are answers, not guesses", () => {
   test("two tied candidates come back as ambiguous with a capped candidate list and no body", async () => {
     const envelope = await handle(ctx, { query: "run" });
@@ -463,6 +630,104 @@ describe("trace: ambiguity and absence are answers, not guesses", () => {
     expect(payload.near_misses.map((miss) => miss.qn)).toEqual(["src/ghost.ts::missing"]);
     expect(envelope.totals.total_relation).toBe("gte");
     expect(envelope.coverage.complete).toBe(false);
+  });
+});
+
+describe("trace: disambiguation reports honest totals and a call per candidate", () => {
+  test("a tie wider than the cap reports the matched total and the shown count", async () => {
+    const envelope = await handle(ctx, { query: "dup" });
+    expect(envelope.status).toBe("ambiguous");
+    const payload = envelope.payload as TraceCandidates;
+    const totals = envelope.totals as TraceTotals;
+    // The cap is the list's width; the tie is wider, and both numbers are on the answer.
+    expect(payload.candidates.length).toBe(CANDIDATE_CAP);
+    expect(DUPS.length).toBeGreaterThan(CANDIDATE_CAP);
+    expect(payload.candidates_total).toBe(DUPS.length);
+    expect(payload.candidates_shown).toBe(payload.candidates.length);
+    // One number per name: the totals, the payload and the prose cannot disagree.
+    expect(totals.candidates_total).toBe(DUPS.length);
+    expect(totals.candidates_shown).toBe(payload.candidates.length);
+    expect(envelope.summary).toContain(`${DUPS.length} candidates matched`);
+    expect(envelope.summary).not.toContain(`${CANDIDATE_CAP} candidates matched`);
+    for (const candidate of payload.candidates) {
+      expect(candidate.why).toContain(`of ${DUPS.length} candidates`);
+    }
+  });
+
+  test("every candidate carries the call that answers it, with the caller's direction", async () => {
+    const envelope = await handle(ctx, { query: "dup", direction: "in" });
+    const payload = envelope.payload as TraceCandidates;
+    expect(payload.candidates.length).toBeGreaterThan(0);
+    for (const candidate of payload.candidates) {
+      expect(candidate.next_call).toEqual({
+        tool: "trace",
+        query: candidate.qn,
+        direction: "in",
+      });
+      const answer = await handle(ctx, {
+        query: candidate.next_call.query,
+        direction: candidate.next_call.direction,
+      });
+      expect(answer.status).toBe("ok");
+      expect(payloadOf(answer).node.qn).toBe(candidate.qn);
+    }
+  });
+
+  test("an omitted direction is reported as all, so the offered call repeats this one", async () => {
+    const payload = (await handle(ctx, { query: "run" })).payload as TraceCandidates;
+    expect(payload.candidates.map((candidate) => candidate.next_call.direction)).toEqual([
+      "all",
+      "all",
+    ]);
+  });
+
+  test("path narrows a tie to one candidate and answers with the node", async () => {
+    const tied = await handle(ctx, { query: "run" });
+    expect(tied.status).toBe("ambiguous");
+    const narrowed = await handle(ctx, { query: "run", path: "src/b.ts" });
+    expect(narrowed.status).toBe("ok");
+    expect(payloadOf(narrowed).node.qn).toBe("src/b.ts::run");
+    expect(narrowed.totals.callers_total).toBe(0);
+    // A prefix is a directory or the exact file: `src/dup3` is neither, `src/dup3.ts` is the file.
+    const one = await handle(ctx, { query: "dup", path: "src/dup3.ts" });
+    expect(one.status).toBe("ok");
+    expect(payloadOf(one).node.qn).toBe("src/dup3.ts::dup");
+  });
+
+  test("a filtered miss stays a miss and its near misses are already path-filtered", async () => {
+    // Unfiltered, the dotted tail finds `caller`; under `src/b.ts` the same query has no answer.
+    const unfiltered = await handle(ctx, { query: "run.caller" });
+    expect(unfiltered.status).toBe("ok");
+    expect(payloadOf(unfiltered).node.qn).toBe(CALLER.qn);
+
+    const filtered = await handle(ctx, { query: "run.caller", path: "src/b.ts" });
+    expect(filtered.status).toBe("not_found");
+    const payload = filtered.payload as TraceNearMisses;
+    expect(payload.near_misses.map((miss) => miss.qn)).toEqual(["src/b.ts::run"]);
+    const miss = payload.near_misses[0];
+    expect(miss?.next_call).toEqual({
+      tool: "trace",
+      query: "src/b.ts::run",
+      direction: "all",
+    });
+    if (miss === undefined) {
+      throw new Error("the filtered near miss is missing");
+    }
+    const answer = await handle(ctx, {
+      query: miss.next_call.query,
+      direction: miss.next_call.direction,
+    });
+    expect(answer.status).toBe("ok");
+    expect(payloadOf(answer).node.qn).toBe("src/b.ts::run");
+  });
+
+  test("a path that matches nothing answers not_found with no near miss from outside it", async () => {
+    const envelope = await handle(ctx, { query: "run", path: "tests/" });
+    expect(envelope.status).toBe("not_found");
+    const payload = envelope.payload as TraceNearMisses;
+    expect(payload.near_misses).toEqual([]);
+    expect(envelope.totals.near_misses_total).toBe(0);
+    expect(envelope.summary).toContain("no symbol matched");
   });
 });
 
@@ -576,6 +841,10 @@ describe("trace: a page always advances on a dense neighbour sequence", () => {
     expect(envelope.coverage.unresolved_edges).toBe(160);
     expect(payload.unresolved.length).toBeLessThan(160);
     expect(payload.unresolved.length).toBeGreaterThan(0);
+    // A capped list still arrives with the whole census, so the missing rows are explained.
+    expect(payload.unresolved_census.total).toBe(160);
+    expect(payload.unresolved_census.buckets.receiver_type_unknown).toBe(160);
+    expect(payload.unresolved_census.material).toBe(160);
     expect(allItems(payload).length).toBeGreaterThan(0);
     expect(envelope.truncated).toBe(true);
     expect(envelope.totals.total_relation).toBe("gte");

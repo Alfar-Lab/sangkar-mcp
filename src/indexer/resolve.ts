@@ -36,8 +36,18 @@ export type EdgeTier = (typeof EDGE_TIERS)[number];
 /**
  * Why a call, an import or an inheritance base could not be bound. `dynamic` is the extractor's own
  * kind (the source offered no name), kept here so an extractor site passes through unchanged.
+ *
+ * `missing_module` is the read side's only way to tell a broken relative import (a file that is
+ * not in the tree) from a module this resolver was never meant to resolve (a package, `node:fs`,
+ * or a `#` tsconfig alias): the specifier already said which one it was, and recording both as
+ * `dynamic` made a real defect indistinguishable from an out-of-tree module.
  */
-export const BIND_EVIDENCE_KINDS = ["receiver_type_unknown", "ambiguous", "dynamic"] as const;
+export const BIND_EVIDENCE_KINDS = [
+  "receiver_type_unknown",
+  "ambiguous",
+  "dynamic",
+  "missing_module",
+] as const;
 
 export type BindEvidenceKind = (typeof BIND_EVIDENCE_KINDS)[number];
 
@@ -138,7 +148,7 @@ export class SymbolIndex {
   readonly #bases = new Map<string, BaseReference[]>();
   /** Extensionless rel path → the units it could name, for module-string resolution. */
   readonly #stems = new Map<string, string[]>();
-  readonly #moduleFiles = new Map<string, string | null>();
+  readonly #candidates = new Map<string, readonly string[]>();
 
   private constructor(units: readonly FileUnit[]) {
     for (const unit of units) {
@@ -217,21 +227,22 @@ export class SymbolIndex {
   }
 
   /**
-   * The unit a module string names, or `null` when the string matches no unit — one unit, because
-   * a module string that matches two files cannot be resolved and must not be guessed. Python's
-   * `a.b` and TypeScript's `./a/b` both become `a/b`; `index` and `__init__` answering for their
-   * directory is the whole of directory-import support.
+   * Every unit a module string could name, sorted. `[]` is "nothing matched" and two or more paths
+   * are "the stem is not enough to decide", which are different facts: the first is a module the
+   * resolver cannot see (a package, a stdlib import), the second is a tree defect the caller can
+   * report along with the competitors. Python's `a.b` and TypeScript's `./a/b` both become `a/b`;
+   * `index` and `__init__` answering for their directory is the whole of directory-import support.
    */
-  moduleFile(module: string): string | null {
-    const cached = this.#moduleFiles.get(module);
+  moduleCandidates(module: string): readonly string[] {
+    const cached = this.#candidates.get(module);
     if (cached !== undefined) {
       return cached;
     }
     const key = modulePath(module);
-    let found: string | null = null;
+    const found: string[] = [];
     const exact = this.#stems.get(key);
     if (exact !== undefined && exact.length === 1) {
-      found = exact[0] ?? null;
+      found.push(...exact);
     } else if (key !== "") {
       const suffix = `/${key}`;
       const matches = new Set<string>();
@@ -242,10 +253,25 @@ export class SymbolIndex {
           }
         }
       }
-      found = matches.size === 1 ? ([...matches][0] ?? null) : null;
+      for (const path of matches) {
+        found.push(path);
+      }
     }
-    this.#moduleFiles.set(module, found);
+    // Sorted because the candidates end up in evidence text, and two runs over the same tree must
+    // produce byte-identical rows.
+    found.sort();
+    this.#candidates.set(module, found);
     return found;
+  }
+
+  /**
+   * The unit a module string names, or `null` when the string matches no unit or more than one —
+   * a module string that matches two files cannot be resolved and must not be guessed. Expressed
+   * over {@link moduleCandidates} so the two can never disagree about which units are in play.
+   */
+  moduleFile(module: string): string | null {
+    const candidates = this.moduleCandidates(module);
+    return candidates.length === 1 ? (candidates[0] ?? null) : null;
   }
 
   #materialize(qns: readonly string[]): readonly ExtractedNode[] {
@@ -352,14 +378,17 @@ function bindRaw(context: BindContext, raw: RawEdge): void {
     case "imports": {
       // A module string names a unit, not a declaration: the same-file, unique-name and
       // inheritance steps have nothing to look at, so an import binds to the target file node at
-      // `extracted`, and an out-of-tree module (a stdlib or package import) is `dynamic`.
-      const moduleRel = context.index.moduleFile(raw.target);
-      const target = moduleRel === null ? undefined : context.index.fileNode(moduleRel);
-      if (target === undefined) {
-        context.unresolved.push(unresolvedOf(context, raw, "dynamic"));
-        return;
+      // `extracted`, and the reason a failed one failed is read off the candidate set.
+      const candidates = context.index.moduleCandidates(raw.target);
+      const only = candidates[0];
+      if (candidates.length === 1 && only !== undefined) {
+        const target = context.index.fileNode(only);
+        if (target !== undefined) {
+          context.emit(edge(context, raw, target.qn, "extracted"));
+          return;
+        }
       }
-      context.emit(edge(context, raw, target.qn, "extracted"));
+      context.unresolved.push(importFailure(context, raw, candidates));
       return;
     }
   }
@@ -601,6 +630,42 @@ function edge(context: BindContext, raw: RawEdge, dst: string, tier: EdgeTier): 
     localName: raw.localName,
     evidence: raw.evidence,
   };
+}
+
+/**
+ * Why an import did not bind, from the candidate set and the specifier's shape.
+ *
+ * A tie is `ambiguous` and names the competitors in the evidence, because the fix lives in the tree
+ * (two files sharing a stem) and a count alone would not say which. A relative specifier that
+ * matched nothing is `missing_module`: the file it points at is not in the tree. Anything else is
+ * `dynamic`, unchanged — a bare package, `node:`/`bun:`, or a `#` alias, which is a tsconfig path
+ * mapping this resolver cannot see and therefore must not report as a defect in the tree.
+ */
+function importFailure(
+  context: BindContext,
+  raw: RawEdge,
+  candidates: readonly string[],
+): UnresolvedBinding {
+  if (candidates.length > 1) {
+    return {
+      ...unresolvedOf(context, raw, "ambiguous"),
+      evidence: `${raw.evidence} candidates: ${candidates.join(" | ")}`,
+    };
+  }
+  if (candidates.length === 0 && isRelativeSpecifier(raw.target)) {
+    return {
+      ...unresolvedOf(context, raw, "missing_module"),
+      evidence: `${raw.evidence} (no file matched)`,
+    };
+  }
+  // One candidate with no file node cannot happen (every unit carries one); it stays `dynamic`
+  // rather than claiming a defect, so the fallthrough is honest instead of assumed.
+  return unresolvedOf(context, raw, "dynamic");
+}
+
+/** The two forms that mean "a path in this tree", so a miss is a defect rather than an import. */
+function isRelativeSpecifier(module: string): boolean {
+  return module.startsWith("./") || module.startsWith("../");
 }
 
 function unresolvedOf(
