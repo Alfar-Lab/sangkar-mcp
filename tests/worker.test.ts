@@ -234,6 +234,28 @@ describe("runWorker", () => {
     expect(generationCount(repo.livePath)).toBe(1);
   });
 
+  test("a fresh store is a first build, so a run with no mode publishes full", async () => {
+    const repo = await tempRepo();
+
+    // No `mode` and no `force`: this is `runWorker`'s own resolution. A store that has never
+    // published a generation has nothing to diff against, so the run is `full` by default and is
+    // recorded as forced — a `fast` label there would misdescribe the generation it wrote.
+    const first = await runCaptured({ repoRoot: repo.repoRoot, dataDir: repo.dataDir });
+    expect(first.code).toBe(WORKER_EXIT.published);
+    expect(first.stdout).toBe("");
+    expect(generationCount(repo.livePath)).toBe(1);
+    const published = generation(repo.livePath);
+    expect(published?.mode).toBe("full");
+    expect(published?.status).toBe("published");
+
+    // The same tree, still with no `mode`: now there is a published generation to compare against,
+    // so the run resolves to `fast`, finds nothing changed and writes no second generation.
+    const idle = await runCaptured({ repoRoot: repo.repoRoot, dataDir: repo.dataDir });
+    expect(idle.code).toBe(WORKER_EXIT.nothingToDo);
+    expect(idle.stdout).toBe("");
+    expect(generationCount(repo.livePath)).toBe(1);
+  });
+
   test("a modified file publishes again, then the tree is idle again", async () => {
     const repo = await tempRepo();
     expect((await runCaptured(options(repo))).code).toBe(WORKER_EXIT.published);

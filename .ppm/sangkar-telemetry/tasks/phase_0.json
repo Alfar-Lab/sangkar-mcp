@@ -21,8 +21,13 @@
         ],
         "verify": "Done when the five outputs are recorded verbatim in this task's progress and every command exited 0 — or the non-zero ones are named as pre-existing with the failing test names. A non-empty `git status --porcelain` is reported to the orchestrator, never reverted."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:01:07Z",
+          "detail": "BASELINE at execution start (read-only, nothing edited).\n1) git rev-parse HEAD = 18a592d1037b2a8df6a4b803fb751533a574ea34 (plan commit on top of plan base ed16170; only .ppm/ plan files added since ed16170). git status --porcelain = empty (clean tree).\n2) $HOME/.bun/bin/bun run typecheck -> \"$ tsc --noEmit\", exit 0.\n3) $HOME/.bun/bin/bun test -> \" 564 pass / 0 fail / 3616 expect() calls / Ran 564 tests across 40 files. [47.84s]\", exit 0. No pre-existing failing tests.\n4) $HOME/.bun/bin/bun run db:drift -> \"No schema changes, nothing to migrate\", exit 0.\n5) ls -a .sangkar/ = .gitignore (2B), graph.db (2.8M); git check-ignore -v .sangkar/graph.db = \".gitignore:13:.sangkar/\t.sangkar/graph.db\" -> data dir already ignored, no .gitignore edit needed. No telemetry/ subdir present.\n6) Bonus: $HOME/.bun/bin/bun run lint -> \"Checked 93 files in 184ms. No fixes applied.\""
+        }
+      ]
     },
     {
       "id": "TASK-002",
@@ -48,8 +53,17 @@
         ],
         "verify": "$HOME/.bun/bin/bun run typecheck exits 0 and $HOME/.bun/bin/bun run lint exits 0. Done when both are green, `grep -c \"v: RECORD_VERSION\" src/shared/telemetry/record.ts` prints 3, `grep -c \"export type TelemetryRecord\" src/shared/telemetry/record.ts` prints 1, `git status --porcelain` lists no path outside `src/shared/telemetry/record.ts` (no commit happens between tasks, so the assertion is \"no diff reaches a file this task does not own\", not \"the tree holds only this file\"), and `grep -n \"stale_reason\" src/shared/telemetry/record.ts` shows no assignment that copies the envelope's string without the `STALE_REASONS` check. Note: `tests/telemetry.test.ts` (TASK-006) asserts this module's behaviour; this task does not create it."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:05:38Z",
+          "detail": "Created src/shared/telemetry/record.ts (only file touched; 12.1K). Declares RECORD_VERSION=1, TelemetryKind, RecordStatus, RecordedStaleReason, SessionMode, RepoSizeBucket, RootKind, TelemetryRecord union, and CallRecord/IndexRunRecord/SessionRecord with the contract field order (verified by serialising each builder: Object.keys(call) = ts,v,kind,install_id,session_id,seq,tool,status,error_code,duration_ms,arg_names_set,budget_tokens,payload_tokens,budget_used_ratio,truncated,truncation_reason,total_relation,coverage_complete,coverage_indexed,coverage_skipped,coverage_failed,unresolved_edges,stale,stale_reason,generation_age_ms,result_counts,server_version,bun_version,os,arch,graph_schema_version; index_run omits the four server-identity fields; session ends languages,root_kind). Specs RecordContext/CallSpec/IndexRunSpec/SessionFacts + callRecordOf, indexRunRecordOf, sessionRecordOf, repoSizeBucketOf, rootKindOf. Imports only #shared/{budget,cli/args,domain/freshness,envelope}; no node: module, no clock read (grep \"node:\" and grepE \"Date.now|new Date|performance.now\" both empty). Whitelist only: arg_names_set=[...new Set(suppliedNames)].sort() (smoke: [\"query\",\"query\",\"file\"] -> [\"file\",\"query\"], [] stays []), budget_tokens from defaulted args.budget (800/0), payload_tokens=ceil(Buffer.byteLength(JSON.stringify(envelope))/4) else 0, budget_used_ratio 4dp or null at 0, stale/stale_reason from envelope with true/null fallback, stale_reason mapped through STALE_REASONS (\"…was last written by generation 3\" -> \"other\", \"root_mismatch\" kept verbatim), generation_age_ms=Date.parse(ts)-Date.parse(indexed_at) or null, result_counts = array-valued top-level payload keys only ({\"calls\":2}), coverage/truncated/total_relation fallbacks false/0/\"gte\". index_run: generation_advanced=exitCode===0, unresolved_ratio 4dp with 0 denominator -> 0 (smoke 1/(1+3)=0.25). repoSizeBucketOf buckets none,xs,s,m,l,xl at 0/1B/1MiB/10MiB/100MiB/1GiB; rootKindOf true->git. Verify: `bun run typecheck` -> exit 0; `bun run lint` -> exit 0 (Checked 95 files, no fixes); grep -c \"v: RECORD_VERSION\" -> 3; grep -c \"export type TelemetryRecord\" -> 1; grep -n stale_reason shows only the recordedStaleReasonOf() call, no verbatim copy; `bun test tests/boundary.test.ts` -> 11 pass, 0 fail; git status shows only `?? src/shared/telemetry/` from me (identity.ts in that dir is TASK-003's; config.ts/config tests/.ppm edits belong to other workers). Deviation: none; error_code typed `string | null` because the contract forbids importing #shared/errors, so AppErrorCode cannot be named here."
+        },
+        {
+          "time": "2026-11-19T03:06:44Z",
+          "detail": "ORCHESTRATOR VERIFY: record.ts exists (359 lines), only #shared imports, no node:/clock. grep -c \"v: RECORD_VERSION\" = 3; grep -c \"export type TelemetryRecord\" = 1; stale_reason only via recordedStaleReasonOf(). bun run typecheck exit 0; bun run lint \"Checked 95 files ... No fixes applied.\"; bun test tests/boundary.test.ts 11 pass 0 fail. Accepted note: error_code typed string|null (contract forbids the errors module import)."
+        }
+      ]
     },
     {
       "id": "TASK-003",
@@ -75,8 +89,17 @@
         ],
         "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/identity.ts` (`record.ts` from TASK-002 is still uncommitted and expected, because no commit happens between tasks), and the module contains no `process.env` read — check with `grep -n \"process\\.\" src/shared/telemetry/identity.ts` (no output)."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:05:10Z",
+          "detail": "Created src/shared/telemetry/identity.ts (only owned file; no other path edited). Exports InstallIdentity, resolveInstallId(dir, now), newSessionId(), utcDateOf(date) using only node:crypto, node:fs, node:path. Same-day file -> {id, isFirstRun:false}; stale/unparseable/absent -> mkdirSync(dir,{recursive:true}) + writeFileSync(flag \"wx\"), {minted, isFirstRun:true}. Rotation first rmSync(file,{force:true}) so \"wx\" is not blocked by yesterday's copy (without it the first start of a new day would hit EEXIST and keep yesterday's id). EEXIST fallback = read the file back and return its install_id with isFirstRun:false; if the read-back is still unusable or the write failed for any other reason, the freshly minted id is returned and nothing throws.\n\nVerification, verbatim:\n$ bun run typecheck -> \"$ tsc --noEmit\" / typecheck exit=0\n$ bun run lint -> \"$ biome check src tests bin\" / \"Checked 95 files in 182ms. No fixes applied.\" / lint exit=0\n$ grep -n \"process\\.\" src/shared/telemetry/identity.ts -> no output (grep exit=1)\n$ bun test tests/boundary.test.ts -> 11 pass, 0 fail (shared-isolation intact)\nAd-hoc check of the contract in a temp dir (script kept outside the repo, /tmp/id-check.ts) — ALL PASS: first-run mint+persist, same-day reuse (isFirstRun false), next-day rotation with a new 32-hex id, garbage file rotates to isFirstRun true, read-only dir holding a stale file hits EEXIST and returns the holder id with isFirstRun false without throwing, unwritable dir returns a minted id without throwing, nested data dir created recursively, utcDateOf = \"2026-05-04\", newSessionId unique 32-hex. First run of that script exposed the unlink-for-stale-only bug (garbage file kept isFirstRun false); fixed by unlinking on every rotation path.\ngit status --porcelain: only ?? src/shared/telemetry/identity.ts of mine; also present from other workers: src/shared/telemetry/record.ts, M src/shared/config.ts, M tests/config.test.ts, M tests/tools-index.test.ts, .ppm changes. Task status untouched."
+        },
+        {
+          "time": "2026-11-19T03:06:44Z",
+          "detail": "ORCHESTRATOR VERIFY: identity.ts (105 lines) imports only node:crypto/fs/path; grep \"process.\" -> no output. Same-day reuse, stale/unparseable -> rotate, wx + EEXIST read-back fallback, non-fatal fs errors. Deviation accepted: rotation rmSync(file,{force:true}) before the wx create, because wx cannot replace yesterday's file and would otherwise keep the old id. typecheck exit 0; lint clean; boundary 11 pass 0 fail."
+        }
+      ]
     },
     {
       "id": "TASK-004",
@@ -104,8 +127,17 @@
         ],
         "verify": "`$HOME/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts` passes with 0 failures, then `$HOME/.bun/bin/bun run typecheck` and `$HOME/.bun/bin/bun run lint` exit 0. Done when all three are green and `grep -rn \"SANGKAR_TELEMETRY\" src/` reports only `src/shared/config.ts`."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:03:51Z",
+          "detail": "Done. src/shared/config.ts: added `export interface TelemetryConfig { readonly enabled: boolean; readonly dir: string }`, added `readonly telemetry: TelemetryConfig` to AppConfig, and loadConfig now returns `telemetry: { enabled: env.SANGKAR_TELEMETRY !== \"off\", dir: join(dataDir, \"telemetry\") }` (unset/empty/any other value enabled; only the exact lowercase `off` disables — documented as one spelling, no 0/false/OFF aliases; dir always computed). Rewrote the loadConfig doc comment to name both environment settings (SANGKAR_CURSOR_KEY and SANGKAR_TELEMETRY) and to keep SANGKAR_NO_WATCH out, worded \"not a tool setting\", pointing at `watcherDisabled` in src/index.ts. tests/tools-index.test.ts:108 literal: added `telemetry: { enabled: false, dir: join(dataDir, \"telemetry\") }`, no assertion touched, no other AppConfig literal needed changing (tsc green). tests/config.test.ts: new `describe(\"loadConfig telemetry\")` with 4 tests (unset→true, \"\"→true, \"off\"→false plus OFF/Off/0/false→true, dir == <dataDir>/telemetry including under --repo-root+--data-dir var/graph), all with injected `env`. Verification: `$HOME/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts` → 38 pass, 0 fail, 133 expect() calls, Ran 38 tests across 2 files [57.00ms], exit 0. `$HOME/.bun/bin/bun run typecheck` → tsc --noEmit, no output, exit 0. `$HOME/.bun/bin/bun run lint` → \"Checked 93 files in 223ms. No fixes applied.\", exit 0 (first run failed only on a formatting nit in my new config.test.ts lines, reformatted by hand to biome's preferred shape). `grep -rn \"SANGKAR_TELEMETRY\" src/` → only src/shared/config.ts:99 (doc comment) and :133 (the read). Files touched: src/shared/config.ts, tests/config.test.ts, tests/tools-index.test.ts. No deviation; status left unchanged."
+        },
+        {
+          "time": "2026-11-19T03:06:44Z",
+          "detail": "ORCHESTRATOR VERIFY: AppConfig gains readonly telemetry: TelemetryConfig; loadConfig returns {enabled: env.SANGKAR_TELEMETRY !== \"off\", dir: join(dataDir,\"telemetry\")}; doc comment names both env vars and keeps SANGKAR_NO_WATCH as \"not a tool setting\". grep -rn SANGKAR_TELEMETRY src/ -> only src/shared/config.ts:99 (doc) and :133 (read). bun test tests/config.test.ts tests/tools-index.test.ts -> 38 pass / 0 fail. typecheck exit 0; lint clean."
+        }
+      ]
     },
     {
       "id": "TASK-005",
@@ -134,8 +166,17 @@
         ],
         "verify": "$HOME/.bun/bin/bun run typecheck and $HOME/.bun/bin/bun run lint exit 0. Done when both are green, `git status --porcelain` lists no path outside `src/shared/telemetry/`, `src/shared/config.ts`, `tests/config.test.ts` and `tests/tools-index.test.ts` (phase_0's full whitelist is checked by TASK-007, and earlier phase_0 tasks have already created `record.ts` and `identity.ts`), and `grep -n \"setInterval\\|setTimeout\" src/shared/telemetry/telemetry.ts` prints nothing (no timer keeps the process alive)."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:11:42Z",
+          "detail": "Built src/shared/telemetry/sink.ts (TelemetrySink, jsonlSink = mkdirSync recursive on first use + one appendFileSync of lines.join(\"\\n\")+\"\\n\", nullSink; no clock, no date math, no parsing, errors left to the caller; a zero-line array writes nothing so no blank line can look torn) and src/shared/telemetry/telemetry.ts (FLUSH_AT_RECORDS=32, FLUSH_AT_MS=5_000, TelemetryOptions, Telemetry, createTelemetry, nullTelemetry). createTelemetry: resolveInstallId(dir, now()) -> sessionId -> RecordContext{Bun.version, process.platform, process.arch, injected serverVersion/graphSchemaVersion} -> exactly one session record via sessionRecordOf (repoSizeBucketOf(statSync(join(dataDir,\"graph.db\")).size), repoSizeBucketOf(0) on a throw; rootKindOf(existsSync(join(repoRoot,\".git\"))); languages []). recordCall/recordIndexRun increment seq from 1, append {date: utcDateOf(new Date(record.ts)), line: JSON.stringify(record), at: clock.getTime()} and call maybeFlush (>=32 buffered or now()-oldest >= 5000ms; no timer). flush groups by date preserving order and calls sink.write once per group (straddling midnight = 2 appends); the buffer is cleared before the writes and never re-queued, so a partial flush cannot duplicate already-appended lines. First sink throw sets degraded + one log.warn(\"telemetry.sink_failed\", {reason: errno code or message}) and every later write/warn is skipped (records are dropped silently, the one warn already named the cause). close flushes then marks closed; the first record after close logs one debug(\"telemetry.record_after_close\"). nullTelemetry returns empty ids and no-ops. Verified with a throwaway /tmp probe (since deleted): session record buffered at construction, close writes it; 32-line threshold flush; age trigger proven with an injected now (4999ms no flush, 5000ms flush) with no sleeping; midnight straddle produced writes 2026-03-04[2] then 2026-03-05[1] in record order; 100 recordCalls + flush + close against an ENOSPC-throwing sink produced exactly 1 warn {\"reason\":\"ENOSPC\"} and no throw. Verify: `$HOME/.bun/bin/bun run typecheck` -> \"$ tsc --noEmit\", exit 0. `$HOME/.bun/bin/bun run lint` -> \"$ biome check src tests bin\", \"Checked 97 files in 224ms. No fixes applied.\", exit 0. `bun test tests/boundary.test.ts` -> 11 pass, 0 fail. `grep -n \"setInterval\\|setTimeout\" src/shared/telemetry/telemetry.ts` -> no output (exit 1). git status shows my two new files only under src/shared/telemetry/. Full suite deliberately not run (TASK-007 gate owns it)."
+        },
+        {
+          "time": "2026-11-19T03:12:19Z",
+          "detail": "ORCHESTRATOR VERIFY: sink.ts (TelemetrySink, jsonlSink one appendFileSync + mkdir recursive, nullSink) and telemetry.ts (FLUSH_AT_RECORDS=32, FLUSH_AT_MS=5000, createTelemetry emits exactly one session record at construction, seq from 1, per-date grouping with a single sink.write per group, degraded flag with exactly one warn, close flushes). No timers: grep setInterval|setTimeout -> no output. bun run typecheck exit 0; lint \"Checked 97 files ... No fixes applied.\"; boundary 11 pass 0 fail."
+        }
+      ]
     },
     {
       "id": "TASK-006",
@@ -164,8 +205,17 @@
         ],
         "verify": "`$HOME/.bun/bin/bun test tests/telemetry.test.ts` passes with 0 failures and at least 8 tests, then `$HOME/.bun/bin/bun run lint` exits 0. Done when all are green and `git status --porcelain` lists no path outside `tests/telemetry.test.ts` and nothing outside phase_0's own whitelist (the phase's module files are still uncommitted and expected — no commit happens between tasks)."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:18:42Z",
+          "detail": "Created tests/telemetry.test.ts (only file touched). 14 tests, 0 fail, 279 expect() calls: `bun test tests/telemetry.test.ts` -> \"14 pass / 0 fail / 279 expect() calls / Ran 14 tests across 1 file. [24.00ms]\"; `bun run lint` -> \"Checked 98 files in 194ms. No fixes applied.\" exit 0; `tsc --noEmit` exit 0. Coverage: (1) three shape cases assert Object.keys(record) === the plan.approach.md §3 list verbatim for call/index_run/session, keys[1] === \"v\", v === 1, kind, JSON.parse(line) deep-equals the record and JSON.stringify(JSON.parse(line)) === line (index_run additionally asserted to omit bun_version/graph_schema_version); (2) rotation: resolveInstallId(dir, day1 01:00) -> isFirstRun true + /^[0-9a-f]{32}$/, day1 23:00 -> same installId with isFirstRun false, day2 -> different installId with isFirstRun true and readdirSync(dir) === [\"install_id.json\"]; (3) off switch: loadConfig({env:{SANGKAR_TELEMETRY:\"off\"},cwd:tmp}) -> enabled false, and env {}, {\"\"}, {\"OFF\"} -> enabled true, telemetry.dir === join(dataDir,\"telemetry\") in all four; no directory-creation assertion (nullTelemetry holds no path), as the contract specifies; (4) throwing sink: a sink whose write increments a counter then throws ENOSPC - recordCall/flush/close all return without rejecting, the sink was reached exactly once (counter === 1, so the case is not vacuous) and warnings === [\"telemetry.sink_failed\"]; (5) privacy: CallSpec with suppliedNames [\"query\",\"file\"] whose args/payload/summary carry \"handleRequest\" and \"/home/x/secret-repo/src/core.ts\" - JSON.stringify -> parse -> scalarsOf(parsed,\"arg_names_set\") deep-walk (skips only that member, includes every leaf value; asserted length > 20 so the walk cannot be empty) asserts no value contains handleRequest, /home/x/secret-repo, secret-repo or core.ts, and arg_names_set === [\"file\",\"query\"]; (6) stale_reason enum: trace wording '\"src/core.ts\" was last written by generation 3' -> \"other\" with no value containing src/core.ts, core.ts or generation, every STALE_REASONS member passes through verbatim (root_mismatch asserted by name), and no envelope -> null; (7) flush: with a fixed clock 30 recordCalls (session buffered at construction = 31 records) write nothing and the next call writes 1 write of FLUSH_AT_RECORDS=32 lines whose kinds are 1 session + 31 calls with seq 1..31; clock +FLUSH_AT_MS-1 does not flush and +FLUSH_AT_MS flushes 4 buffered lines; close() flushes 2 buffered lines and a second close writes nothing; a flush straddling UTC midnight through the real jsonlSink leaves exactly 2026-11-18.jsonl (2 lines) and 2026-11-19.jsonl (1 line); (8) stdout: spyOn(process.stdout,\"write\") installed immediately around one recordCall/flush/close of one test and restored in finally - chunks === [] and spy.mock.calls length 0 (no suite-wide spy). Non-vacuity probe: temporarily adding \"trace\" (a value the record does contain) to the forbidden list failed the redaction case, proving the deep-walk reaches real values; reverted, 14 pass again. git status --porcelain lists tests/telemetry.test.ts as my only path (src/shared/config.ts, tests/config.test.ts, tests/tools-index.test.ts, src/shared/telemetry/, .ppm/** are other tasks' uncommitted work). No module defect found; no source file edited."
+        },
+        {
+          "time": "2026-11-19T03:19:14Z",
+          "detail": "ORCHESTRATOR VERIFY: tests/telemetry.test.ts created (622 lines, 14 tests, 279 expect() calls) covering shape/order per kind with v second, day rotation, the off switch, a throwing sink with exactly one warn, the deep-walked redaction invariant (arg_names_set excluded, walk asserted >20 scalars so it cannot be vacuous), the stale_reason enum, the 32-record/5000 ms/close/midnight flush cases and a scoped stdout spy. bun test tests/telemetry.test.ts -> 14 pass / 0 fail. bun run lint -> \"Checked 98 files ... No fixes applied.\""
+        }
+      ]
     },
     {
       "id": "TASK-007",
@@ -194,8 +244,13 @@
         ],
         "verify": "Done when every command above exited 0, the full suite is green, `tests/boundary.test.ts` is unmodified, the changed-file list matches the whitelist exactly, and the `process.env` sweep shows the same four files as the baseline with no new one. Report any deviation to the orchestrator instead of fixing it here."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:20:25Z",
+          "detail": "PHASE 0 GATE (orchestrator, read-only).\n1) git status --porcelain: phase_0 touched exactly src/shared/telemetry/{record,sink,identity,telemetry}.ts, src/shared/config.ts, tests/config.test.ts, tests/tools-index.test.ts, tests/telemetry.test.ts (+ .ppm task JSON written by ppm). tests/boundary.test.ts is NOT modified. Note: .ppm/answer-fidelity/** is dirty from a concurrent external session, not from this plan.\n2) bun test tests/boundary.test.ts -> 11 pass / 0 fail.\n3) bun run typecheck -> exit 0; bun run lint -> exit 0.\n4) Full suite bun test -> 582 pass / 0 fail / 3905 expect() calls / 41 files / 48.36s (baseline was 564 pass across 40; +18 = 14 telemetry + 4 loadConfig telemetry).\n5) grep -rn \"process.env\" src/ -> same four files as the TASK-001 baseline (src/shared/config.ts, src/index.ts, src/indexer/watch.ts, src/tools/index/handler.ts), no fifth. grep -rn \"SANGKAR_TELEMETRY\" src/ -> only src/shared/config.ts:99 (doc) and :133 (the read)."
+        }
+      ]
     }
   ]
 }

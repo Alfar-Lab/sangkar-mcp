@@ -174,12 +174,13 @@ mis-pointed override is an error, not a quietly wrong answer.
 
 ## Environment
 
-Two settings remain, and both are read from the environment rather than a flag:
+Three settings remain, and all three are read from the environment rather than a flag:
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SANGKAR_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; when unset the process generates its own key, so cursors do not survive across invocations — set it to share cursors between processes |
 | `SANGKAR_NO_WATCH` | unset | any value stops the watcher; set by tests |
+| `SANGKAR_TELEMETRY` | unset | usage telemetry under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables it, and when off no file and no directory is created |
 
 ## Distribution
 

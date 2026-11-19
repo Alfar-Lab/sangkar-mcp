@@ -202,6 +202,7 @@ shared layer that knows what `trace` means.
 | `domain/coverage.ts` | `assemble(scope) -> {coverage, unresolved, relation}` | produces `eq` vs `gte` — the absence contract (`DESIGN.md` §6) |
 | `domain/risk.ts` | `score(changed, impacted) -> {score, band, drivers[]}` | one formula, so `summary` and `impact` cannot disagree |
 | `domain/diff.ts` | `changedSince(base) -> {files, removed}` | git + hash comparison (`DATABASE.md` §7) |
+| `telemetry/` | record types + the three builders, `jsonlSink`/`nullSink`, `createTelemetry`/`nullTelemetry`, `readRecords` + `aggregate`, `renderHtml`, `runTelemetry` | usage records, the JSONL sink, the aggregator and the HTML report — imports `#shared/*` only, so the root and the indexer can both write through it (`TELEMETRY.md`) |
 
 ### 5.2 What `shared` deliberately does **not** export
 
@@ -523,6 +524,14 @@ MCP over stdio uses **stdout for the protocol**. Any stray `console.log` corrupt
 Error codes used so far (from `DATABASE.md` §5 and the tool specs): `wrong_project_db`,
 `unsupported_filesystem`, `schema_too_new`, `cursor_invalid`, `cursor_expired`, `cursor_mismatch`,
 `budget_too_large`, `bootstrapping`, `not_found`, `ambiguous`.
+
+Usage telemetry is the second write path, and it is local-only: records go to
+`<dataDir>/telemetry/YYYY-MM-DD.jsonl`, never to stdout and never to the network, and the whole path is
+gated by `SANGKAR_TELEMETRY` (`shared/config.ts`, §5.1). It changes none of the rules above — a record
+is written from a `finally` after the answer, a throwing sink is logged once and disabled instead of
+propagating, and `sangkar telemetry` prints one human line, exactly like a tool call. The record
+schemas and the privacy prohibition are specified in [TELEMETRY.md](TELEMETRY.md) and are not repeated
+here, because a second copy is the thing that drifts.
 
 ---
 

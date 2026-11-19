@@ -136,6 +136,55 @@ function answered<T = unknown>(run: Run): Envelope<T> {
   return envelope;
 }
 
+/**
+ * One hand-written `call` record, field for field per the required-field table in
+ * `src/shared/telemetry/report.ts`: the report is proven against a line `sink.ts` did not write.
+ */
+const CALL_RECORD_LINE = JSON.stringify({
+  ts: "2026-11-18T10:00:00.000Z",
+  v: 1,
+  kind: "call",
+  install_id: "0f".repeat(16),
+  session_id: "1a".repeat(16),
+  seq: 1,
+  tool: "status",
+  status: "ok",
+  error_code: null,
+  duration_ms: 10,
+  arg_names_set: ["budget"],
+  budget_tokens: 1_000,
+  payload_tokens: 100,
+  budget_used_ratio: 0.1,
+  truncated: false,
+  truncation_reason: null,
+  total_relation: "gte",
+  coverage_complete: true,
+  coverage_indexed: 1,
+  coverage_skipped: 0,
+  coverage_failed: 0,
+  unresolved_edges: 0,
+  stale: false,
+  stale_reason: null,
+  generation_age_ms: null,
+  result_counts: {},
+  server_version: "0.1.0-beta.0",
+  bun_version: "1.4.4",
+  os: "linux",
+  arch: "x64",
+  graph_schema_version: 1,
+});
+
+const TELEMETRY_DATE = "2026-11-18";
+
+/** A data dir holding that one daily line, plus the report path the verb writes by default. */
+async function telemetryFixture(name: string): Promise<{ dataDir: string; report: string }> {
+  const dataDir = join(root, name);
+  const dir = join(dataDir, "telemetry");
+  await mkdir(dir, { recursive: true });
+  await writeFile(join(dir, `${TELEMETRY_DATE}.jsonl`), `${CALL_RECORD_LINE}\n`, "utf8");
+  return { dataDir, report: join(dir, "report.html") };
+}
+
 let root = "";
 let repo = "";
 let elsewhere = "";
@@ -325,6 +374,58 @@ describe("sangkar CLI", () => {
       expectExit(run, 0, "sangkar trace --help");
       expect(run.stdout).toContain("query");
       expect(run.stdout).toContain("depth");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry writes one line and the report, and is a verb rather than a tool",
+    async () => {
+      const { dataDir, report } = await telemetryFixture("telemetry-data");
+      const run = await spawnCli(["telemetry", "--data-dir", dataDir], elsewhere);
+      expectExit(run, 0, "sangkar telemetry");
+      const lines = run.stdout.replace(/\n+$/, "").split("\n");
+      expect(lines).toHaveLength(1);
+      expect(lines[0]).toMatch(/^wrote .*report\.html \(1 records, 0 unparsed lines\)$/);
+      // The line names the file that now exists: `<data-dir>/telemetry/report.html`.
+      expect(lines[0]).toContain(` ${report} `);
+      expect(existsSync(report)).toBe(true);
+      expect(statSync(report).size).toBeGreaterThan(0);
+      expect(run.stderr.split("\n").filter((line) => /error/i.test(line))).toEqual([]);
+      // Not a tool: no envelope on stdout, and no name in the tool surface's own list.
+      expect(run.stdout).not.toContain('"status":');
+      expect(TOOL_NAMES as readonly string[]).not.toContain("telemetry");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --help prints its own usage and writes no report",
+    async () => {
+      const dataDir = join(root, "telemetry-help-data");
+      const run = await spawnCli(["telemetry", "--help", "--data-dir", dataDir], elsewhere);
+      expectExit(run, 0, "sangkar telemetry --help");
+      expect(run.stdout).toContain("usage: sangkar telemetry");
+      expect(existsSync(join(dataDir, "telemetry", "report.html"))).toBe(false);
+      expect(existsSync(dataDir)).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --since nonsense exits 2 with the reason and writes no report",
+    async () => {
+      const dataDir = join(root, "telemetry-bad-since");
+      const run = await spawnCli(
+        ["telemetry", "--since", "nonsense", "--data-dir", dataDir],
+        elsewhere,
+      );
+      expectExit(run, 2, "sangkar telemetry --since nonsense");
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain('--since must be YYYY-MM-DD or <n>d, not "nonsense"');
+      expect(run.stderr).toContain("usage: sangkar telemetry");
+      expect(existsSync(join(dataDir, "telemetry", "report.html"))).toBe(false);
+      expect(existsSync(dataDir)).toBe(false);
     },
     RUN_TIMEOUT_MS,
   );

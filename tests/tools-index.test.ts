@@ -110,6 +110,7 @@ function harness(generation: string | null = GENERATION_LIVE): Harness {
     dataDir,
     cursorKey: "k".repeat(32),
     budgets: { defaultTokens: 1_200, maxTokens: 32_000 },
+    telemetry: { enabled: false, dir: join(dataDir, "telemetry") },
   };
   const cursors: CursorFacade = createCursors({ key: "fake-cursor-key-material-32-bytes" });
   const ctx: ToolContext = {

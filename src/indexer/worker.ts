@@ -19,7 +19,7 @@
  */
 import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { basename, join, resolve } from "node:path";
 import { type ChangeSet, changedSince } from "#shared/domain/diff";
@@ -36,6 +36,8 @@ import {
 } from "#shared/store/lock";
 import { type MigrateResult, migrate } from "#shared/store/migrate";
 import { beginWrite, type WriteTx, withStage } from "#shared/store/publish";
+import type { IndexRunSpec } from "#shared/telemetry/record";
+import { nullTelemetry, type Telemetry } from "#shared/telemetry/telemetry";
 import { type DiscoveredFile, type DiscoverResult, discover } from "./discover";
 import { extractFile } from "./extract";
 import { specFor } from "./lang/registry";
@@ -126,6 +128,43 @@ export interface WorkerOptions {
   readonly force?: boolean;
   /** `generation.mode`; defaults to `full` on a run that is forced and `fast` otherwise. */
   readonly mode?: WorkerMode;
+  /**
+   * The recorder the run's one `index_run` goes to. Absent when the caller passed none — a direct
+   * {@link runWorker} call — and then the run writes no record at all.
+   */
+  readonly telemetry?: Telemetry;
+}
+
+/**
+ * What went past in one run, counted from facts the run already holds: the walk, the change plan,
+ * the parse results and the bind result. Filled by {@link indexGraph} and read once, on the way
+ * out, so the record describes the same numbers the generation was written from.
+ */
+interface RunSummary {
+  filesSeen: number;
+  filesIndexed: number;
+  filesSkipped: number;
+  filesFailed: number;
+  nodesByKind: Record<string, number>;
+  edgesByKindTier: Record<string, number>;
+  unresolvedCount: number;
+  languages: Record<string, number>;
+  filesChangedInRun: number;
+}
+
+/** Zeroed: the run's early exits report the fields they never got to compute as zero. */
+function emptySummary(): RunSummary {
+  return {
+    filesSeen: 0,
+    filesIndexed: 0,
+    filesSkipped: 0,
+    filesFailed: 0,
+    nodesByKind: {},
+    edgesByKindTier: {},
+    unresolvedCount: 0,
+    languages: {},
+    filesChangedInRun: 0,
+  };
 }
 
 /** One run's fixed inputs, assembled after the lock is held and the schema is current. */
@@ -136,6 +175,8 @@ interface RunContext {
   readonly mode: WorkerMode;
   readonly rebuildRequired: boolean;
   readonly startedAt: number;
+  /** The run's counters, shared with the exit path that writes the record. */
+  readonly summary: RunSummary;
 }
 
 /** What the change comparison decided: which paths to write, and whether there is anything to do. */
@@ -199,6 +240,16 @@ export async function runWorker(options: WorkerOptions): Promise<number> {
   const dataDir = resolve(options.dataDir);
   const livePath = join(dataDir, DATABASE_FILE);
   const startedAt = Date.now();
+  // No recorder supplied (a direct call, as the worker tests make) means the seam is null and the
+  // call sites below carry no conditional.
+  const telemetry = options.telemetry ?? nullTelemetry();
+  const summary = emptySummary();
+
+  // The outcome of a path that leaves before {@link indexGraph} resolves the mode and the change
+  // comparison decides `force`: exit 1, which is what a throw out of the setup means.
+  let exitCode: number = WORKER_EXIT.failed;
+  let mode: WorkerMode = options.mode ?? "full";
+  let force = options.force === true;
 
   let lock: LockHandle | null = null;
   let beat: ReturnType<typeof setInterval> | null = null;
@@ -207,35 +258,30 @@ export async function runWorker(options: WorkerOptions): Promise<number> {
     // The lock is a file *in* the data dir, so the directory has to exist before it can be taken.
     await mkdir(dataDir, { recursive: true });
 
-    try {
-      lock = await acquireLock(dataDir);
-    } catch (error) {
-      if (isAppError(error) && error.code === "index_locked") {
-        log.warn("worker.locked", {
-          dataDir,
-          pid: process.pid,
-          retryAfterMs: error.retryAfterMs,
-          reason: messageOf(error),
-        });
-        return WORKER_EXIT.locked;
-      }
-      throw error;
+    lock = await acquireOrNull(dataDir);
+    if (lock === null) {
+      exitCode = WORKER_EXIT.locked;
+    } else {
+      beat = startHeartbeat(lock);
+
+      await ensureDataDirIgnoreFile(dataDir);
+      const migrated = migrateLive(livePath);
+      // A store that never published has nothing to diff against: a "fast" label on a first build
+      // would misdescribe both the generation row and the run's record.
+      const firstBuild = !hasPublishedGeneration(livePath);
+      force = options.force === true || migrated.rebuildRequired || firstBuild;
+      mode = options.mode ?? (force ? "full" : "fast");
+
+      exitCode = await indexGraph({
+        repoRoot,
+        livePath,
+        force,
+        mode,
+        rebuildRequired: migrated.rebuildRequired,
+        startedAt,
+        summary,
+      });
     }
-    beat = startHeartbeat(lock);
-
-    await ensureDataDirIgnoreFile(dataDir);
-    const migrated = migrateLive(livePath);
-    const force = options.force === true || migrated.rebuildRequired;
-    const mode = options.mode ?? (force ? "full" : "fast");
-
-    return await indexGraph({
-      repoRoot,
-      livePath,
-      force,
-      mode,
-      rebuildRequired: migrated.rebuildRequired,
-      startedAt,
-    });
   } catch (error) {
     log.error("worker.failed", {
       repoRoot,
@@ -244,7 +290,7 @@ export async function runWorker(options: WorkerOptions): Promise<number> {
       code: isAppError(error) ? error.code : "internal",
     });
     recordFailure(livePath, error);
-    return WORKER_EXIT.failed;
+    exitCode = WORKER_EXIT.failed;
   } finally {
     if (beat !== null) {
       clearInterval(beat);
@@ -257,6 +303,82 @@ export async function runWorker(options: WorkerOptions): Promise<number> {
         log.error("worker.lock_release_failed", { path: lock.path, reason: messageOf(error) });
       }
     }
+    // Recorded only after the lock is gone: a slow sink must not hold the graph's write lock. The
+    // `finally` is the run's single exit path, so exactly one record is written per run.
+    const record: IndexRunSpec = {
+      mode,
+      exitCode,
+      durationMs: Date.now() - startedAt,
+      wasForced: force,
+      filesSeen: summary.filesSeen,
+      filesIndexed: summary.filesIndexed,
+      filesSkipped: summary.filesSkipped,
+      filesFailed: summary.filesFailed,
+      nodesByKind: summary.nodesByKind,
+      edgesByKindTier: summary.edgesByKindTier,
+      unresolvedCount: summary.unresolvedCount,
+      languages: summary.languages,
+      dbSizeBytes: dbSizeOf(livePath),
+      filesChangedInRun: summary.filesChangedInRun,
+    };
+    telemetry.recordIndexRun(record);
+    telemetry.close();
+  }
+
+  return exitCode;
+}
+
+/**
+ * The write lock, or `null` when another indexer holds it — the one refusal this run reports as
+ * exit 75 instead of failing. Any other acquisition error is a real failure and is rethrown to
+ * {@link runWorker}'s `catch`.
+ */
+async function acquireOrNull(dataDir: string): Promise<LockHandle | null> {
+  try {
+    return await acquireLock(dataDir);
+  } catch (error) {
+    if (!isAppError(error) || error.code !== "index_locked") {
+      throw error;
+    }
+    log.warn("worker.locked", {
+      dataDir,
+      pid: process.pid,
+      retryAfterMs: error.retryAfterMs,
+      reason: messageOf(error),
+    });
+    return null;
+  }
+}
+
+/**
+ * Whether this store has ever published a generation. A store that has not is a first build: there
+ * is nothing to diff against, so the run is `full` and `was_forced` is true even though the change
+ * plan would only ever say "everything changed". {@link migrateLive} has just created the file.
+ */
+function hasPublishedGeneration(livePath: string): boolean {
+  if (!existsSync(livePath)) {
+    return false;
+  }
+  const conn = openReader(livePath);
+  try {
+    const statement = prepared(conn, "worker.publishedGeneration", (sqlite) =>
+      sqlite.query<{ one: number }, []>(
+        "SELECT 1 AS one FROM generation WHERE status = 'published' LIMIT 1",
+      ),
+    );
+    // `bun:sqlite` answers `null` for no row, so this is the published check and not a truthiness test.
+    return statement.get() !== null;
+  } finally {
+    conn.close();
+  }
+}
+
+/** The published graph's size, or 0 when this run never created one. */
+function dbSizeOf(livePath: string): number {
+  try {
+    return statSync(livePath).size;
+  } catch {
+    return 0;
   }
 }
 
@@ -315,6 +437,7 @@ async function indexGraph(ctx: RunContext): Promise<number> {
   const plan = await planRun(ctx.repoRoot, ctx.livePath, discovered, ctx.force);
 
   if (plan.nothingToDo) {
+    collectSeen(ctx.summary, discovered, plan);
     log.info("worker.nothing_to_do", {
       repoRoot: ctx.repoRoot,
       files: discovered.files.length,
@@ -332,6 +455,7 @@ async function indexGraph(ctx: RunContext): Promise<number> {
   const generationId = newGenerationId();
   const revision = await revisionOf(ctx.repoRoot);
   const identity = await projectIdentityOf(ctx.repoRoot);
+  collectSummary(ctx.summary, discovered, plan, parsed, units, resolved);
   const durationMs = Date.now() - ctx.startedAt;
 
   await withStage(
@@ -376,6 +500,51 @@ async function indexGraph(ctx: RunContext): Promise<number> {
     mode: ctx.mode,
   });
   return WORKER_EXIT.published;
+}
+
+/**
+ * The facts a run that publishes nothing still knows: the walk and the change plan. A
+ * `nothingToDo` run writes no nodes, so every other counter stays zero.
+ */
+function collectSeen(summary: RunSummary, discovered: DiscoverResult, plan: ChangePlan): void {
+  summary.filesSeen = discovered.files.length;
+  summary.filesSkipped = discovered.skipped;
+  summary.languages = countBy(discovered.files, (file) => file.lang);
+  summary.filesChangedInRun = plan.changed.length;
+}
+
+/**
+ * Fills the run's counters from what the run already holds: no second walk, no query, no re-parse.
+ * `unresolvedCount` is both lists `persistUnit` inserts — the sites the extractor could not type
+ * and the ones binding failed to resolve — so it is the row count the graph will show.
+ */
+function collectSummary(
+  summary: RunSummary,
+  discovered: DiscoverResult,
+  plan: ChangePlan,
+  parsed: readonly ParsedFile[],
+  units: readonly FileUnit[],
+  resolved: BindResult,
+): void {
+  collectSeen(summary, discovered, plan);
+  summary.filesIndexed = parsed.filter((entry) => entry.unit !== null).length;
+  summary.filesFailed = parsed.filter((entry) => entry.parseStatus === "failed").length;
+  summary.nodesByKind = countBy(
+    units.flatMap((unit) => unit.nodes),
+    (node) => node.kind,
+  );
+  summary.edgesByKindTier = countBy(resolved.edges, (edge) => `${edge.kind}:${edge.tier}`);
+  summary.unresolvedCount =
+    units.flatMap((unit) => unit.unresolved).length + resolved.unresolved.length;
+}
+
+function countBy<T>(items: readonly T[], keyOf: (item: T) => string): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) {
+    const key = keyOf(item);
+    counts[key] = (counts[key] ?? 0) + 1;
+  }
+  return counts;
 }
 
 /**
