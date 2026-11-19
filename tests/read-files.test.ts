@@ -422,6 +422,9 @@ describe("read/reader", () => {
     expect(reader.metaFor()).toEqual({
       projectName: "fixture",
       projectRoot: "/tmp/fixture",
+      // The fixture recorded name and root only; an unrecorded branch or remote is null, never "".
+      projectBranch: null,
+      projectRemote: null,
       generation: GENERATION_NEW,
       indexedAt: "2026-01-02T00:00:00Z",
       indexerState: "idle",

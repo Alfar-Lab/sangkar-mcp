@@ -257,6 +257,8 @@ describe("SymbolIndex", () => {
     // here, so only the plain stem lookup is exercised.
     expect(INDEX.moduleFile("helpers")).toBe("src/helpers.py");
     expect(INDEX.moduleFile("pathlib")).toBeNull();
+    expect(INDEX.moduleCandidates("helpers")).toEqual(["src/helpers.py"]);
+    expect(INDEX.moduleCandidates("pathlib")).toEqual([]);
 
     // Reportable declarations only: the module node named `widget` is not a call target.
     expect(INDEX.nodesNamed("widget")).toEqual([]);
@@ -438,5 +440,127 @@ describe("bind: non-call edges", () => {
     // No containment edge was collapsed by the per-kind filter: the full list is the count. Every
     // other edge in the fixture is one of the eight resolved non-contains edges.
     expect(RESULT.edges).toHaveLength(bound.length + 8);
+  });
+});
+
+/*
+ * The import taxonomy (#12), on its own six-line fixture so the main graph above keeps its shape.
+ *
+ * `src/one/thing.py` and `src/two/thing.py` share the stem `thing`, so the specifier alone cannot
+ * pick one; `src/app.py` imports them and nothing else. The four failures are the four causes a
+ * failed import can have, and they must not read the same way: a stem tie is a tree defect, a
+ * `./` miss is a broken path, a package and a `#` alias are modules this resolver never sees.
+ */
+const THING_ONE_FILE = "src/one/thing.py::thing.py";
+const THING_ONE_MODULE = "src/one/thing.py::thing";
+const THING_TWO_FILE = "src/two/thing.py::thing.py";
+const THING_TWO_MODULE = "src/two/thing.py::thing";
+const APP_FILE = "src/app.py::app.py";
+const APP_MODULE = "src/app.py::app";
+
+function thingUnit(relPath: string, fileQn: string, moduleQn: string): FileUnit {
+  return unit(
+    relPath,
+    [
+      decl("file", relPath, "", relPath.slice(relPath.lastIndexOf("/") + 1)),
+      decl("module", relPath, "", "thing"),
+    ],
+    [contains(fileQn, moduleQn, 1)],
+  );
+}
+
+const IMPORT_UNITS: readonly FileUnit[] = [
+  thingUnit("src/one/thing.py", THING_ONE_FILE, THING_ONE_MODULE),
+  thingUnit("src/two/thing.py", THING_TWO_FILE, THING_TWO_MODULE),
+  unit(
+    "src/app.py",
+    [decl("file", "src/app.py", "", "app.py"), decl("module", "src/app.py", "", "app")],
+    [
+      contains(APP_FILE, APP_MODULE, 1),
+      // A stem tie, a broken relative path, a package, a tsconfig alias, and one import that binds.
+      raw("imports", APP_MODULE, "thing", 2, { evidence: "import:thing" }),
+      raw("imports", APP_MODULE, "./missing", 3, { evidence: "import:./missing" }),
+      raw("imports", APP_MODULE, "sangkar-elsewhere", 4, {
+        evidence: "import:sangkar-elsewhere",
+      }),
+      raw("imports", APP_MODULE, "#shared/thing", 5, { evidence: "import:#shared/thing" }),
+      raw("imports", APP_MODULE, "./two/thing", 6, { evidence: "import:./two/thing" }),
+    ],
+  ),
+];
+
+const IMPORT_INDEX = SymbolIndex.from(IMPORT_UNITS);
+const IMPORT_RESULT = bind(IMPORT_UNITS, IMPORT_INDEX);
+
+function importFailureAt(line: number) {
+  return IMPORT_RESULT.unresolved.find((entry) => entry.line === line);
+}
+
+describe("SymbolIndex.moduleCandidates", () => {
+  test("lists every unit a stem could name, sorted, and moduleFile agrees with the count", () => {
+    expect(IMPORT_INDEX.moduleCandidates("thing")).toEqual([
+      "src/one/thing.py",
+      "src/two/thing.py",
+    ]);
+    // Two candidates cannot be resolved, so the coarse answer stays null rather than guessing one.
+    expect(IMPORT_INDEX.moduleFile("thing")).toBeNull();
+
+    // A specifier with a path segment narrows the candidates to one, and then both agree again.
+    expect(IMPORT_INDEX.moduleCandidates("./two/thing")).toEqual(["src/two/thing.py"]);
+    expect(IMPORT_INDEX.moduleFile("./two/thing")).toBe("src/two/thing.py");
+
+    // A module nothing matches is an empty list, not a null string.
+    expect(IMPORT_INDEX.moduleCandidates("nowhere")).toEqual([]);
+    expect(IMPORT_INDEX.moduleFile("nowhere")).toBeNull();
+  });
+});
+
+describe("bind: import failures carry their cause", () => {
+  test("a stem tie is ambiguous and names both competing paths in its evidence", () => {
+    // Neither file is chosen for line 2, so no import edge is emitted for the tie (line 6 binds
+    // `./two/thing`, which is the same unit reached by a specifier that names it).
+    expect(IMPORT_RESULT.edges.some((edge) => edge.kind === "imports" && edge.line === 2)).toBe(
+      false,
+    );
+    expect(importFailureAt(2)).toEqual({
+      file: "src/app.py",
+      line: 2,
+      rawTarget: "thing",
+      evidenceKind: "ambiguous",
+      evidence: "import:thing candidates: src/one/thing.py | src/two/thing.py",
+    });
+  });
+
+  test("a relative specifier that matched nothing is missing_module", () => {
+    expect(importFailureAt(3)).toEqual({
+      file: "src/app.py",
+      line: 3,
+      rawTarget: "./missing",
+      evidenceKind: "missing_module",
+      evidence: "import:./missing (no file matched)",
+    });
+  });
+
+  test("a bare package specifier stays dynamic, with its evidence unchanged", () => {
+    expect(importFailureAt(4)).toMatchObject({
+      rawTarget: "sangkar-elsewhere",
+      evidenceKind: "dynamic",
+      evidence: "import:sangkar-elsewhere",
+    });
+  });
+
+  test("a # alias stays dynamic: a tsconfig path map is not a defect in this tree", () => {
+    expect(importFailureAt(5)).toMatchObject({
+      rawTarget: "#shared/thing",
+      evidenceKind: "dynamic",
+      evidence: "import:#shared/thing",
+    });
+  });
+
+  test("the one import with a single candidate still binds to its file node", () => {
+    expect(IMPORT_RESULT.edges.filter((edge) => edge.kind === "imports")).toEqual([
+      expect.objectContaining({ src: APP_MODULE, dst: THING_TWO_FILE, tier: "extracted" }),
+    ]);
+    expect(importFailureAt(6)).toBeUndefined();
   });
 });

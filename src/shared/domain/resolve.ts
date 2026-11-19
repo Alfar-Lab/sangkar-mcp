@@ -49,6 +49,9 @@ export interface ResolutionCandidate {
 /**
  * A resolved query is one of three answers and never a partial one: `ok` carries the node,
  * `ambiguous` carries the tied candidates (no answer body), `not_found` carries near misses.
+ *
+ * `candidates_total` is the size of the tie *before* the `CANDIDATE_CAP` slice, so an answer that
+ * shows five of twelve says so; `candidates_shown` is `candidates.length` and the two cannot drift.
  */
 export type Resolution =
   | {
@@ -62,11 +65,31 @@ export type Resolution =
       readonly status: "ambiguous";
       readonly step: ResolutionStep;
       readonly candidates: readonly ResolutionCandidate[];
+      readonly candidates_total: number;
+      readonly candidates_shown: number;
     }
   | {
       readonly status: "not_found";
       readonly near_misses: readonly ResolutionCandidate[];
     };
+
+/**
+ * Caller-side narrowing. `kinds` is all-or-nothing like `findByName`; `path` is a repo-relative
+ * prefix applied before any cap, so a filtered query never answers from outside it.
+ *
+ * A bare `readonly string[]` is still accepted in this position and means `{ kinds }`: `trace`
+ * passes its `kinds` array positionally and must keep compiling and answering unchanged.
+ */
+export interface ResolveOptions {
+  readonly kinds?: readonly string[];
+  readonly path?: string;
+}
+
+/** The options after normalization: a normalized `kinds` list and a normalized prefix or none. */
+interface Filter {
+  readonly kinds: readonly string[];
+  readonly under: string | null;
+}
 
 /**
  * The read surface resolution needs, with the connection already bound. A `Conn`-backed
@@ -146,30 +169,46 @@ function acceptsKind(node: NodeRow, kinds: readonly string[]): boolean {
   return kinds.length === 0 || kinds.includes(node.kind);
 }
 
+/**
+ * The path half of the filter. It can never be pushed into a store lookup, so every step applies
+ * it to the rows it got back — that is what keeps a near miss from outside the prefix out.
+ */
+function acceptsPath(node: NodeRow, filter: Filter): boolean {
+  return filter.under === null || isUnderPrefix(node.path, filter.under);
+}
+
+function isLegacyKinds(value: ResolveOptions | readonly string[]): value is readonly string[] {
+  return Array.isArray(value);
+}
+
+/**
+ * Absent, empty and whitespace-only all mean "no filter", so a caller that passes `path: ""`
+ * gets the answer it got before the option existed. `normalizeRel` would turn `""` into a prefix
+ * that matches nothing, which is the one outcome this must not produce.
+ */
+function filterOf(options?: ResolveOptions | readonly string[]): Filter {
+  const resolved: ResolveOptions =
+    options === undefined ? {} : isLegacyKinds(options) ? { kinds: options } : options;
+  const path = normalizeRel((resolved.path ?? "").trim());
+  return { kinds: resolved.kinds ?? [], under: path === "" ? null : path };
+}
+
 function hit(node: NodeRow, score: number, why: string): Hit {
   return { node, score: round2(score), why };
 }
 
 /** Step 1: the unique `qn`. Nothing can tie with it, so it is answered immediately. */
-function exactQn(
-  source: ResolutionSource,
-  query: string,
-  kinds: readonly string[],
-): StepHit | null {
+function exactQn(source: ResolutionSource, query: string, filter: Filter): StepHit | null {
   const node = source.findByQn(query);
-  if (node === null || !acceptsKind(node, kinds)) {
+  if (node === null || !acceptsKind(node, filter.kinds) || !acceptsPath(node, filter)) {
     return null;
   }
   return { step: "exact_qn", hits: [hit(node, STEP_SCORE.exact_qn, "exact qualified name")] };
 }
 
 /** Step 2: bare name, narrowed by `kinds` when the caller supplied them. */
-function exactName(
-  source: ResolutionSource,
-  query: string,
-  kinds: readonly string[],
-): StepHit | null {
-  const nodes = source.findByName(query, kinds);
+function exactName(source: ResolutionSource, query: string, filter: Filter): StepHit | null {
+  const nodes = source.findByName(query, filter.kinds).filter((node) => acceptsPath(node, filter));
   if (nodes.length === 0) {
     return null;
   }
@@ -189,17 +228,13 @@ function exactName(
 }
 
 /** Step 3: `Receiver.name` resolved through its tail, preferring the tail in its own scope. */
-function dottedTail(
-  source: ResolutionSource,
-  query: string,
-  kinds: readonly string[],
-): StepHit | null {
+function dottedTail(source: ResolutionSource, query: string, filter: Filter): StepHit | null {
   const dot = query.lastIndexOf(".");
   if (dot <= 0 || dot === query.length - 1) {
     return null;
   }
   const tail = query.slice(dot + 1);
-  const nodes = source.findByName(tail, kinds);
+  const nodes = source.findByName(tail, filter.kinds).filter((node) => acceptsPath(node, filter));
   if (nodes.length === 0) {
     return null;
   }
@@ -226,11 +261,7 @@ const PATH_LIKE =
   /(^|\/)\.?[\w.+-]+\.(?:[cm]?[jt]sx?|py|go|rs|java|kt|rb|cs|cpp|cc|cxx|c|h|hpp|php|swift|scala|sql|sh|md|json|ya?ml|toml|xml|html)$/;
 
 /** Step 4: a path resolves to the file node that owns it, or to symbols declared inside it. */
-function pathStep(
-  source: ResolutionSource,
-  query: string,
-  kinds: readonly string[],
-): StepHit | null {
+function pathStep(source: ResolutionSource, query: string, filter: Filter): StepHit | null {
   if (!query.includes("/") && !PATH_LIKE.test(query)) {
     return null;
   }
@@ -248,11 +279,14 @@ function pathStep(
   const seen = new Set<number>();
   const hits: Hit[] = [];
   for (const name of names) {
-    for (const node of source.findByName(name, kinds)) {
+    for (const node of source.findByName(name, filter.kinds)) {
       if (seen.has(node.id)) {
         continue;
       }
       if (node.path !== normalized && !isUnderPrefix(node.path, normalized)) {
+        continue;
+      }
+      if (!acceptsPath(node, filter)) {
         continue;
       }
       seen.add(node.id);
@@ -302,11 +336,7 @@ function hasDecorator(node: NodeRow, name: string): boolean {
  * fallback can only keep candidates whose name already matches, which is documented rather
  * than guessed away.
  */
-function decoratorStep(
-  source: ResolutionSource,
-  query: string,
-  kinds: readonly string[],
-): StepHit | null {
+function decoratorStep(source: ResolutionSource, query: string, filter: Filter): StepHit | null {
   if (!query.startsWith("@")) {
     return null;
   }
@@ -314,10 +344,11 @@ function decoratorStep(
   if (name === "") {
     return null;
   }
-  const nodes =
+  const nodes = (
     source.findByDecorator !== undefined
-      ? source.findByDecorator(name, kinds)
-      : source.findByName(name, kinds).filter((node) => hasDecorator(node, name));
+      ? source.findByDecorator(name, filter.kinds)
+      : source.findByName(name, filter.kinds).filter((node) => hasDecorator(node, name))
+  ).filter((node) => acceptsPath(node, filter));
   if (nodes.length === 0) {
     return null;
   }
@@ -334,7 +365,7 @@ function decoratorStep(
  * always a `ok` answer; every later step can tie and therefore can be `ambiguous`.
  */
 const STEPS: ReadonlyArray<
-  (source: ResolutionSource, query: string, kinds: readonly string[]) => StepHit | null
+  (source: ResolutionSource, query: string, filter: Filter) => StepHit | null
 > = [exactQn, exactName, dottedTail, pathStep, decoratorStep];
 
 /** Nothing matched: another symbol that shares a segment of the query is the useful answer. */
@@ -355,7 +386,7 @@ function nearMissNames(query: string): string[] {
 function nearMisses(
   source: ResolutionSource,
   query: string,
-  kinds: readonly string[],
+  filter: Filter,
 ): ResolutionCandidate[] {
   const candidates: ResolutionCandidate[] = [];
   const seen = new Set<number>();
@@ -363,7 +394,10 @@ function nearMisses(
     if (candidates.length >= CANDIDATE_CAP) {
       break;
     }
-    for (const node of source.findByName(name, kinds)) {
+    for (const node of source.findByName(name, filter.kinds)) {
+      if (!acceptsPath(node, filter)) {
+        continue;
+      }
       if (seen.has(node.id) || candidates.length >= CANDIDATE_CAP) {
         continue;
       }
@@ -402,31 +436,38 @@ function decide(stepHit: StepHit): Resolution {
       node: first.node,
     };
   }
+  // The cap is applied after the tie is known, so the payload can say "five of twelve" instead of
+  // implying the tie was five wide.
+  const shown = winners.slice(0, CANDIDATE_CAP);
   return {
     status: "ambiguous",
     step: stepHit.step,
-    candidates: winners.slice(0, CANDIDATE_CAP).map(candidateOf),
+    candidates: shown.map(candidateOf),
+    candidates_total: winners.length,
+    candidates_shown: shown.length,
   };
 }
 
 /**
  * Resolves one free-text query against `source`. `kinds` narrows every step and is
- * all-or-nothing, exactly like `findByName`: an empty or omitted list means every kind.
+ * all-or-nothing, exactly like `findByName`: an empty or omitted list means every kind. `path`
+ * restricts every step — and the near misses — to nodes under that repo-relative prefix.
  *
  * Evaluation stops at the first step that produces a hit, so an exact name always wins over a
  * dotted tail and a dotted tail always wins over a path, even though a later step might also
- * have matched.
+ * have matched. A step whose only hits fall outside `path` produces no hit at all, so the filter
+ * can narrow an answer and can empty it, but can never widen the detection order.
  */
 export function resolve(
   source: ResolutionSource,
   query: string,
-  kinds?: readonly string[],
+  options?: ResolveOptions | readonly string[],
 ): Resolution {
   const text = query.trim();
   if (text === "") {
     return { status: "not_found", near_misses: [] };
   }
-  const filter = kinds ?? [];
+  const filter = filterOf(options);
   for (const step of STEPS) {
     const stepHit = step(source, text, filter);
     if (stepHit === null || stepHit.hits.length === 0) {

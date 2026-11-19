@@ -69,6 +69,16 @@ export interface GraphMeta {
   readonly projectName: string | null;
   /** `meta.project_root`: the guard against answering about a different tree. */
   readonly projectRoot: string | null;
+  /**
+   * `meta.project_branch`: the branch `HEAD` named at publish, `null` on a detached HEAD or when
+   * the publish could not ask git.
+   *
+   * Optional so a hand-written `GraphReader` fake that predates the key still type-checks;
+   * {@link makeReader} always answers, with `null` for a value the database never recorded.
+   */
+  readonly projectBranch?: string | null;
+  /** `meta.project_remote`: `remote.origin.url` at publish, `null` when the clone has no origin. */
+  readonly projectRemote?: string | null;
   /** `meta.generation`: the generation a cursor binds to; `null` on an unpublished database. */
   readonly generation: string | null;
   /** `generation.published_at` of {@link generation}; `null` when there is no generation row. */
@@ -326,16 +336,29 @@ function failureCount(raw: string | undefined): number {
 }
 
 /**
+ * One `meta` value as a tool sees it: absent and empty are the same `null`.
+ *
+ * The indexer writes an empty string for `project_branch`/`project_remote` when git could not
+ * answer, and an identity field that renders as `""` in a payload would read like a name that is
+ * blank rather than a fact the graph does not have.
+ */
+function metaValue(values: Map<string, string>, key: string): string | null {
+  const raw = values.get(key);
+  return raw === undefined || raw === "" ? null : raw;
+}
+
+/**
  * Binds `conn` once and returns the reader a tool sees. Nothing else in the process needs to know
  * about the handle, and nothing a handler does with the result can write.
  */
 export function makeReader(conn: Conn): GraphReader {
-  /** `meta` is five keys on one row each; one query per call is one index lookup per key. */
+  /** `meta` is one row per key; the identity and health keys are read in one index lookup each. */
   const metaValues = (): Map<string, string> => {
     const rows = prepared(conn, "reader.meta", (sqlite) =>
       sqlite.query<MetaSqlRow, []>(
         "SELECT m.key AS key, m.value AS value FROM meta m WHERE m.key IN" +
-          " ('project_name', 'project_root', 'generation', 'indexer_state', 'consecutive_failures')",
+          " ('project_name', 'project_root', 'project_branch', 'project_remote', 'generation'," +
+          " 'indexer_state', 'consecutive_failures')",
       ),
     ).all();
     return new Map(rows.map((row) => [row.key, row.value]));
@@ -393,8 +416,10 @@ export function makeReader(conn: Conn): GraphReader {
       const values = metaValues();
       const generation = values.get("generation") ?? null;
       return {
-        projectName: values.get("project_name") ?? null,
-        projectRoot: values.get("project_root") ?? null,
+        projectName: metaValue(values, "project_name"),
+        projectRoot: metaValue(values, "project_root"),
+        projectBranch: metaValue(values, "project_branch"),
+        projectRemote: metaValue(values, "project_remote"),
         generation,
         // `meta` has no publish timestamp; the generation row is the record of when it happened.
         indexedAt: generation === null ? null : publishedAt(generation),

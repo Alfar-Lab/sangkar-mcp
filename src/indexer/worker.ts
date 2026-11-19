@@ -21,7 +21,7 @@ import { Database } from "bun:sqlite";
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
 import { type ChangeSet, changedSince } from "#shared/domain/diff";
 import { isAppError } from "#shared/errors";
 import { log } from "#shared/log";
@@ -46,6 +46,7 @@ import {
   type NotIndexedEntry,
   type ParseStatus,
   PENDING_GENERATION,
+  type ProjectIdentity,
   persistUnit,
 } from "./persist";
 import {
@@ -172,6 +173,7 @@ interface GenerationWrite {
   readonly resolved: BindResult;
   readonly generationId: string;
   readonly revision: Revision;
+  readonly identity: ProjectIdentity;
   readonly mode: WorkerMode;
   readonly durationMs: number;
   readonly rebuildRequired: boolean;
@@ -329,6 +331,7 @@ async function indexGraph(ctx: RunContext): Promise<number> {
   const resolved = bind(units, SymbolIndex.from(units));
   const generationId = newGenerationId();
   const revision = await revisionOf(ctx.repoRoot);
+  const identity = await projectIdentityOf(ctx.repoRoot);
   const durationMs = Date.now() - ctx.startedAt;
 
   await withStage(
@@ -349,6 +352,7 @@ async function indexGraph(ctx: RunContext): Promise<number> {
             resolved,
             generationId,
             revision,
+            identity,
             mode: ctx.mode,
             durationMs,
             rebuildRequired: ctx.rebuildRequired,
@@ -530,6 +534,41 @@ function newGenerationId(): string {
 }
 
 /**
+ * The tree a publish is about, for the `meta` identity keys (`DATABASE.md` §3.1): the name and root
+ * come from the filesystem, so they are always known; the branch and remote come from git.
+ *
+ * Both git reads are best-effort and cannot throw: {@link gitOutput} answers `null` for a non-zero
+ * exit, a missing binary or a timeout, and {@link gitValue} flattens that to the empty string. A
+ * publish about a detached HEAD, an origin-less clone or a plain directory is still a publish.
+ */
+async function projectIdentityOf(repoRoot: string): Promise<ProjectIdentity> {
+  return {
+    name: basename(repoRoot),
+    root: repoRoot,
+    branch: await gitValue(repoRoot, ["symbolic-ref", "--short", "HEAD"]),
+    remote: await gitValue(repoRoot, ["config", "--get", "remote.origin.url"]),
+  };
+}
+
+/**
+ * One git read as a trimmed string, `""` when git cannot answer. The `catch` is not redundant with
+ * `gitOutput`'s internal guard: a pipe that fails after a successful spawn rejects the read, and a
+ * missing branch name must cost the identity, never the generation.
+ */
+async function gitValue(repoRoot: string, args: readonly string[]): Promise<string> {
+  try {
+    return (await gitOutput(repoRoot, args))?.trim() ?? "";
+  } catch (error) {
+    log.debug("worker.git_unavailable", {
+      repoRoot,
+      args: args.join(" "),
+      reason: messageOf(error),
+    });
+    return "";
+  }
+}
+
+/**
  * `HEAD` plus whether tracked files differ from it, or `{head: null, dirty: false}` when git cannot
  * answer. Bounded and non-interactive for the same reasons as `#shared/domain/diff`: no credential
  * helper, no optional index lock, no unbounded child.
@@ -677,6 +716,7 @@ function writeGeneration(tx: WriteTx, sqlite: Database, write: GenerationWrite):
     mode: write.mode,
     durationMs: write.durationMs,
     worktreeDirty: write.revision.dirty,
+    project: write.identity,
   });
   writeMeta(sqlite, META_INDEXER_STATE, STATE_IDLE);
   writeMeta(sqlite, META_CONSECUTIVE_FAILURES, "0");

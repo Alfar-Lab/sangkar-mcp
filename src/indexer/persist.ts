@@ -84,12 +84,36 @@ export interface PersistCounts {
   readonly pendingTombstones: number;
 }
 
+/**
+ * The identity of the tree a publish is about (`DATABASE.md` §3.1), captured by the worker and
+ * written here so the four `meta` keys land in the same transaction as `meta.generation`.
+ *
+ * `branch` and `remote` are the empty string when git could not answer: the key is always written,
+ * because "this clone has no origin" is an answer and a missing key is not, and `reader.ts` maps an
+ * empty value to `null` so a tool never sees an empty string as if it were a name.
+ */
+export interface ProjectIdentity {
+  /** Repo basename at the root the run indexed. */
+  readonly name: string;
+  /** Absolute path of the root the run indexed. */
+  readonly root: string;
+  /** `git symbolic-ref --short HEAD`, empty on a detached HEAD or when git cannot answer. */
+  readonly branch: string;
+  /** `git config --get remote.origin.url`, empty when there is no origin. */
+  readonly remote: string;
+}
+
 /** Everything {@link finalizeGeneration} needs besides the transaction. */
 export interface GenerationInput {
   readonly generationId: string;
   readonly baseCommit: string | null;
   /** `full` for a forced index, `fast` for an incremental publish. */
   readonly mode: "full" | "fast";
+  /**
+   * The tree's identity, written with the generation. Absent only for a caller that has no
+   * filesystem opinion about the tree (a unit test finalizing a hand-built graph).
+   */
+  readonly project?: ProjectIdentity;
   /** Injected clock for `generation.published_at`; defaults to the current instant. */
   readonly publishedAt?: string;
   /** Wall time the run took; the worker owns the timing, this module only records it. */
@@ -152,6 +176,10 @@ const ID_BATCH = 400;
 
 const META_GENERATION = "generation";
 const META_GENERATION_SEQ = "generation_seq";
+const META_PROJECT_NAME = "project_name";
+const META_PROJECT_ROOT = "project_root";
+const META_PROJECT_BRANCH = "project_branch";
+const META_PROJECT_REMOTE = "project_remote";
 
 /** The degree of a node is a count over its own edges, so it is one correlated subquery each. */
 const DEGREE_UPDATE =
@@ -232,6 +260,29 @@ function writeMeta(handle: Database, key: string, value: string): void {
       "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
     )
     .run(key, value);
+}
+
+/** The one-shaped statement behind {@link writeMetaOnce}: a key that is recorded once, forever. */
+function writeMetaOnce(handle: Database, key: string, value: string): void {
+  handle
+    .query<unknown, [string, string]>(
+      "INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO NOTHING",
+    )
+    .run(key, value);
+}
+
+/**
+ * The identity keys (`DATABASE.md` §3.1), written with the generation they describe.
+ *
+ * `project_name` and `project_root` are recorded **once**: §3.1 fixes them at first index and makes
+ * `project_root` the `root_mismatch` guard, which a re-index of a moved checkout must report rather
+ * than erase. The branch and remote are what the tree is on *now*, so each publish refreshes them.
+ */
+function writeProjectIdentity(handle: Database, identity: ProjectIdentity): void {
+  writeMetaOnce(handle, META_PROJECT_NAME, identity.name);
+  writeMetaOnce(handle, META_PROJECT_ROOT, identity.root);
+  writeMeta(handle, META_PROJECT_BRANCH, identity.branch);
+  writeMeta(handle, META_PROJECT_REMOTE, identity.remote);
 }
 
 function countRows(handle: Database, table: "node" | "edge" | "file"): number {
@@ -759,6 +810,11 @@ export function finalizeGeneration(tx: WriteTx, input: GenerationInput): Generat
     );
   writeMeta(handle, META_GENERATION, generationId);
   writeMeta(handle, META_GENERATION_SEQ, String(seq));
+  if (input.project !== undefined) {
+    // The same transaction as `meta.generation`, so no reader can see a generation without the
+    // identity it was published for.
+    writeProjectIdentity(handle, input.project);
+  }
 
   log.debug("generation finalized", {
     generationId,

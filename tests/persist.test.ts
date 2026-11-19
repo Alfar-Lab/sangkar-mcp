@@ -1,11 +1,13 @@
 import { Database } from "bun:sqlite";
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { qn } from "#shared/paths";
+import { type Conn, openReader } from "#shared/store/db";
 import { migrate } from "#shared/store/migrate";
 import { beginWrite, type WriteTx } from "#shared/store/publish";
+import { type GraphMeta, makeReader } from "#shared/store/read/reader";
 import type { ExtractedNode, UnresolvedSite } from "../src/indexer/extract";
 import {
   FTS_REBUILD_FRACTION,
@@ -14,9 +16,11 @@ import {
   type NotIndexedEntry,
   PENDING_GENERATION,
   type PersistUnit,
+  type ProjectIdentity,
   persistUnit,
 } from "../src/indexer/persist";
 import type { BindResult, ResolvedEdge } from "../src/indexer/resolve";
+import { runWorker, WORKER_EXIT } from "../src/indexer/worker";
 
 /**
  * The persist pass against a real migrated database, built under `mkdtemp` exactly as the store
@@ -123,6 +127,82 @@ function idOf(livePath: string, qualifiedName: string): number {
     throw new Error(`no node for ${qualifiedName}`);
   }
   return found.id;
+}
+
+/** A git invocation that fails loudly: these tests are about identity, not about git's own errors. */
+function git(root: string, ...args: readonly string[]): string {
+  const result = Bun.spawnSync({
+    cmd: ["git", "--no-pager", "-C", root, ...args],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (result.exitCode !== 0) {
+    throw new Error(`git ${args.join(" ")} failed: ${result.stderr.toString()}`);
+  }
+  return result.stdout.toString();
+}
+
+/**
+ * A committed fixture repository with one indexable file. The identity capture under test reads a
+ * real `git symbolic-ref` and `git config`, so a plain temp directory could not exercise it; the
+ * caller names the file's content so one helper serves both the repository and the plain-dir case.
+ */
+async function gitFixture(source: string, remote?: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "sangkar-persist-identity-"));
+  dirs.push(root);
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "widget.ts"), source, "utf8");
+  git(root, "init", "-q", "-b", "main");
+  git(root, "add", "-A");
+  git(
+    root,
+    "-c",
+    "user.name=persist fixture",
+    "-c",
+    "user.email=persist@example.invalid",
+    "-c",
+    "commit.gpgsign=false",
+    "commit",
+    "-q",
+    "-m",
+    "init",
+  );
+  if (remote !== undefined) {
+    git(root, "remote", "add", "origin", remote);
+  }
+  return root;
+}
+
+/** A temp working tree that is deliberately not a repository. */
+async function plainTree(source: string): Promise<string> {
+  const root = await mkdtemp(join(tmpdir(), "sangkar-persist-plain-"));
+  dirs.push(root);
+  await mkdir(join(root, "src"), { recursive: true });
+  await writeFile(join(root, "src", "widget.ts"), source, "utf8");
+  return root;
+}
+
+/** The four identity keys exactly as stored, so an empty value stays visible here. */
+function identityMeta(livePath: string): Record<string, string> {
+  const found: Record<string, string> = {};
+  for (const entry of rows<{ key: string; value: string }>(
+    livePath,
+    "SELECT key, value FROM meta WHERE key IN" +
+      " ('project_name', 'project_root', 'project_branch', 'project_remote') ORDER BY key",
+  )) {
+    found[entry.key] = entry.value;
+  }
+  return found;
+}
+
+/** `metaFor()` through a real reader: the shape a tool actually receives. */
+function metaOf(livePath: string): GraphMeta {
+  const conn: Conn = openReader(livePath);
+  try {
+    return makeReader(conn).metaFor();
+  } finally {
+    conn.close();
+  }
 }
 
 function decl(
@@ -360,6 +440,72 @@ describe("persistUnit", () => {
       2,
     );
     expect(row<{ rows: number }>(livePath, TOMBSTONE_COUNT_SQL)?.rows).toBe(0);
+  });
+
+  test("keeps a bound-failure kind verbatim, including ambiguous and missing_module", async () => {
+    // `unresolved.evidence_kind` is unconstrained text on purpose: the taxonomy is the indexer's
+    // (#12), so the writer must not normalise, validate or drop a kind it has not seen before.
+    const livePath = await tempGraph();
+    addFile(livePath, WIDGET);
+    writeGeneration(livePath, (tx) => {
+      persistUnit(
+        tx,
+        unit(WIDGET, [fileNode(WIDGET)]),
+        resolvedOf(
+          [],
+          [
+            {
+              file: WIDGET,
+              line: 2,
+              rawTarget: "thing",
+              evidenceKind: "ambiguous",
+              evidence: "import:thing candidates: src/one/thing.py | src/two/thing.py",
+            },
+            {
+              file: WIDGET,
+              line: 3,
+              rawTarget: "./missing",
+              evidenceKind: "missing_module",
+              evidence: "import:./missing (no file matched)",
+            },
+            {
+              file: WIDGET,
+              line: 4,
+              rawTarget: "sangkar-elsewhere",
+              evidenceKind: "dynamic",
+              evidence: "import:sangkar-elsewhere",
+            },
+          ],
+        ),
+      );
+      finalizeGeneration(tx, { generationId: "g1", baseCommit: null, mode: "full" });
+    });
+
+    expect(
+      rows<{ line: number; raw_target: string; evidence_kind: string; evidence: string | null }>(
+        livePath,
+        "SELECT line, raw_target, evidence_kind, evidence FROM unresolved ORDER BY line",
+      ),
+    ).toEqual([
+      {
+        line: 2,
+        raw_target: "thing",
+        evidence_kind: "ambiguous",
+        evidence: "import:thing candidates: src/one/thing.py | src/two/thing.py",
+      },
+      {
+        line: 3,
+        raw_target: "./missing",
+        evidence_kind: "missing_module",
+        evidence: "import:./missing (no file matched)",
+      },
+      {
+        line: 4,
+        raw_target: "sangkar-elsewhere",
+        evidence_kind: "dynamic",
+        evidence: "import:sangkar-elsewhere",
+      },
+    ]);
   });
 
   test("refuses a unit whose file row is missing, rather than inventing an id", async () => {
@@ -758,3 +904,133 @@ describe("FTS delta", () => {
 
 /** Every tombstone, pending or published: the count a re-persist must leave at zero. */
 const TOMBSTONE_COUNT_SQL = "SELECT count(*) AS rows FROM tombstone";
+
+/** One parseable file, so a worker run has something to index besides its data dir. */
+const FIXTURE_SOURCE = `export function render(title: string): string {
+  return title;
+}
+`;
+
+describe("repository identity", () => {
+  test("a publish records name, root, branch and remote in meta", async () => {
+    const remote = "https://example.invalid/acme/widgets.git";
+    const repoRoot = await gitFixture(FIXTURE_SOURCE, remote);
+    const dataDir = join(repoRoot, ".sangkar");
+    const livePath = join(dataDir, "graph.db");
+
+    expect(await runWorker({ repoRoot, dataDir, force: true, mode: "full" })).toBe(
+      WORKER_EXIT.published,
+    );
+
+    expect(identityMeta(livePath)).toEqual({
+      project_branch: "main",
+      project_name: basename(repoRoot),
+      project_remote: remote,
+      project_root: repoRoot,
+    });
+
+    const meta = metaOf(livePath);
+    expect(meta.projectName).toBe(basename(repoRoot));
+    expect(meta.projectRoot).toBe(repoRoot);
+    expect(meta.projectBranch).toBe("main");
+    expect(meta.projectRemote).toBe(remote);
+    // Written with the generation, not after it: a reader that sees a publish sees its identity.
+    expect(meta.generation).not.toBeNull();
+  });
+
+  test("a clone with no origin stores an empty remote that a tool reads as null", async () => {
+    const repoRoot = await gitFixture(FIXTURE_SOURCE);
+    const dataDir = join(repoRoot, ".sangkar");
+    const livePath = join(dataDir, "graph.db");
+
+    expect(await runWorker({ repoRoot, dataDir, force: true, mode: "full" })).toBe(
+      WORKER_EXIT.published,
+    );
+
+    // `git config --get remote.origin.url` exits non-zero here, so the key holds the empty string:
+    // "no origin" is recorded, and the reader turns that into the one absence a tool can render.
+    expect(identityMeta(livePath)).toEqual({
+      project_branch: "main",
+      project_name: basename(repoRoot),
+      project_remote: "",
+      project_root: repoRoot,
+    });
+
+    const meta = metaOf(livePath);
+    expect(meta.projectRemote).toBeNull();
+    expect(meta.projectBranch).toBe("main");
+  });
+
+  test("a failed git call records empty values and never fails the publish", async () => {
+    const repoRoot = await plainTree(FIXTURE_SOURCE);
+    const dataDir = join(repoRoot, ".sangkar");
+    const livePath = join(dataDir, "graph.db");
+
+    // Not a repository at all: both identity calls exit non-zero. The run still publishes, because
+    // an unanswerable git costs the identity and not the generation.
+    expect(await runWorker({ repoRoot, dataDir, force: true, mode: "full" })).toBe(
+      WORKER_EXIT.published,
+    );
+    expect(row<{ status: string }>(livePath, "SELECT status FROM generation")?.status).toBe(
+      "published",
+    );
+    expect(identityMeta(livePath)).toEqual({
+      project_branch: "",
+      project_name: basename(repoRoot),
+      project_remote: "",
+      project_root: repoRoot,
+    });
+
+    const meta = metaOf(livePath);
+    expect(meta.projectBranch).toBeNull();
+    expect(meta.projectRemote).toBeNull();
+  });
+
+  test("keeps the name and root recorded first, and refreshes branch and remote", async () => {
+    const livePath = await tempGraph();
+    addFile(livePath, OTHER);
+    const identity = (name: string, branch: string, remote: string): ProjectIdentity => ({
+      name,
+      root: `/checkout/${name}`,
+      branch,
+      remote,
+    });
+    const otherEdges = (): ResolvedEdge[] => [edge(OTHER, "contains", OTHER_FILE_QN, LONELY, 3)];
+
+    writeGeneration(livePath, (tx) => {
+      persistUnit(tx, otherUnit(), resolvedOf(otherEdges()));
+      finalizeGeneration(tx, {
+        generationId: "g1",
+        baseCommit: null,
+        mode: "full",
+        project: identity("widgets", "main", "git@example.invalid:acme/widgets.git"),
+      });
+    });
+    expect(identityMeta(livePath)).toEqual({
+      project_branch: "main",
+      project_name: "widgets",
+      project_remote: "git@example.invalid:acme/widgets.git",
+      project_root: "/checkout/widgets",
+    });
+
+    // A second publish on another branch: `DATABASE.md` §3.1 fixes the name and root at first
+    // index (the root is the `root_mismatch` guard), while branch and remote describe this run.
+    writeGeneration(livePath, (tx) => {
+      persistUnit(tx, otherUnit(), resolvedOf(otherEdges()));
+      finalizeGeneration(tx, {
+        generationId: "g2",
+        baseCommit: null,
+        mode: "fast",
+        project: identity("renamed", "feature", ""),
+      });
+    });
+    expect(identityMeta(livePath)).toEqual({
+      project_branch: "feature",
+      project_name: "widgets",
+      project_remote: "",
+      project_root: "/checkout/widgets",
+    });
+    // An empty branch or remote is an absence to a tool, never a blank name.
+    expect(metaOf(livePath).projectRemote).toBeNull();
+  });
+});

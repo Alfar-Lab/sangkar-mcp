@@ -24,8 +24,17 @@
         "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/domain.test.ts  (all pass)\nDone when: the diff shows path filtering inside resolve, the capped-tie assertion prints candidates_total > candidates_shown, and no existing domain test was weakened."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:27:10Z",
+          "detail": "src/shared/domain/resolve.ts + tests/domain.test.ts: ResolveOptions{path} threaded through exact_qn/exact_name/dotted_tail/path/decorator and nearMisses via one Filter; ambiguous now carries candidates_total (pre-cap winners) and candidates_shown; why text built from the filtered pre-cap total. Capped-tie probe: candidates_total=7, candidates_shown=5, whys \"exact name, 1..5 of 7 candidates\"; path=\"src/f3.ts\" on the same 7 -> ok \"exact name, 1 of 1 candidate\". `bun run typecheck` exit 0; `bun run test tests/domain.test.ts` exit 0 (49 pass, 0 fail, 223 expect calls); biome check on both files exit 0. Signature kept as `options?: ResolveOptions | readonly string[]` because src/tools/trace/handler.ts:984 (TASK-007 scope) still passes `args.kinds` positionally. No stdout, no new deps, no schema/doc edits."
+        },
+        {
+          "time": "2026-11-19T03:46:47Z",
+          "detail": "Orchestrator verification: diff confined to src/shared/domain/resolve.ts + tests/domain.test.ts. `~/.bun/bin/bun run typecheck` exit 0; `bun run test tests/domain.test.ts` 49 pass / 0 fail / 223 expects; biome check clean. Capped-tie case reports candidates_total=7 > candidates_shown=5 and the `why` text says \"1 of 7\"..\"5 of 7\". Deviation accepted: third param typed `ResolveOptions | readonly string[]` so src/tools/trace/handler.ts:984 (TASK-007's file) keeps compiling; TASK-007 narrows it."
+        }
+      ]
     },
     {
       "id": "TASK-002",
@@ -49,8 +58,17 @@
         "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/unresolved.test.ts  (all pass)\nDone when: the registry.ts-style fixture yields material 0 and the census sum equals the row count."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:26:32Z",
+          "detail": "Added src/shared/domain/unresolved.ts (UNRESOLVED_BUCKETS/bucketOf/bucketCensus + BUILTIN_RECEIVERS 20, BUILTIN_MEMBERS 39, BUILTIN_MODULES 44; type-only import of UnresolvedRef from #shared/store/read/coverage) and tests/unresolved.test.ts (11 tests, 98 expects). PATH=$HOME/.bun/bin:$PATH ~/.bun/bin/bun run test tests/unresolved.test.ts -> exit 0, 11 pass / 0 fail; ~/.bun/bin/bun run typecheck -> exit 0. Registry fixture (import:./types.js, call:Set, call:push x2, call:watchers.push) yields buckets {builtin_stdlib:3, internal_module:1, dynamic_property_call:1, others:0}, material 0; mixed 9-row fixture census sum = 9. `bunx biome check --write` on the two new files only, exit 0. Not run: lint over the tree, boundary.test.ts, full suite."
+        },
+        {
+          "time": "2026-11-19T03:46:47Z",
+          "detail": "Orchestrator verification: two new files only (src/shared/domain/unresolved.ts, tests/unresolved.test.ts); sole runtime import is `import type UnresolvedRef` from #shared/store/read/coverage (shared-isolation ok). `~/.bun/bin/bun run typecheck` exit 0; `bun run test tests/unresolved.test.ts` 11 pass / 0 fail / 98 expects; biome clean. Registry-style fixture yields {builtin_stdlib:3, internal_module:1, dynamic_property_call:1} with material 0; mixed 9-row fixture buckets sum to 9 with material 4."
+        }
+      ]
     },
     {
       "id": "TASK-005",
@@ -76,8 +94,17 @@
         "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/persist.test.ts  (all pass)\nDone when: metaFor() returns a branch and root after a publish in a fixture repo, and the same call returns null for a repo with no origin."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:31:17Z",
+          "detail": "worker.ts: projectIdentityOf() + gitValue() capture branch (git symbolic-ref --short HEAD) and remote (git config --get remote.origin.url), best-effort, passed as identity through GenerationWrite. persist.ts: ProjectIdentity + GenerationInput.project; finalizeGeneration writes project_name/project_root (once, DATABASE.md §3.1) and project_branch/project_remote (each publish) in the meta.generation transaction. reader.ts: GraphMeta gains projectBranch/projectRemote (optional, nullable), metaValue() maps absent/empty to null. tests/persist.test.ts +4 tests. Verify: `~/.bun/bin/bun run typecheck` exit 0; `~/.bun/bin/bun run test tests/persist.test.ts` exit 0 (12 pass, 0 fail, 78 expect calls). Biome check on the 4 files: exit 0. Caveat: tests/read-files.test.ts:422 pins the exact GraphMeta object and will now see the two extra null keys — outside my file list."
+        },
+        {
+          "time": "2026-11-19T03:48:52Z",
+          "detail": "Orchestrator verification: worker diff inside worker.ts/persist.ts/reader.ts/tests.persist.test.ts. `~/.bun/bin/bun run typecheck` exit 0; `bun run test tests/persist.test.ts` 12 pass / 0 fail / 78 expects; biome clean; no migrations/ or drizzle meta touched. Deviation accepted: GraphMeta.projectBranch/projectRemote are optional (`?: string | null`) because ~12 hand-written fake readers outside this task's file list would stop type-checking; makeReader always answers and maps absent/empty to null. Change-caused break repaired by the orchestrator: tests/read-files.test.ts:422 asserted the old exact GraphMeta object — added `projectBranch: null, projectRemote: null` (now 19 pass / 0 fail). TASK-011 must map a possible undefined to null in status.payload.project."
+        }
+      ]
     },
     {
       "id": "TASK-006",
@@ -102,8 +129,17 @@
         "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/runtime.test.ts  (all pass)\n~/.bun/bin/bun run bin/sangkar.ts status --json  (answers normally: stdout is the JSON envelope, no diagnostic line)\nDone when: the refused cases produce one stderr line naming Bun >= 1.4.4 and the supported runtime is unchanged."
       },
       "pre_request": [],
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:29:59Z",
+          "detail": "New src/shared/runtime.ts (MIN_BUN 1.4.4, numeric-segment compare, runtimeDiagnostic, guardRuntime -> RUNTIME_EXIT 70, stderr-only sink), new tests/runtime.test.ts (14 tests / 42 expects), bin/sangkar.ts guard placed before `await import(\"../src/index\")`. Verify: `bun run typecheck` exit 0; `PATH=~/.bun/bin:$PATH bun run test tests/runtime.test.ts` 14 pass / 0 fail (the script calls `bun` from PATH, hence the prefix); `bun run bin/sangkar.ts status --json` exit 0, stdout 1185 bytes = 10-member JSON envelope status=ok, 0 runtime.unsupported lines (single stderr line is the pre-existing store.identity_unrecorded warn); real-process refusal probe exit 70, stdout 0 bytes, one stderr line {\"required\":\"Bun >= 1.4.4\",\"found\":\"1.3.9\"}; biome check clean on the 3 files. Gap: under node the static `../src/shared/runtime` import fails first (ERR_MODULE_NOT_FOUND, exit 1, stdout 0), so the diagnostic is unreachable outside Bun; the fix is tsconfig `allowImportingTsExtensions` + a `.ts` specifier (out of scope)."
+        },
+        {
+          "time": "2026-11-19T03:48:52Z",
+          "detail": "Orchestrator verification: `~/.bun/bin/bun run typecheck` exit 0; `bun run test tests/runtime.test.ts` 14 pass / 0 fail / 42 expects; `bun run bin/sangkar.ts status --json` exit 0 with a normal envelope on stdout and no runtime.unsupported line on stderr. Real-process refusal probe: exit 70, stdout 0 bytes, stderr one JSON line naming Bun >= 1.4.4. Documented limit: a non-Bun interpreter cannot reach the guard because the extensionless static import of ../src/shared/runtime fails node's resolver first (ERR_MODULE_NOT_FOUND); the guard is Bun-reachable only, which is the stale-Bun case it exists for. No BUN_VERSION env override exists, so the phase-2 runtime probe must fake the RuntimeProbe rather than force an env var."
+        }
+      ]
     },
     {
       "agent": "verify",
@@ -131,8 +167,13 @@
       ],
       "size": "S",
       "title": "Phase 0 gate",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:58:57Z",
+          "detail": "Phase 0 gate executed in worktree. (1) bun run typecheck -> exit 0 ($ tsc --noEmit). (2) bun run lint -> exit 0 (biome check src tests bin: 97 files, no issues). (3) PATH=\"$HOME/.bun/bin:$PATH\" bun run test tests/domain.test.ts tests/unresolved.test.ts tests/persist.test.ts tests/runtime.test.ts tests/boundary.test.ts -> exit 0, 98 pass / 0 fail / 478 expect() across 5 files, no failing test names. (4) Boundary rules: src/shared/domain/unresolved.ts has a single import: 'import type { UnresolvedRef } from \"#shared/store/read/coverage\"' (type-only, no src/tools or src/indexer imports) -> PASS. src/shared/runtime.ts (91 lines) contains zero import statements and zero dynamic import() calls, so no store imports -> PASS. (5) Migrations check: git status --porcelain -- migrations drizzle drizzle.config.ts -> empty, migrations/ and drizzle meta unmodified. git status churn all attributable to phase_0 tasks: modified bin/sangkar.ts + src/shared/runtime.ts + tests/runtime.test.ts (TASK-006), src/shared/domain/resolve.ts + tests/resolve.test.ts (TASK-001), src/shared/domain/unresolved.ts + tests/unresolved.test.ts (TASK-002), src/indexer/{worker,persist}.ts + src/shared/store/read/reader.ts + tests/persist.test.ts + tests/read-files.test.ts (TASK-005), src/indexer/resolve.ts (TASK-017), .ppm/answer-fidelity/tasks/phase_0.json (orchestrator status tracking). No unexpected churn. Verdict: PASS — all three commands exit 0, both boundary rules hold, migrations untouched."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -161,8 +202,17 @@
       ],
       "size": "M",
       "title": "Indexer: split import failures by cause",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T03:57:13Z",
+          "detail": "Changed src/indexer/resolve.ts (SymbolIndex.moduleCandidates + moduleFile expressed over it, BindEvidenceKind +missing_module, importFailure: >1 candidate -> ambiguous with \" candidates: a | b\", 0 candidates + \"./|../\" -> missing_module with \"(no file matched)\", otherwise dynamic incl. \"#\" aliases), tests/resolve.test.ts (moduleCandidates agreement + stem-tie/./miss/package/# fixture), tests/persist.test.ts (new kinds land in unresolved verbatim). ~/.bun/bin/bun run typecheck -> exit 0; ~/.bun/bin/bun run test tests/resolve.test.ts tests/persist.test.ts -> 34 pass, 0 fail, exit 0; biome check on the 3 files -> exit 0. Kind census, controlled on the identical tree with full re-index: before (HEAD resolve.ts, gen g-8a0cd4) ambiguous 187, dynamic 4627, receiver_type_unknown 4763, missing_module 0, total 9577, all 552 import rows dynamic -> after (gen g-cd72cf) ambiguous 196, dynamic 4556, missing_module 62, receiver_type_unknown 4761, total 9575, import rows 481 dynamic / 9 ambiguous / 62 missing_module (the 2 extra rows + 18 self-source edges are resolve.ts indexing itself); checked 0 relative-specifier rows left dynamic."
+        },
+        {
+          "time": "2026-11-19T03:57:55Z",
+          "detail": "Orchestrator verification: diff confined to src/indexer/resolve.ts + tests/resolve.test.ts + tests/persist.test.ts (persist.ts untouched). `~/.bun/bin/bun run typecheck` exit 0; `bun run test tests/resolve.test.ts tests/persist.test.ts` 34 pass / 0 fail / 236 expects. Live census on .sangkar/graph.db after re-index: ambiguous 196, dynamic 4556, missing_module 62, receiver_type_unknown 4761 (before: ambiguous 187 / dynamic 4627 / missing_module absent). No relative specifier left as dynamic; tie evidence carries both competing paths; # aliases and bare packages stay dynamic by design (issue #6 remains open)."
+        }
+      ]
     }
   ]
 }
