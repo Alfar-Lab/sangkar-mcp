@@ -1,0 +1,216 @@
+{
+  "phase": "phase_1",
+  "title": "The wrong-answer fixes (#1, #4, #2, #6, #7)",
+  "tasks": [
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/index.ts (the composition root only — no other file):\n1. `interface FileFingerprint { readonly ino: number; readonly size: number; readonly mtimeMs: number }` and `function fingerprintOf(dbPath: string): FileFingerprint | null` using `statSync`, returning `null` on ENOENT/EACCES. Publish renames a new inode over the live path (`src/shared/store/publish.ts`), so `ino` is the signal; `size`+`mtimeMs` guard a filesystem that reuses inodes.\n2. The `Store` `ready` variant gains `readonly fingerprint: FileFingerprint | null`, set at open time in `openStore`; an absent or refused store has none.\n3. `function refreshStore(store: Store, config: AppConfig): Store` decides on the file, not on the store variant — this is what makes **absent → ready** work, which is the flow \"a server started before the first index, then a publish happens\":\n   - `const now = fingerprintOf(dbPath)`. `now === null` → return the store unchanged (an absent store stays absent; a ready store keeps serving, because a vanished file is not a newer generation).\n   - `store.kind === \"ready\"` and `now` equals `store.fingerprint` → return the same object (identity, no re-open).\n   - otherwise (`store.kind !== \"ready\"`, or the fingerprint differs) build a replacement **before** destroying anything: `openReader(dbPath)` → `readSchemaVersion` (a newer schema is a refusal, not a swap) → `makeReader(conn)` → `reader.metaFor()` → `guardRoot(meta.projectRoot, config.repoRoot, dbPath)` → `buildContext(config, reader)`. On success close the previous connection when there was one, and return the new ready store with the new fingerprint and `guard.staleReason`.\n   - on any throw or guard error: `log.warn(\"store.refresh_failed\", { reason, dbPath })`, keep whatever was there, and (when the previous store was `ready`) return it with `staleReason` set to `\"a newer generation could not be opened\"` so the next answer is honestly stale.\n4. In `runMcp`, change `const store` to `let store`, refresh at the start of the `CallToolRequestSchema` handler — **before** the `kind === \"absent\"` / `\"refused\"` short-circuits, which is the whole point of item 3 — and keep `lifecycle.conn` pointing at the current connection so `shutdown` closes the live handle (`src/index.ts:679`).\n5. `decisive` is filled in exactly one place each: `uncheckedReadStatus()` returns `{ ..., stale: true, stale_reason: reason, decisive: false }`, and `route()` sets `decisive` from the **final** `stale` after its `root_mismatch` downgrade, so `stale && decisive` cannot describe the same answer. No handler sets it.\n6. Rewrite the invariant comment at `src/index.ts:301-309` (\"the handle is opened once, here, and never re-opened\") into a statement of the new contract: the handle is re-opened when the file on disk is a newer generation, and `DATABASE.md` §5's guarantee is about a reader that is not refreshed, not about a server that must answer questions about a tree.\nConstraints: `openReader`, `makeReader`, `readSchemaVersion`, `guardRoot` keep their signatures; do not add a per-call `open()` on the unchanged path; do not touch `emit()`, the publish protocol, or the watcher; `route()`'s `next_tools` behaviour is unchanged.",
+        "goal": "Stop the MCP server from answering from its startup generation: refresh the store when the file on disk is a newer generation, and stamp `read_status.decisive` once in the root so a stale answer carries its own warning.",
+        "steps": [
+          "Add `FileFingerprint`, `fingerprintOf`, and the `readonly fingerprint` member on the `ready` store variant; set it in `openStore`.",
+          "Implement `refreshStore` with the three-way decision above, including absent → ready and the failure path that keeps the previous reader.",
+          "Wire the refresh into the MCP call handler ahead of the absent/refused short-circuits, and keep `lifecycle.conn` current for `shutdown`.",
+          "Fill `decisive` in `uncheckedReadStatus()` and `route()` from the final stale value, and rewrite the obsolete \"never re-opened\" comment.",
+          "Write tests/store-refresh.test.ts: (a) unchanged file returns the identical store object; (b) publishing a second generation over a temp db (migrate + `withStage`, the pattern in tests/smoke.test.ts) makes the refreshed reader report the new generation and closes the old handle; (c) a newer `meta.schema_version` keeps the previous reader and sets `stale_reason`; (d) a cursor minted under the pre-swap generation is refused after the swap; (e) **absent → ready**: an `openStore` against a missing db path answers absent, a publish creates the file, and the next refresh returns a ready store whose reader reports that generation; (f) a stdio end-to-end run with `SANGKAR_NO_WATCH=1` where a second process publishes and the server's next `status` reports the new generation and `decisive === !stale`.",
+          "Run `~/.bun/bin/bun test tests/store-refresh.test.ts tests/cursor.test.ts tests/mcp-surface.test.ts tests/freshness.test.ts` and `~/.bun/bin/bun run typecheck`."
+        ],
+        "verify": "`~/.bun/bin/bun run typecheck` exits 0; `~/.bun/bin/bun test tests/store-refresh.test.ts tests/cursor.test.ts tests/mcp-surface.test.ts tests/freshness.test.ts` green. Done when: the end-to-end case shows the server reporting the newer generation after an external publish, and every answer in that run has `read_status.decisive === !read_status.stale`."
+      },
+      "files": [
+        "src/index.ts",
+        "tests/store-refresh.test.ts"
+      ],
+      "id": "TASK-005",
+      "size": "M",
+      "title": "Re-open the store on a newer generation and stamp read_status.decisive",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/tools/status/handler.ts only (plus its test). Current code at `:160-184`:\n```ts\n  const files = ctx.reader.allFiles();\n  const rows = ctx.reader.rowsForPaths(requested);\n  const census = ctx.reader.censusByLanguage();\n  ...\n  const censusFiles = census.reduce((total, row) => total + row.files, 0);\n  const skipped = Math.max(0, censusFiles - files.length);\n```\nChange to a scoped count from one list, plus the two new fields:\n- `const allSkipped = ctx.reader.notIndexedAll();` once, and `const scoped = requested.length === 0 ? allSkipped : rows.notIndexed;` so a no-paths call scopes to the repository instead of answering `not_indexed: []` (today `rowsForPaths([])` returns `{indexed: [], notIndexed: []}`; `src/shared/store/read/coverage.ts:117-119`).\n- `skipped: scoped.length`, `not_indexed: scoped.map((row) => ({ path: row.path, reason: row.reason }))`.\n- `complete: files.length > 0 && scoped.length === 0 && failed === 0` (the scope's own answer; the repo-wide number no longer gates it).\n- `totals.not_indexed_total: ctx.reader.notIndexedCount()` (repo-wide, identical in every tool).\n- `coverage.tests: ctx.reader.testsCensus()`.\n- Replace the `censusFiles` subtraction and its `max` guard: the census consistency invariant becomes `censusFiles === files.length + ctx.reader.notIndexedCount()`, and the comment must say so. If `censusFiles` becomes unused after the change, delete it rather than keep a dead binding.\n- Rewrite the `Scope-limited by construction` comment to state the new truth: `skipped` counts the assembled scope, `totals.not_indexed_total` counts the graph.\n- The human summary line (`:529`) must keep naming the skipped number that matches its scope, and add the total only when the list was trimmed.",
+        "goal": "Make `status` report a skipped count that its own list backs, publish the repo-wide total beside it, and report the test census.",
+        "steps": [
+          "Replace the census subtraction with the scoped list and count from notIndexedAll() and rowsForPaths.",
+          "Add totals.not_indexed_total and coverage.tests; keep the totals.total_relation derivation untouched.",
+          "Update the two comments (the scope-limited note in the handler and the now-false note at tests/tools-status.test.ts:644-645) and the human summary line.",
+          "Update every exact-shape assertion the new keys touch in tests/tools-status.test.ts: line 433 (coverage toEqual), line 441 (totals toEqual), line 478 (no-paths totals toEqual), line 646 (coverage toEqual, whose comment claims the counts are repo-wide and is now false). The census invariant at lines 684-687 becomes: censusFiles equals env.coverage.indexed plus totals.not_indexed_total.",
+          "Add two cases: 3 skipped paths of which 2 sit under the requested prefix (skipped 2, not_indexed length 2, not_indexed_total 3), and a no-paths call on a fixture with skipped paths (populated list, not_indexed_total equal to coverage.skipped, truncated true when the budget cuts the list).",
+          "Run the scoped checks."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/tools-status.test.ts tests/tools-smoke.test.ts tests/budget.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: `status --json` on a graph with skipped paths never returns `skipped > 0` with `not_indexed: []` unless `truncated: true` and `totals.not_indexed_total >= coverage.skipped`, and a no-paths call lists rows."
+      },
+      "files": [
+        "src/tools/status/handler.ts",
+        "tests/tools-status.test.ts"
+      ],
+      "id": "TASK-006",
+      "size": "M",
+      "title": "Scope status coverage to its own list and publish the repo-wide total and test census",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/tools/summary/handler.ts only (plus its test). `summary` already assembles through `#shared/domain/coverage` (`buildChange` → `changedSince`/`assemble` at `:825-830`) and already publishes `totals.not_indexed_total` in the repo scope (`:645`). Three changes:\n1. `coverage.skipped` stays the scoped count (top-level prefixes) — do not change `topLevelPrefixes` at `:299-307`.\n2. `totals.not_indexed_total` becomes `assembly.notIndexedTotal` (the repo-wide count from TASK-003) in **all three scopes** (`change`, `repo`, `area`), so it is one number per generation regardless of what the caller asked. Where a scope currently derives it from a list length, replace that derivation.\n3. `coverage.tests = ctx.reader.testsCensus()` in every scope, beside the existing coverage assembly.\nThe doc comment on the `coverage` section must say that `skipped` is the scope while `not_indexed_total` is the graph, in one line. Do not add `unmatched_files` to this payload: it is not documented in TOOLS-SPEC §4 and this task does not own that contract (it stays in `impact`).",
+        "goal": "Make `summary` publish the same repo-wide skipped total as `status` for the same generation, and report the test census in every scope.",
+        "steps": [
+          "Replace the list-length derivation of totals.not_indexed_total with assembly.notIndexedTotal in every scope that publishes it.",
+          "Add notIndexedCount to the CoverageSource literal at src/tools/summary/handler.ts:821-824: TASK-003 makes it a required member, so this file does not compile without it.",
+          "Add coverage.tests to each scope covereage.",
+          "Update the one-line doc comment about the two numbers.",
+          "Update tests/tools-summary.test.ts: the documented-keys test at lines 646-672 gains tests; the existing not_indexed_total assertion keeps its value only if the fixture has no out-of-prefix skipped paths, otherwise change it to the repo-wide number and say why in the test name.",
+          "Add a case where a skipped path outside the top-level prefixes exists (coverage.skipped excludes it, not_indexed_total includes it), then run the scoped checks."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/tools-summary.test.ts tests/tools-impact.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: on one generation, `status --json` and `summary --json` report an identical `totals.not_indexed_total`, and both report a `coverage.tests` object."
+      },
+      "files": [
+        "src/tools/summary/handler.ts",
+        "tests/tools-summary.test.ts"
+      ],
+      "id": "TASK-007",
+      "size": "M",
+      "title": "Publish the repo-wide skipped total and test census from summary",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "New helper in src/shared/paths.ts:\n```ts\n/**\n * `./x.js` from `src/a/b.ts` is `src/a/x`; `../c` from `src/a/b.ts` is `src/c`. Collapses `.` and\n * `..` and strips a trailing extension, then returns `null` when the specifier climbs above the\n * repository root — a module string is not a stored path, so `normalizeRel`'s `..`-preserving rule\n * does not apply. Absolute specifiers return `null`.\n */\nexport function resolveFrom(importer: string, specifier: string): string | null;\n```\nIn src/indexer/resolve.ts:\n- `moduleCandidates(module: string, fromFile?: string)` (`:229-264`) and `moduleFile(module, fromFile?)` (`:266-275`): when `fromFile` is provided and `isRelativeSpecifier(module)` (`:666-669`) is true, try the importer-relative stem first — `resolveFrom` → the exact `#stems` entry → the same sorted candidate list — and return it when it is non-empty. Otherwise fall through to today's exact-then-suffix match, unchanged.\n- `importHits(file, name, index)` (`:492-514`) passes `file` to `index.moduleFile`.\n- `bindRaw`'s `imports` case (`:382`) passes `context.file` to `index.moduleCandidates`.\n- The `#candidates` memo (`:151`) is keyed by module string today; make the key `module + \"\\0\" + (fromFile ?? \"\")` so two importers do not share a cache entry.\nDo not change `normalizeRel`, `stemOf`, `#stems`, `importFailure`'s evidence kinds, or the extracted/inferred tiers. Do not add a dependency.",
+        "goal": "Resolve a relative specifier against the importing file's directory first and collapse `..`, so 71 currently-unresolved relative imports in this repository bind — without changing stored path semantics.",
+        "steps": [
+          "Add resolveFrom to src/shared/paths.ts with the escape and absolute-specifier refusals.",
+          "Thread fromFile through moduleCandidates/moduleFile and key the memo by specifier plus importer.",
+          "Pass the importer at the two call sites (importHits, bindRaw imports).",
+          "Add the six cases to tests/resolve.test.ts using the existing decl/raw/unit/UNITS helpers: ./x.js resolves to x.ts; ./dir/index.js resolves to dir/index.ts; a duplicate basename beaten locally; ../x.js with an existing target; a genuinely missing relative target that stays missing_module; a ../../.. specifier that escapes and falls back rather than resolving.",
+          "Run ~/.bun/bin/bun test tests/resolve.test.ts tests/persist.test.ts.",
+          "Index this repository into a scratch data dir: ~/.bun/bin/bun run bin/sangkar.ts index --data-dir /tmp/import-fix --json. Then count with the only SQL runner on this machine (no sqlite3 binary, no sql verb): ~/.bun/bin/bun -e 'import {Database} from \"bun:sqlite\"; console.log(new Database(\"/tmp/import-fix/graph.db\", {readonly: true}).query(\"SELECT count(*) AS c FROM unresolved WHERE evidence LIKE 'import:%' AND (raw_target LIKE './%' OR raw_target LIKE '../%')\").get())' — expect c: 0, down from 71."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/resolve.test.ts tests/persist.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0; the scratch-index query returns 0 relative unresolved import rows and `bin/sangkar.ts:3`'s `../src/shared/runtime` binds. Done when: the six fixture cases pass and `~/.bun/bin/bun test tests/parser-parity.test.ts` still sits inside its ±15 % unresolved band."
+      },
+      "files": [
+        "src/indexer/resolve.ts",
+        "src/shared/paths.ts",
+        "tests/resolve.test.ts"
+      ],
+      "id": "TASK-008",
+      "size": "M",
+      "title": "Bind relative imports against the importer directory and collapse ..",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/shared/domain/diff.ts (plus tests/diff.test.ts and one line in tests/tools-smoke.test.ts).\n1. ChangeState (line 47) gains \"untracked\".\n2. Add gitStatusPorcelain(repoRoot, timeoutMs, env) beside gitNameStatus: argv exactly git --no-pager --no-optional-locks -c credential.helper= -c core.askpass= -C <repoRoot> rev-parse --show-prefix for the sub-root prefix, then git --no-pager --no-optional-locks -c credential.helper= -c core.askpass= -C <repoRoot> status --porcelain -z --untracked-files=all. git status rejects --relative and --no-ext-diff (verified against git 2.53.0) so do not pass them, and say so in the doc comment. Same timeout race and SIGKILL as gitNameStatus; a failure returns the same GitOutcome shape and sets degraded, never throws.\n3. Add parseStatusPorcelain(stdout): v1 -z records are XY<SP><path>\\0 with XY == \"??\" meaning untracked; ignore every other status here (the diff carries those) and ignore a record whose path does not start with the --show-prefix value, stripping that prefix before reporting.\n4. Union in changeSetFor (lines 455-469): after the existing changed/removed derivation, add one entry per untracked path that is neither in changed nor in removed nor already a gitState entry, with state \"untracked\", keeping the existing classify gate so a path with no indexable language and no file row stays in unmatched. Sort entries by path after the merge so two runs agree.\n5. Coherence with freshness: changeSet.changed must include the untracked paths (an untracked file is drift), so the drift computation at src/tools/summary/handler.ts:816 (changed.length + removed.length) and impact's equivalent do not report stale:false beside a change set that grew. If including them in changed would double-report a path in the payload, add a separate field or a documented note instead, and say which you chose in the report.\n6. The module doc comment gains one line: the second git read exists because git diff cannot see an untracked file, and lists what git status cannot use.\n7. tests/tools-smoke.test.ts:592 pins the four-value state list with toContain; if its fixture now yields an untracked row, extend that list to the five values. It is in this task's files for that reason and no other edit there is expected.\nDo not change gitNameStatus's argv, parseNameStatus, the hash source, or the degraded semantics.",
+        "goal": "Make a newly added, still-untracked file appear in the change set, labelled with its own state, so `summary` and `impact` stop answering \"nothing changed\" for the commonest agent action.",
+        "steps": [
+          "Add \"untracked\" to ChangeState and document the fifth state where the union is described.",
+          "Add gitStatusPorcelain with the accepted prologue, --untracked-files=all, the rev-parse --show-prefix read, and the same bounded-spawn shape as the diff read.",
+          "Add parseStatusPorcelain for the v1 -z stream (space after the two-letter status, no quoting, prefix stripping).",
+          "Union untracked paths into entries behind the existing classify gate, drop duplicates, sort by path, and make the freshness drift count include them (item 5).",
+          "Add tests to tests/diff.test.ts on the makeGitRepo() fixture: an untracked file yields one untracked entry; an untracked directory with two files yields two entries (proof -uall took effect); a modified tracked file plus a new untracked file yields two entries; a sub-directory root reports paths relative to that root; a git failure still degrades without throwing.",
+          "Run ~/.bun/bin/bun test tests/diff.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts tests/tools-smoke.test.ts."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/diff.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: on a clean tree with one untracked file, the change set contains it with `state: \"untracked\"`, and a tree with one modified tracked file plus one untracked file reports `changed_files_total: 2`."
+      },
+      "files": [
+        "src/shared/domain/diff.ts",
+        "tests/diff.test.ts",
+        "tests/tools-smoke.test.ts"
+      ],
+      "id": "TASK-009",
+      "size": "M",
+      "title": "Union git status --porcelain into the change set with an untracked state",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/tools/impact/handler.ts only (plus its test), around `summaryOf` at `:337-355`. Today the last sentence is:\n```ts\n    `${facts.tested} of ${facts.impacted} covered by tests.`\n```\nAdd the census clause: when `ctx.reader.testsCensus().nodes === 0`, the sentence must say the graph indexes no test symbols, so a reader cannot mistake \"nothing is covered\" for \"this repository has no tests\". Use the census number in the wording (e.g. `\"0 of 12 covered by tests; this graph indexes no test symbols.\"`) and leave the non-zero case byte-identical, because `tests/tools-impact.test.ts` pins the current sentence.\nBuild the census once per call, not per node, and do not add a payload field: the census is published by `status` and `summary` (issue #2's scope), and `impact`'s job is to explain its own numerator.",
+        "goal": "Make `impact`'s coverage sentence distinguish \"nothing covers this change\" from \"no test corpus was indexed\".",
+        "steps": [
+          "Read `ctx.reader.testsCensus()` once in the handler that builds `SummaryFacts`.",
+          "Extend `summaryOf` so the zero-census case appends the clause and the non-zero case is unchanged.",
+          "Add two cases to tests/tools-impact.test.ts: a fixture with test nodes keeps the current sentence verbatim; a fixture with none appends the clause.",
+          "Run the scoped checks."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/tools-impact.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: the same change set on a graph with zero `is_test` nodes and on one with test nodes produces sentences that differ only in the clause."
+      },
+      "files": [
+        "src/tools/impact/handler.ts",
+        "tests/tools-impact.test.ts"
+      ],
+      "id": "TASK-010",
+      "size": "S",
+      "title": "Explain a zero test numerator in impact's coverage sentence",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "One file: docs/my-product/TOOLS-SPEC.md. Document exactly what phase 1 shipped, in the sections that own those keys — do not restructure the file and do not touch §3/§5/§7/§8 (phase 2 owns those).\n1. §1.1's field table (around `:80-86`) gains a row for `read_status.decisive`: \"`false` exactly when `stale` is `true`; filled by the composition root, never by a handler; a stale answer is self-describing, not silently wrong.\"\n2. §2's `coverage` table: `skipped` is redefined as \"the count of `not_indexed` rows in the scope this answer assembled\", plus a new `totals.not_indexed_total` row: \"the repo-wide count; identical in every tool for one generation\". Add `coverage.tests` (`{nodes, languages:[{language,nodes}]}`) with the sentence that `nodes: 0` means no test symbols were indexed.\n3. The `Example output` blocks that show `\"skipped\": 12` with `\"not_indexed\": []` (grep for it: `:165`, `:251`, `:597`, `:695`, `:847`) must stop contradicting the new contract: either the list is non-empty or `totals.not_indexed_total` is present and the envelope says `truncated`. Pick the shape that matches what the tool now produces and keep the examples internally consistent.\n4. §4's `### changed_files` rows section (`:457-471`): `state` is now `modified | added | deleted | renamed | untracked`, with one sentence on what `untracked` means (present on disk, not in the index, so no symbols) and the note that `git diff` alone cannot produce it.\n5. §1.1's example envelope, if it carries `read_status`, gains `decisive`.\nEvery claim must be checkable against the code the phase produced; when the code and this doc disagree, the code wins and the discrepancy is reported rather than documented.",
+        "goal": "Update TOOLS-SPEC for every payload key phase 1 moved, so the public contract and the implementation land in the same phase.",
+        "steps": [
+          "Add the `read_status.decisive` row and the example-envelope field.",
+          "Redefine `coverage.skipped`, add `totals.not_indexed_total` and `coverage.tests`.",
+          "Fix the example outputs that show a count with an empty list.",
+          "Extend the change-set `state` vocabulary with `untracked`.",
+          "Grep the file for `skipped` and for `not_indexed` and confirm every occurrence now agrees with the code."
+        ],
+        "verify": "`git diff --stat docs/my-product/TOOLS-SPEC.md` shows one file changed; `grep -n 'decisive' docs/my-product/TOOLS-SPEC.md` is non-empty; `grep -n 'not_indexed_total\\|coverage.tests\\|untracked' docs/my-product/TOOLS-SPEC.md` covers §1, §2 and §4. Done when: for every payload key added in phase 1 there is one row here, and no example in the file shows `skipped` greater than zero beside an empty `not_indexed` without a total."
+      },
+      "files": [
+        "docs/my-product/TOOLS-SPEC.md"
+      ],
+      "id": "TASK-011",
+      "pre_request": [
+        "TASK-005",
+        "TASK-006",
+        "TASK-007",
+        "TASK-009",
+        "TASK-010"
+      ],
+      "size": "M",
+      "title": "Document the phase 1 payload changes in TOOLS-SPEC",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "Read-only: this task modifies no file. Run the commands in this order and report each exit code with the command's own summary line. A failure that reproduces at `58a2103` without this phase's changes is pre-existing: say so, quote the evidence, and do not fix it and do not weaken an assertion.",
+        "goal": "Prove phase 1 is a green, integrated set of changes: the full suite, the acceptance assertions and the migration drift check all pass on the merged tree.",
+        "steps": [
+          "Run ~/.bun/bin/bun run typecheck and ~/.bun/bin/bun run lint.",
+          "Run ~/.bun/bin/bun run test (the whole suite).",
+          "Run ~/.bun/bin/bun run acceptance and report the latency and prepared-vs-builder numbers it prints.",
+          "Run ~/.bun/bin/bun run db:drift. It runs drizzle-kit generate, which can WRITE a migration file: if src/shared/store/migrations gains a file, report it as a defect, delete that file, and confirm git status --porcelain is clean of it before leaving.",
+          "Run ~/.bun/bin/bun test tests/parser-parity.test.ts and report where the unresolved count sits relative to CRG's 44338 plus or minus 15 percent band, since import binding moved it."
+        ],
+        "verify": "All five commands exit 0. Done when: the report quotes each exit code, the acceptance numbers, the unresolved-vs-band position, and confirms `git status --porcelain` shows no migration file."
+      },
+      "files": [],
+      "id": "TASK-012",
+      "pre_request": [
+        "TASK-005",
+        "TASK-006",
+        "TASK-007",
+        "TASK-008",
+        "TASK-009",
+        "TASK-010",
+        "TASK-011"
+      ],
+      "size": "S",
+      "title": "Phase 1 gate: full suite, acceptance, drift and the parity band",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

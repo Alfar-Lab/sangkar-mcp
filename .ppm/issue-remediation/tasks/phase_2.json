@@ -1,0 +1,222 @@
+{
+  "phase": "phase_2",
+  "title": "Tool schema text, example calls and remaining docs (#8, #9)",
+  "tasks": [
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "In src/index.ts only. This task runs AFTER the manifest tasks, because it consumes the `example` exports they add.\n1. `itemSchemaOf` (lines 163-166) currently hardcodes `{ type: \"string\" }`; make it honour the declared item type and values: `items: { type: \"integer\" }` must publish `{type: \"integer\"}` (this is `expand.range`), and `items.values` keeps publishing an `enum`. The declared shape is `InputField.items?: { type?: string; values?: readonly string[] }` in src/shared/cli/args.ts.\n2. `RegisteredTool` (line 126) gains `readonly example?: Readonly<Record<string, unknown>> | undefined`.\n3. Add `example as <tool>Example` to each of the seven existing manifest import statements (lines 77-94 show the current shape, e.g. `import { input as traceInput, manifest as traceManifest } from \"./tools/trace/manifest\";`), and add `example: <tool>Example,` to each `TOOLS` registry entry beside `input:`.\n4. `inputSchemaOf`/`descriptorOf` publish it as `inputSchema.examples = [example]` when defined, and nothing when it is not. Do not invent a per-argument `examples` keyword and do not change the published `inputSchema.type`/`required` behaviour.\n5. Whatever shape the SDK's `Tool` type accepts for `inputSchema` must still typecheck; if a cast is needed, constrain it to the extra key and say why in a comment.\nDo not edit any manifest (TASK-014/015/016 own them) and do not change `parseArgs`, `parseCliArgsAndNames`, `usageOf`, or the CLI argument parser in src/shared/cli/args.ts.",
+        "goal": "Publish what the manifests declare: array item types, and one tool-level example per manifest, without changing the CLI parser.",
+        "steps": [
+          "Fix itemSchemaOf to honour items.type and items.values.",
+          "Add the optional example member to RegisteredTool.",
+          "Import each manifest's example beside its input and add it to that tool's TOOLS entry.",
+          "Publish inputSchema.examples = [example] when present.",
+          "Run typecheck, lint, and the test files named in verify."
+        ],
+        "verify": "`~/.bun/bin/bun run typecheck` exits 0; `~/.bun/bin/bun test tests/mcp-surface.test.ts tests/cli-args.test.ts` green. Done when: a stdio `tools/list` probe shows `expand.properties.range.items` as `{type: \"integer\"}` and no tool publishes `examples` until its manifest declares one."
+      },
+      "files": [
+        "src/index.ts"
+      ],
+      "id": "TASK-013",
+      "size": "S",
+      "title": "Publish array item types and per-tool example calls in the input schema",
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-014",
+        "TASK-015",
+        "TASK-016"
+      ]
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Two files: src/tools/trace/manifest.ts, src/tools/search/manifest.ts. Each gains:\n1. A `description` on every argument that lacks one — trace has 8 (`query`, `direction`, `kinds`, `path`, `depth`, `budget`, `unresolved`, `cursor`), search has 5 (`query`, `kind`, `path`, `budget`, `cursor`). Rules for the text: one clause, at most ~12 words, naming **what the argument selects** — not its type and not its default (the schema already publishes both). Source the substance from the `why` column of that tool's Parameters table in docs/my-product/TOOLS-SPEC.md (§3 for trace, §5 for search) and from the argument's existing JSDoc on the `TraceArgs`/`SearchArgs` interface; keep the vocabulary the enum already uses (`all`/`in`/`out`, the node kinds, the unresolved buckets). Example shape: `direction: { type: \"enum\", values: DIRECTIONS, default: \"all\", description: \"Which way to walk from the symbol: in, out or both.\" }`.\n2. A `example` export beside `input`, typed `Record<string, unknown>`, so `src/index.ts` can publish it: a call an agent can paste verbatim, using only declared argument names and a plausible value from the tool's own docs. For trace: `{ query: \"handleRequest\", depth: 1 }`. For search: `{ query: \"publish\", kind: \"function\" }`. If a required argument exists, the example must include it.\nConstraints: do not renumber or reorder arguments (tests pin key order — `tests/tools-search.test.ts:280`, `tests/tools-trace.test.ts`); do not change `TOOLS-SPEC` (another task owns it); do not touch `src/index.ts` (TASK-013 owns it).",
+        "goal": "Give every trace and search argument a description of what it selects, and publish one copy-pasteable example call per tool.",
+        "steps": [
+          "Add `description` to each of trace's 8 arguments, sourced from TOOLS-SPEC §3's `why` column.",
+          "Add trace's `example` export.",
+          "Add `description` to each of search's 5 arguments, sourced from TOOLS-SPEC §5.",
+          "Add search's `example` export.",
+          "Run `~/.bun/bin/bun test tests/tools-trace.test.ts tests/tools-search.test.ts tests/cli-args.test.ts`."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/tools-trace.test.ts tests/tools-search.test.ts tests/cli-args.test.ts` green (the CLI usage block reads `description`, so it changes shape for these two tools — update the pinned expectations only where they are about the touched lines, never by loosening the assertion). Done when: `grep -c 'description:' src/tools/trace/manifest.ts` and the search equivalent equal their argument counts, and both manifests export `example`."
+      },
+      "files": [
+        "src/tools/trace/manifest.ts",
+        "src/tools/search/manifest.ts"
+      ],
+      "id": "TASK-014",
+      "pre_request": [],
+      "size": "M",
+      "title": "Describe every trace and search argument and add their example calls",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Three files: src/tools/summary/manifest.ts (5 arguments: `scope`, `target`, `base`, `budget`, `cursor`), src/tools/impact/manifest.ts (5: `paths`, `base`, `depth`, `budget`, `cursor`), src/tools/status/manifest.ts (2: `paths`, `budget`). Each gains:\n1. A `description` on every argument: one clause, at most ~12 words, naming what the argument selects. Source the substance from the `why` column of TOOLS-SPEC §4 (summary), §6 (impact) and §2 (status), and from the interface JSDoc already in those handlers (`SummaryArgs`, `ImpactArgs`, `StatusArgs`). Do not restate the type or the default.\n2. An `example` export beside `input`, `Record<string, unknown>`, a call an agent can paste: summary `{ scope: \"change\" }`, impact `{ depth: 2 }`, status `{ paths: [\"src\"] }` — adjust only if the manifest's declared arguments make that invalid.\nConstraints: keep argument order and names exactly as they are (five tool tests pin key order); do not edit src/index.ts or TOOLS-SPEC.",
+        "goal": "Give every summary, impact and status argument a description of what it selects, and publish one example call per tool.",
+        "steps": [
+          "Add descriptions to summary's 5 arguments and its `example` export.",
+          "Add descriptions to impact's 5 arguments and its `example` export.",
+          "Add descriptions to status's 2 arguments and its `example` export.",
+          "Run `~/.bun/bin/bun test tests/tools-summary.test.ts tests/tools-impact.test.ts tests/tools-status.test.ts tests/cli-args.test.ts`."
+        ],
+        "verify": "Those four test files are green, with any usage-block expectation updated only for the lines this task touched. Done when: every argument in the three manifests carries a `description` and each manifest exports `example`."
+      },
+      "files": [
+        "src/tools/summary/manifest.ts",
+        "src/tools/impact/manifest.ts",
+        "src/tools/status/manifest.ts"
+      ],
+      "id": "TASK-015",
+      "pre_request": [],
+      "size": "M",
+      "title": "Describe every summary, impact and status argument and add their example calls",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Two files: src/tools/expand/manifest.ts (5 arguments: `target`, `what`, `path`, `range`, `budget`) and src/tools/index/manifest.ts (2: `force`, `mode` — already described; verify the text still matches the schema and leave it alone if it does).\n1. `expand` gains a `description` on all five. `what` must name the five values it selects (`members`, `edges`, `source`, `coverage`, `outline`) in one clause; `range` must say it is the 1-based inclusive line span inside the resolved node's own extent, clamped to it (that is what `src/tools/expand/handler.ts:581` implements). Source the rest from TOOLS-SPEC §7's Parameters table (`:652-676`).\n2. `expand` gains an `example` export, `Record<string, unknown>`: `{ target: \"src/indexer/resolve.ts\", what: \"outline\" }`.\n3. `index` gains an `example` export: `{ mode: \"fast\" }`.\nConstraints: keep argument order and names (`tests/tools-expand.test.ts:499` and `tests/tools-index.test.ts:158` pin them); do not change `what`'s values list, which already contains `outline`; do not edit src/index.ts.",
+        "goal": "Describe expand's arguments — including the undocumented `range` and the five `what` values — and publish example calls for expand and index.",
+        "steps": [
+          "Add descriptions to expand's five arguments, naming the five `what` values and `range`'s clamping rule.",
+          "Add expand's `example` export.",
+          "Add index's `example` export after checking its two existing descriptions still match the schema.",
+          "Run `~/.bun/bin/bun test tests/tools-expand.test.ts tests/tools-index.test.ts tests/cli-args.test.ts`."
+        ],
+        "verify": "Those three test files are green. Done when: all five expand arguments carry a `description`, `grep -n 'range' src/tools/expand/manifest.ts` shows a described argument, and both manifests export `example`."
+      },
+      "files": [
+        "src/tools/expand/manifest.ts",
+        "src/tools/index/manifest.ts"
+      ],
+      "id": "TASK-016",
+      "pre_request": [],
+      "size": "S",
+      "title": "Describe expand's arguments and publish expand and index example calls",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "One file: tests/mcp-surface.test.ts, in the existing test that publishes the seven names and their schema (lines 175-252).\n1. Every `toEqual` assertion over an `inputSchema.properties.<arg>` entry must become `toMatchObject`, because each property gains a `description` (and the tool gains `examples`). At least four are affected: line 230 (trace.query), line 232 (trace.depth), line 238 (trace.direction), line 245 (status.paths). Scan the whole test for others — grep `inputSchema.properties` and check each one; the audit found exactly these four, and a fifth would be a defect to report, not to exempt.\n2. Add the invariant the issue asks for: for every tool in `tools/list`, for every property in `inputSchema.properties`, expect `property.enum ?? property.description` to be defined; and for every tool, expect `inputSchema.examples` to be a non-empty array whose single element is an object whose keys are all declared properties of that tool.\n3. Add the item-type assertion for `expand.properties.range`: `items` must be `{type: \"integer\"}`.\nConstraints: no other test file is edited here; do not relax any assertion beyond the property-shape ones named above, and do not delete a check to make the invariant pass — an argument with neither an enum nor a description is the defect to report.",
+        "goal": "Make the published surface prove issue #8's acceptance criteria: every argument explains itself, every tool shows an example, and array items keep their type.",
+        "steps": [
+          "Convert the four `toEqual` property assertions (lines 230, 232, 238, 245) to `toMatchObject` and grep the file for any other property equality.",
+          "Add the per-property invariant loop over all seven tools.",
+          "Add the per-tool example assertion, checking the example's keys are declared arguments.",
+          "Add the expand.range item-type assertion.",
+          "Run the scoped test."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/mcp-surface.test.ts` green. Done when: the file contains the two new invariants, all seven tools pass them, and a deliberately undescribed argument would fail the suite (state in the report how you satisfied yourself of that)."
+      },
+      "files": [
+        "tests/mcp-surface.test.ts"
+      ],
+      "id": "TASK-017",
+      "pre_request": [
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016"
+      ],
+      "size": "S",
+      "title": "Assert the schema invariants over all seven tools in the mcp surface test",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Two files: docs/my-product/TOOLS-SPEC.md and docs/my-product/DESIGN.md.\n1. TOOLS-SPEC §1.2 (freshness of the answer, around `:194`) gains the recorded decision for issue #9 item 2: `read_status` keeps its field set; a fresh graph already emits three of the five fields; a compact form was considered and rejected because the measured saving is a few dozen tokens per answer while `next_tools` costs more on the same answer and `read_status` is a public contract whose shape `DESIGN.md:166` fixes. Write it as a decision with the reason, two to four sentences, not as an apology.\n2. TOOLS-SPEC §3 (trace), §5 (search), §7 (expand), §8 (index): each Parameters table gains a short `example call` line under its heading — the JSON object the tool now publishes in `inputSchema.examples`, verbatim. Also correct the table rows that the manifests' new descriptions make wrong.\n3. TOOLS-SPEC §10 (\"Total parameter surface\", `:893`) gains one sentence: every declared argument carries an enum or a description, and the seven example calls above are the published `inputSchema.examples`.\n4. DESIGN §5/§6 (`:166`, `:177`, `:197`, `:343`): record that the server re-opens the store when the file on disk is a newer generation, that `read_status.decisive` is filled once by the composition root and is `false` exactly when `stale` is `true`, and that a stale answer is a warning, never a silent one. Keep §6's envelope table consistent with `read_status`'s actual members.\nEvery sentence must be checkable against the code shipped in phases 0-2; where they disagree, the code wins and the discrepancy is reported.",
+        "goal": "Record the read_status decision and document the argument descriptions and example calls in the design record.",
+        "steps": [
+          "Write the §1.2 decision paragraph for the compact read_status question.",
+          "Add the four example calls to §3, §5, §7 and §8, copied verbatim from the manifests' `example` exports.",
+          "Fix any Parameters row the new descriptions contradict; add the §10 sentence.",
+          "Update DESIGN §5/§6 for the re-open and `read_status.decisive`.",
+          "Grep both files for `stale_checked_at`, `not_indexed_total`, `decisive` and `examples` to confirm they agree with the code."
+        ],
+        "verify": "`grep -n 'decisive' docs/my-product/DESIGN.md docs/my-product/TOOLS-SPEC.md` is non-empty; each of §3/§5/§7/§8 contains an example call identical to the string its manifest exports (compare with `grep -n 'example' src/tools/*/manifest.ts`). Done when: no doc sentence contradicts a payload key or a schema keyword the code now publishes."
+      },
+      "files": [
+        "docs/my-product/TOOLS-SPEC.md",
+        "docs/my-product/DESIGN.md"
+      ],
+      "id": "TASK-018",
+      "pre_request": [
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016"
+      ],
+      "size": "M",
+      "title": "Record the read_status decision and document the examples in the design record",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Two files: README.md and AGENTS.md.\n1. README.md, in or immediately after the \"One database belongs to one working tree\" paragraph (`:157-159`): add a two-worktree registration snippet — one `mcpServers` block (JSON, the shape a Claude Desktop / Cursor config uses) with two entries, one per worktree, each passing its own `--repo-root` and its own `--data-dir`, plus two lines of prose on what goes wrong if both entries share a data dir (the second server is refused by the `root_mismatch` guard). Use a generic path placeholder (`/work/app`, `/work/app.feature`) and the real command form (`~/.bun/bin/bun run /path/to/bin/sangkar.ts mcp --repo-root … --data-dir …`) — the `sangkar` binary form only if it is on PATH, which this repository's own docs must not assume.\n2. AGENTS.md \"Current state and known gaps\": update it to the state after this plan — the three open work items stay, but the numbers this plan moved must be re-measured on a fresh index of this repository and restated (relative unresolved imports 71 → the new number, `not_indexed` 107, nodes/edges). Add one line under \"Docs and plans\" naming `.ppm/issue-remediation/` as the plan that closed issues #1, #2, #4, #6, #7, #8 and the remainder of #9.\nConstraints: no other README section changes; do not touch `docs/INSTRUCTIONS.md` (byte-pinned to `INSTRUCTIONS_TEXT`); measure numbers from a scratch index (`--data-dir /tmp/...`), never from the repository's `.sangkar/`.",
+        "goal": "Close the two documentation gaps that remain: the two-worktree registration snippet (#9 item 5) and the stale current-state numbers in AGENTS.md.",
+        "steps": [
+          "Write the two-worktree `mcpServers` snippet into README.md with its one-paragraph explanation.",
+          "Index this repository into a scratch data dir and record the numbers the update needs.",
+          "Rewrite AGENTS.md's current-state paragraph with the measured numbers and name this plan.",
+          "Confirm the README snippet's flags exist: `~/.bun/bin/bun run bin/sangkar.ts mcp --help`."
+        ],
+        "verify": "`grep -n 'mcpServers' README.md` is non-empty and the two entries differ in both `--repo-root` and `--data-dir`; `~/.bun/bin/bun run bin/sangkar.ts mcp --help` documents every flag the snippet uses. Done when: both files are updated and the numbers in AGENTS.md come from a scratch index taken after phase 1's merge."
+      },
+      "files": [
+        "README.md",
+        "AGENTS.md"
+      ],
+      "id": "TASK-019",
+      "pre_request": [],
+      "size": "S",
+      "title": "Add the two-worktree registration snippet and refresh AGENTS.md's current state",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "Read-only: this task modifies no file and runs no index into `.sangkar/`. Report exact command output and exit codes. A failure is reported as blocking with the failing assertion quoted, or as pre-existing with the evidence that it reproduces without this plan's changes.\nTwo probe harnesses exist and are the ones to reuse — do not write a new server driver: (a) tests/mcp-surface.test.ts frames JSON-RPC over a spawned server's stdin/stdout and is the shape to copy for `tools/list` and per-call probes; (b) tests/store-refresh.test.ts, written by TASK-005, already drives a live server across an external publish — run it and quote its assertions rather than re-deriving the flow. For SQL, there is no `sqlite3` binary and no `sql` verb: use `~/.bun/bin/bun -e 'import {Database} from \"bun:sqlite\"; ...'` with `{readonly: true}`, as TASK-008 step 6 shows.",
+        "goal": "Final gate: prove the whole plan's definition of done, observation by observation, on the merged tree.",
+        "steps": [
+          "Run the four gates in order (typecheck, lint, test, db:drift) and report each exit code; after db:drift confirm git status --porcelain shows no migration file. Then run acceptance and report its latency and prepared-vs-builder numbers.",
+          "Index this repository into a scratch dir (--data-dir /tmp/final-probe --json).",
+          "#1: quote the assertions from ~/.bun/bin/bun test tests/store-refresh.test.ts (new generation after an external publish, decisive === !stale, absent to ready).",
+          "#4 and #2: run status --json and summary --json against the scratch dir and quote coverage.skipped, coverage.not_indexed.length, totals.not_indexed_total and coverage.tests from both, plus one impact --json whose change set has no test symbols reachable.",
+          "#6: run the TASK-008 bun -e count query against the scratch dir and quote the number. #7: in a throwaway copy of the fixture repo create one untracked file plus one modified tracked file and quote changed_files_total: 2 with the two states, then delete it.",
+          "#8 and #9: a tools/list probe reporting the property/description/example counts and range.items.type; then quote the README mcpServers block and the TOOLS-SPEC 1.2 decision paragraph."
+        ],
+        "verify": "Steps 1 and 2 exit 0 and every one of the seven observations is quoted from a real command or probe, not restated from the plan. Done when: the report lists seven numbered observations with the evidence for each, plus the residual gaps (if any) named explicitly."
+      },
+      "files": [],
+      "id": "TASK-020",
+      "pre_request": [
+        "TASK-013",
+        "TASK-014",
+        "TASK-015",
+        "TASK-016",
+        "TASK-017",
+        "TASK-018",
+        "TASK-019"
+      ],
+      "size": "S",
+      "title": "Final gate: definition of done and the seven issue observations",
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

@@ -1,0 +1,111 @@
+{
+  "phase": "phase_0",
+  "title": "Shared contract and read primitives",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Add read_status.decisive and coverage.tests to the envelope contract",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/envelope.ts"
+      ],
+      "details": {
+        "goal": "Publish the two new contract fields phase 1 fills: `read_status.decisive` and `coverage.tests`. Both optional, so the eight existing Coverage/ReadStatus literals keep compiling and no behaviour changes here.",
+        "contract": "Add above `Coverage` in src/shared/envelope.ts:\n```ts\nexport interface TestCensusEntry {\n  language: string;\n  nodes: number;\n}\n\n/** The test corpus this graph indexed. `nodes: 0` with `languages: []` is \"no test symbols\n * were indexed\", which is a different fact from \"nothing covers this change\". */\nexport interface TestCensus {\n  nodes: number;\n  languages: TestCensusEntry[];\n}\n```\n`Coverage` gains exactly one member, after `not_indexed`:\n```ts\n  /** Indexed test symbols and the languages they come from (TOOLS-SPEC.md §1.1). Optional: only\n   * the tools that render it pay the query. */\n  tests?: TestCensus;\n```\n`ReadStatus` gains one member, after `stale_checked_at`:\n```ts\n  /** `!stale`, filled by the composition root after the handler answered (src/index.ts,\n   * `route()` and `uncheckedReadStatus()`). Optional here because no handler sets it and a\n   * hand-written ReadStatus fake predating the field must still type-check. */\n  decisive?: boolean;\n```\nDo not add a tenth top-level envelope field, do not make either member required, and do not touch `Totals` (the repo-wide count is `not_indexed_total`, which the `${string}_total` index signature already admits).",
+        "steps": [
+          "Add `TestCensusEntry` and `TestCensus` immediately above `Coverage`.",
+          "Add the optional `tests?: TestCensus` member to `Coverage` with its doc comment.",
+          "Add the optional `decisive?: boolean` member to `ReadStatus` and extend the interface doc comment to say it is filled once, by the root.",
+          "Run the scoped checks below."
+        ],
+        "verify": "`~/.bun/bin/bun run typecheck` exits 0 (no constructor broke); `~/.bun/bin/bun run lint` exits 0; `~/.bun/bin/bun test tests/envelope.test.ts tests/contract.test.ts` is green. Done when: `git diff --stat` shows only src/shared/envelope.ts, and `grep -n 'decisive\\|tests?: TestCensus' src/shared/envelope.ts` shows both members."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-002",
+      "title": "Add notIndexedAll, notIndexedCount and testsCensus to the read layer",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/store/read/coverage.ts",
+        "src/shared/store/read/files.ts",
+        "src/shared/store/read/reader.ts",
+        "tests/read.test.ts",
+        "tests/read-files.test.ts"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "Give the reader the three primitives phase 1 needs: every `not_indexed` row (status with no paths), the repo-wide `not_indexed` count (the shared total), and the test census per language.",
+        "contract": "Prepared statements only, through `prepared(conn, \"<stable key>\", build)`, one per query; never build a query in a loop. Exact SQL:\n- `notIndexedAll` (key `coverage.notIndexedAll`): `SELECT ni.id, ni.path, ni.reason, ni.detail, ni.language FROM not_indexed ni ORDER BY ni.path, ni.reason` — same row shape as the existing `coverage.notIndexed/*` statement in `src/shared/store/read/coverage.ts`.\n- `notIndexedCount` (key `coverage.notIndexedCount`): `SELECT COUNT(*) AS n FROM not_indexed`.\n- `testsCensus` (key `files.testsCensus`): `SELECT f.language AS language, COUNT(*) AS nodes FROM node n JOIN file f ON f.id = n.file_id WHERE n.is_test = 1 GROUP BY f.language ORDER BY nodes DESC, f.language ASC`.\nSignatures to add on `GraphReader` (src/shared/store/read/reader.ts), wired beside `rowsForPaths`/`censusByLanguage` in `makeReader`:\n```ts\n  /** Every skipped path in the graph, not just those under a requested prefix. */\n  notIndexedAll(): readonly SkippedPathRow[];\n  /** The repo-wide number of skipped paths: the one total every tool can agree on. */\n  notIndexedCount(): number;\n  /** Indexed test symbols and the languages behind them. */\n  testsCensus(): TestCensus;\n```\n`testsCensus` returns `{ nodes: sum, languages: [{language, nodes}] }` where a null `file.language` is rendered as the string `\"unknown\"` (the same way `censusByLanguage` handles it — check and follow that code). Keep `src/shared/store/read/coverage.ts` free of `TestCensus` (that type lives in `#shared/envelope`). Do not change `rowsForPaths`, `censusByLanguage`, or any existing cache key.",
+        "steps": [
+          "Add `notIndexedAll(conn)` and `notIndexedCount(conn)` to src/shared/store/read/coverage.ts, reusing the existing row interface.",
+          "Add `testsCensus(conn)` to src/shared/store/read/files.ts next to `censusByLanguage`, with the SQL above and the null-language handling that code already uses.",
+          "Declare the three methods on `GraphReader` and wire them in `makeReader`'s returned object.",
+          "Add cases to tests/read.test.ts (repo-wide rows vs a prefixed scope) and tests/read-files.test.ts (census with one test node, and the empty corpus).",
+          "Run the scoped checks."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/read.test.ts tests/read-files.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: on a graph with 3 skipped paths of which 2 sit under `src/`, `notIndexedCount() === 3` while `rowsForPaths([\"src\"]).notIndexed.length === 2`, and `testsCensus()` on a graph with no test nodes returns `{nodes: 0, languages: []}`."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-003",
+      "title": "Publish the repo-wide skipped total from the coverage assembly",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/domain/coverage.ts",
+        "tests/domain.test.ts"
+      ],
+      "pre_request": [
+        "TASK-002"
+      ],
+      "details": {
+        "goal": "Make `assemble()` return the two numbers a tool publishes: the scoped count (`coverage.skipped`) and the repo-wide total (`notIndexedTotal`), so no caller can report one without the other.",
+        "contract": "```ts\nexport interface CoverageSource {\n  readonly rowsForPaths: (paths: readonly string[]) => PathCoverage;\n  readonly unresolvedForFiles: (fileIds: readonly number[]) => readonly UnresolvedRef[];\n  /** The repo-wide skipped-path count (`reader.notIndexedCount()`). */\n  readonly notIndexedCount: () => number;\n}\n\nexport interface CoverageAssembly {\n  readonly coverage: Coverage;\n  readonly unresolved: readonly UnresolvedRef[];\n  readonly relation: TotalRelation;\n  /** `coverage.skipped` is scoped to `scope.paths`; this is the whole graph. Never smaller than\n   * `coverage.not_indexed.length`. */\n  readonly notIndexedTotal: number;\n}\n```\n`coverage.skipped` stays `skipped.length` (the scoped count) — do not make it repo-wide; `coverageSource(conn)` gains the `notIndexedCount` projection. Update the module doc comment to say why two numbers exist, in one or two lines.",
+        "steps": [
+          "Add `notIndexedCount` to `CoverageSource` and to `coverageSource(conn)`.",
+          "Add `notIndexedTotal: source.notIndexedCount()` to the object `assemble` returns.",
+          "Extend the module doc comment: scoped count, repo-wide total, and which tool renders which.",
+          "Add a case to tests/domain.test.ts: a source whose scoped list has 1 entry and whose count is 3 yields `coverage.skipped === 1` and `notIndexedTotal === 3`.",
+          "Run the scoped checks."
+        ],
+        "verify": "`~/.bun/bin/bun test tests/domain.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: every existing `assemble` assertion still passes unchanged (the scoped `skipped` semantics did not move) and the new triple-scope case is green."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-004",
+      "title": "Phase 0 gate: typecheck, lint and the touched suites",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003"
+      ],
+      "details": {
+        "goal": "Prove phase 0 landed as a compiling, lint-clean, test-green contract with no behaviour change.",
+        "contract": "Read-only: this task modifies no file. Report the exact command output, not a summary. A pre-existing failure is reported as pre-existing with the evidence that it predates the phase.",
+        "steps": [
+          "Run `~/.bun/bin/bun run typecheck`.",
+          "Run `~/.bun/bin/bun run lint`.",
+          "Run `~/.bun/bin/bun test tests/envelope.test.ts tests/contract.test.ts tests/domain.test.ts tests/read.test.ts tests/read-files.test.ts tests/boundary.test.ts tests/budget.test.ts`.",
+          "Run `~/.bun/bin/bun run bin/sangkar.ts status --data-dir /tmp/phase0-probe --json` twice against a scratch data dir that does not exist, to confirm the absent-store path is unchanged.",
+          "Report each command's exit code and the counts printed."
+        ],
+        "verify": "All four commands exit 0, `boundary.test.ts` reports no violation, and `status --json` on an empty data dir answers `bootstrapping`. Done when the report quotes the exit codes and the test runner's summary line."
+      },
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}
