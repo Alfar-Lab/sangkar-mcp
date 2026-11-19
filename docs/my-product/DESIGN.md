@@ -209,6 +209,14 @@ Because absence is a first-class output, unresolved call sites are **stored, not
 
 That split is what lets `trace` answer "0 with certainty" vs "0 but 321 unresolved" without the whole resolver/tier machinery CRG needs.
 
+### 6.2 Where the census lives
+
+A bare unresolved count is not actionable — most rows in a real graph are a stdlib call the indexer will never bind, not a caller it missed. So every answer that carries an unresolved count also carries its **buckets**, and the bucket set is closed: `builtin_stdlib`, `external_package`, `internal_module`, `dynamic_property_call`, `receiver_type_unknown`, `ambiguous` (declared in `src/shared/domain/unresolved.ts`, in that order, zeros included).
+
+The census sits in the **payload** — `payload.unresolved` on `status`, `summary` and `impact`, `payload.unresolved_census` on `trace` — not in `coverage`. The envelope's `coverage` object in §5 does not move: same fields, same meaning, `unresolved_edges` still the scope's count. The census is the explanation of that one number, so `total` is copied from `coverage.unresolved_edges` rather than computed a second time: two counts of the same rows cannot disagree, and a reader never has to decide which one to trust.
+
+`material` is the narrower population, computed from its own predicate rather than read off a bucket name — `evidenceKind === "ambiguous"` (two candidates are indistinguishable, so user code can be one of them) or bucket `receiver_type_unknown`. A broken relative import is a defect, not a hidden caller, and `dynamic_property_call` is non-material by construction: the extractor records it exactly when no declared target exists. Adding buckets, or moving rows between them, never moves the total, and none of it changes the `eq`/`gte` rule — `emit()` still owns truncation and still downgrades `eq` to `gte` itself, so a census can explain a downgrade but never cause one.
+
 ---
 
 ## 7. Two cross-cutting contracts
@@ -262,6 +270,28 @@ Additional rules:
 - **`@decorator` is a filter, not a node kind.** Decorators are properties, not identity — in both parents they live in `extra`/`properties`, and CBM has a `Decorator` label that is not what "who uses @foo" means. Document the semantics; do not invent a node kind.
 - **Locals are low-recall and must say so.** "Callers of a variable" is mostly empty by construction: CRG only models Liquid `Variable` nodes, CBM has a `Variable` label but no call edges through locals. `trace` on a local returns `status: ok` with `coverage.note: "variable references, not call edges"`.
 - **Confidence tiers on every edge**, surfaced in the payload, never averaged away: `extracted` (the source names it and the node exists) · `inferred` (import/path evidence) · `ambiguous` (several nodes fit) · `unresolved` (no node has that name). Tier names and scores follow CRG's, because they read well and were already documented.
+- **`path` narrows a resolution; it never widens one.** A repo-relative prefix, applied to every candidate a resolution step returns and to the near misses, *before* the ≤5 cap — so a filtered query answers from inside the prefix or says it did not find the name. The same prefix rule serves `trace`, `search` and `expand` (one implementation, `src/shared/domain/resolve.ts`). It cannot be pushed into a store lookup, so each step filters the rows it already got back; that is also why a near miss from outside the prefix can never leak into the answer.
+
+### 8.1 One definition of a candidate count
+
+An ambiguous answer carries two counts, and neither is recomputed by a tool:
+
+| field | means |
+|---|---|
+| `candidates_total` | the size of the tie **before** the ≤5 cap — what actually matched |
+| `candidates_shown` | how many candidates this payload carries — what the client can address |
+
+Both come from the resolution itself (`Resolution`'s ambiguous branch), and `candidates_shown` is the candidate array's own length, so the numbers cannot drift between tools. `totals` carries the pair as well as the candidates payload, because "how large was the tie" and "how much of it did you send" are different facts and a single `<list>_total` would force one of them to lie. The prose is built from the same pair: `trace`'s summary says how many matched (`7 candidates matched, none preferred`), `expand`'s hint adds how much was served (`matches 7 nodes, showing 5`) — so a capped answer is readable without diffing arrays.
+
+### 8.2 The change set
+
+The change set (`ChangeSet` in `src/shared/domain/diff.ts`) keeps its two flat arrays — `changed` and `removed`, sorted repo-relative paths — and adds `entries`, one typed view over the same facts:
+
+```ts
+entries: { state: "modified" | "added" | "deleted" | "renamed"; path: string; from?: string }[]
+```
+
+`entries` is derived from `changed ∪ removed`, never from a third source, so a path appears in both views or in neither. `from` exists only on `renamed`: git's two halves of a rename are one fact, and a payload that rendered them as "one added, one deleted" would lose it; a copy is `added`, because its source still exists. The flat arrays stay because they are what a caller filters and rejoins by — `impact`'s `paths` argument takes that file list back — and a path list should not require reading a state machine.
 
 ---
 
