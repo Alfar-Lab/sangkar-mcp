@@ -246,6 +246,9 @@ function makeReader(graph: FakeGraph): GraphReader {
       return files.find((file) => file.path === path) ?? null;
     },
     allFiles: () => [...files],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [],
     metaFor: () => ({
       projectName: "impact fixture",

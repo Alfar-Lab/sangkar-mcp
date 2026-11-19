@@ -836,10 +836,12 @@ function fakeCoverageSource(
   indexed: readonly IndexedFileRow[],
   skipped: readonly SkippedPathRow[],
   unresolved: readonly UnresolvedRef[],
+  notIndexedTotal: number = skipped.length,
 ): CoverageSource {
   return {
     rowsForPaths: () => ({ indexed, notIndexed: skipped }),
     unresolvedForFiles: (fileIds) => unresolved.filter((row) => fileIds.includes(row.fileId)),
+    notIndexedCount: () => notIndexedTotal,
   };
 }
 
@@ -959,6 +961,23 @@ describe("coverage: eq only when complete, unresolved-free and fresh", () => {
     expect(narrowed.unresolved).toEqual([]);
     expect(narrowed.coverage.unresolved_edges).toBe(0);
     expect(narrowed.relation).toBe("eq");
+  });
+
+  // Three skips in the graph, one of them under the queried prefix: the payload must be able to say
+  // both, because the scoped count alone reads as "nothing was skipped".
+  test("the scoped skipped count and the repo-wide total are reported separately", () => {
+    const source = fakeCoverageSource(
+      [fileRow(1, "src/a.ts", GENERATION)],
+      [skippedRow("src/legacy.xslt", "grammar_unavailable")],
+      [],
+      3,
+    );
+    const result = assemblyOf(source);
+    expect(result.coverage.skipped).toBe(1);
+    expect(result.coverage.not_indexed).toHaveLength(1);
+    expect(result.notIndexedTotal).toBe(3);
+    expect(result.coverage.complete).toBe(false);
+    expect(result.relation).toBe("gte");
   });
 });
 

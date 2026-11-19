@@ -8,7 +8,7 @@ import { log } from "#shared/log";
 import { type Conn, db, openReader, openWriter } from "#shared/store/db";
 import { migrate } from "#shared/store/migrate";
 import type { CursorFacade, ToolContext } from "#shared/store/read/context";
-import { allFiles, censusByLanguage, fileByPath } from "#shared/store/read/files";
+import { allFiles, censusByLanguage, fileByPath, testsCensus } from "#shared/store/read/files";
 import { type GraphReader, makeReader } from "#shared/store/read/reader";
 import * as schema from "#shared/store/schema";
 
@@ -21,9 +21,11 @@ import * as schema from "#shared/store/schema";
  *   reported as failed files instead of disappearing;
  * - `readNodeFts` returns best-first on a stable triple `(bm25 asc, in_degree desc, id asc)`,
  *   which is what makes a cursor page boundary inside one generation safe;
- * - `meta`, `generation` and `tombstone` are readable through the reader without a connection.
+ * - `meta`, `generation` and `tombstone` are readable through the reader without a connection;
+ * - `testsCensus` counts `is_test = 1` and nothing else, so a graph with no test symbol answers
+ *   `{nodes: 0, languages: []}` instead of omitting the field;
  *
- * The fourth property is a type: a `GraphReader` and a `ToolContext` built by hand from
+ * One more property is a type: a `GraphReader` and a `ToolContext` built by hand from
  * `#shared/*` imports alone must typecheck, because that is the unit-test seam every tool task
  * depends on.
  */
@@ -38,6 +40,8 @@ const ALPHA = 1;
 const BETA = 2;
 const GAMMA = 3;
 const DELTA = 4;
+/** The one symbol in the fixture with `is_test = 1`: the whole `testsCensus` input. */
+const TEST_BETA = 5;
 
 const GENERATION_OLD = "g-1";
 const GENERATION_NEW = "g-2";
@@ -45,6 +49,35 @@ const GENERATION_NEW = "g-2";
 const dirs: string[] = [];
 let readerConn: Conn;
 let reader: GraphReader;
+
+/**
+ * A throwaway graph, seeded and torn down inside one test.
+ *
+ * The census cases below are about graphs the shared fixture is not — one with no test node at
+ * all, one whose counts span two languages — and seeding them here keeps the shared fixture
+ * exactly as the FTS and ranked-query assertions expect it.
+ */
+function withTempGraph(
+  seedRows: (handle: ReturnType<typeof db>) => void,
+  run: (conn: Conn) => void,
+): void {
+  const dir = mkdtempSync(join(tmpdir(), "sangkar-read-census-"));
+  dirs.push(dir);
+  const path = join(dir, "graph.db");
+  const writer = openWriter(path);
+  try {
+    migrate(writer.sqlite);
+    seedRows(db(writer));
+  } finally {
+    writer.close();
+  }
+  const conn = openReader(path);
+  try {
+    run(conn);
+  } finally {
+    conn.close();
+  }
+}
 
 function seed(writer: Conn): void {
   const handle = db(writer);
@@ -187,6 +220,29 @@ function seed(writer: Conn): void {
         signature: null,
         docstring: "widget filler filler filler filler filler",
         isTest: 0,
+        props: "{}",
+      },
+    ])
+    .run();
+
+  // Deliberately outside `node_fts` and `node_metrics`: the census reads `node` and `file` only,
+  // and the FTS ordering and ranked queries pinned above must not move because of it.
+  handle
+    .insert(schema.node)
+    .values([
+      {
+        id: TEST_BETA,
+        fileId: SRC_B_PYTHON,
+        parentId: null,
+        kind: "function",
+        subkind: null,
+        name: "beta",
+        qn: "src/b.py::beta",
+        startLine: 1,
+        endLine: 2,
+        signature: null,
+        docstring: null,
+        isTest: 1,
         props: "{}",
       },
     ])
@@ -396,6 +452,95 @@ describe("read/files", () => {
     ]);
     expect(allFiles(readerConn).every((row) => row.sha256.length === 64)).toBe(true);
   });
+
+  test("testsCensus counts the test node under its file's language", () => {
+    // The fixture's four `src/a.ts` nodes are not tests, so only `src/b.py::beta` is counted and
+    // `src/a.ts` contributes no entry at all rather than a zero row.
+    expect(testsCensus(readerConn)).toEqual({
+      nodes: 1,
+      languages: [{ language: "python", nodes: 1 }],
+    });
+  });
+
+  test("a graph with no test node is an empty census, not a missing one", () => {
+    withTempGraph(
+      () => {},
+      (conn) => {
+        expect(testsCensus(conn)).toEqual({ nodes: 0, languages: [] });
+      },
+    );
+  });
+
+  test("testsCensus sums the per-language counts it returns", () => {
+    withTempGraph(
+      (handle) => {
+        handle
+          .insert(schema.file)
+          .values([
+            {
+              id: 1,
+              path: "src/a.ts",
+              language: "typescript",
+              sha256: "a".repeat(64),
+              size: 10,
+              lineCount: 1,
+              parseStatus: "ok",
+              parseErrorRanges: null,
+              indexedGeneration: GENERATION_NEW,
+            },
+            {
+              id: 2,
+              path: "src/b.py",
+              language: "python",
+              sha256: "b".repeat(64),
+              size: 10,
+              lineCount: 1,
+              parseStatus: "ok",
+              parseErrorRanges: null,
+              indexedGeneration: GENERATION_NEW,
+            },
+          ])
+          .run();
+        // Two test nodes in one language and a non-test node beside them: `nodes` must sum the
+        // entries (so it cannot disagree with `languages`) and the non-test row must not count.
+        const rows = [
+          { id: 1, fileId: 1, qn: "src/a.ts::t1", isTest: 1 },
+          { id: 2, fileId: 1, qn: "src/a.ts::t2", isTest: 1 },
+          { id: 3, fileId: 2, qn: "src/b.py::test_a", isTest: 1 },
+          { id: 4, fileId: 2, qn: "src/b.py::helper", isTest: 0 },
+        ];
+        for (const row of rows) {
+          handle
+            .insert(schema.node)
+            .values({
+              id: row.id,
+              fileId: row.fileId,
+              parentId: null,
+              kind: "function",
+              subkind: null,
+              name: row.qn.split("::")[1] ?? "",
+              qn: row.qn,
+              startLine: 1,
+              endLine: 1,
+              signature: null,
+              docstring: null,
+              isTest: row.isTest,
+              props: "{}",
+            })
+            .run();
+        }
+      },
+      (conn) => {
+        const census = testsCensus(conn);
+        expect(census.languages).toEqual([
+          { language: "typescript", nodes: 2 },
+          { language: "python", nodes: 1 },
+        ]);
+        expect(census.nodes).toBe(3);
+        expect(census.nodes).toBe(census.languages.reduce((sum, row) => sum + row.nodes, 0));
+      },
+    );
+  });
 });
 
 describe("read/reader", () => {
@@ -410,6 +555,10 @@ describe("read/reader", () => {
     ]);
     expect(reader.metricsFor(ALPHA)?.inDegree).toBe(7);
     expect(reader.fileByPath("src/b.py")?.language).toBe("python");
+    expect(reader.testsCensus()).toEqual({
+      nodes: 1,
+      languages: [{ language: "python", nodes: 1 }],
+    });
     expect(reader.allFiles().map((row) => row.id)).toEqual([
       SRC_A_TYPESCRIPT,
       SRC_B_PYTHON,
@@ -513,10 +662,13 @@ describe("read/context", () => {
     outbound: () => [],
     metricsFor: () => null,
     rowsForPaths: () => ({ indexed: [], notIndexed: [] }),
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
     unresolvedForFiles: () => [],
     fileByPath: () => null,
     allFiles: () => [],
     censusByLanguage: () => [{ language: "python", files: 3, parsed: 2, failed: 1 }],
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     metaFor: () => ({
       projectName: "fake",
       projectRoot: "/tmp/fake",

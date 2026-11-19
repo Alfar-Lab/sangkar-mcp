@@ -19,6 +19,7 @@
  * its own copy of the row mapper because its query is not this one; the shape is one interface
  * in one place, and a drift would fail the type check rather than a test.
  */
+import type { TestCensus } from "#shared/envelope";
 import { normalizeRel } from "#shared/paths";
 import { type Conn, prepared } from "#shared/store/db";
 import type { IndexedFileRow } from "#shared/store/read/coverage";
@@ -175,4 +176,38 @@ export function censusByLanguage(conn: Conn): LanguageCensus[] {
       parsed: counts.parsed,
       failed: counts.failed,
     }));
+}
+
+interface TestCensusSqlRow {
+  /** Nullable because the mapper must handle a graph written before `file.language` was `NOT NULL`. */
+  readonly language: string | null;
+  readonly nodes: number;
+}
+
+/**
+ * Indexed test symbols, and the languages they come from, ordered by size so the dominant test
+ * corpus of a repo is the first entry a tool renders.
+ *
+ * `nodes: 0` with `languages: []` is "this graph indexed no test symbol". That is not the same
+ * fact as "nothing covers this change": the first is a property of the index, the second a
+ * property of the change, and conflating them turns a blind index into a clean bill.
+ *
+ * `file.language` is `NOT NULL`, so the fallback only covers a graph written by an older schema;
+ * `TestCensusEntry.language` is a string, and dropping the row instead would make the entries sum
+ * to less than `nodes`.
+ */
+export function testsCensus(conn: Conn): TestCensus {
+  const rows = prepared(conn, "files.testsCensus", (sqlite) =>
+    sqlite.query<TestCensusSqlRow, []>(
+      "SELECT f.language AS language, COUNT(*) AS nodes FROM node n" +
+        " JOIN file f ON f.id = n.file_id WHERE n.is_test = 1" +
+        " GROUP BY f.language ORDER BY nodes DESC, f.language ASC",
+    ),
+  ).all();
+
+  const languages = rows.map((row) => ({ language: row.language ?? "unknown", nodes: row.nodes }));
+  return {
+    nodes: languages.reduce((sum, entry) => sum + entry.nodes, 0),
+    languages,
+  };
 }

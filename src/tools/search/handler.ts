@@ -225,6 +225,7 @@ function scopeOf(
     {
       rowsForPaths: () => rows,
       unresolvedForFiles: (fileIds) => ctx.reader.unresolvedForFiles(fileIds),
+      notIndexedCount: () => ctx.reader.notIndexedCount(),
     },
     { paths: scopePaths, generation, stale },
   );

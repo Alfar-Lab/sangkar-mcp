@@ -21,12 +21,16 @@
  * {@link GraphReader.readNodeFts} is a statement bound, not a product knob: `shared` decides what
  * is true and in which stable order, the tool decides what to show and how much of it.
  */
+import type { TestCensus } from "#shared/envelope";
 import { AppError } from "#shared/errors";
 import { type Conn, prepared } from "#shared/store/db";
 import {
   type IndexedFileRow,
+  notIndexedAll,
+  notIndexedCount,
   type PathCoverage,
   rowsForPaths,
+  type SkippedPathRow,
   type UnresolvedRef,
   unresolvedForFiles,
 } from "#shared/store/read/coverage";
@@ -42,6 +46,7 @@ import {
   censusByLanguage,
   fileByPath,
   type LanguageCensus,
+  testsCensus,
 } from "#shared/store/read/files";
 import { metricsFor, type NodeMetrics } from "#shared/store/read/metrics";
 import { findByName, findByQn, members, type NodeRow, nodesByFile } from "#shared/store/read/nodes";
@@ -53,6 +58,7 @@ export type {
   NodeMetrics,
   NodeRow,
   PathCoverage,
+  SkippedPathRow,
   UnresolvedRef,
 };
 
@@ -198,6 +204,10 @@ export interface GraphReader {
   metricsFor(nodeId: number): NodeMetrics | null;
   /** Indexed files and skipped paths under `prefixes`: both halves of a coverage answer. */
   rowsForPaths(prefixes: readonly string[]): PathCoverage;
+  /** Every skipped path in the graph, not just those under a requested prefix. */
+  notIndexedAll(): readonly SkippedPathRow[];
+  /** The repo-wide number of skipped paths: the one total every tool can agree on. */
+  notIndexedCount(): number;
   /** Unbound call sites for `fileIds`; an empty list is an absence only when coverage is complete. */
   unresolvedForFiles(fileIds: readonly number[]): UnresolvedRef[];
   /** One indexed file by repo-relative path; `null` means "look in `rowsForPaths`". */
@@ -206,6 +216,8 @@ export interface GraphReader {
   allFiles(): IndexedFileRow[];
   /** `{language, files, parsed, failed}` per language, `not_indexed` folded in. */
   censusByLanguage(): LanguageCensus[];
+  /** Indexed test symbols and the languages behind them. */
+  testsCensus(): TestCensus;
   /** Identity and health; never the environment, never the filesystem. */
   metaFor(): GraphMeta;
   /**
@@ -407,10 +419,13 @@ export function makeReader(conn: Conn): GraphReader {
     outboundMany: (nodeIds, kinds) => outboundMany(conn, nodeIds, kinds),
     metricsFor: (nodeId) => metricsFor(conn, nodeId),
     rowsForPaths: (prefixes) => rowsForPaths(conn, prefixes),
+    notIndexedAll: () => notIndexedAll(conn),
+    notIndexedCount: () => notIndexedCount(conn),
     unresolvedForFiles: (fileIds) => unresolvedForFiles(conn, fileIds),
     fileByPath: (path) => fileByPath(conn, path),
     allFiles: () => allFiles(conn),
     censusByLanguage: () => censusByLanguage(conn),
+    testsCensus: () => testsCensus(conn),
 
     metaFor(): GraphMeta {
       const values = metaValues();

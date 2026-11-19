@@ -13,11 +13,17 @@
  *
  * The returned `coverage` is the `Coverage` interface of `#shared/envelope`, not a copy of it:
  * one contract, one definition.
+ *
+ * Two skip counts travel together because they answer different questions and neither implies the
+ * other: `coverage.skipped` counts the paths *this scope* skipped (`status` over a directory), while
+ * `notIndexedTotal` is the whole graph's count that a scoped answer (`summary`, `expand`) publishes
+ * as `not_indexed_total`, so a narrow scope cannot understate what the repository never read.
  */
 import type { Coverage, TotalRelation } from "#shared/envelope";
 import type { Conn } from "#shared/store/db";
 import {
   type IndexedFileRow,
+  notIndexedCount,
   type PathCoverage,
   rowsForPaths,
   type SkippedPathRow,
@@ -46,15 +52,18 @@ export interface CoverageScope {
  * an in-memory fixture, so the `eq`/`gte` matrix is provable without a database.
  */
 export interface CoverageSource {
-  rowsForPaths(prefixes: readonly string[]): PathCoverage;
-  unresolvedForFiles(fileIds: readonly number[]): UnresolvedRef[];
+  readonly rowsForPaths: (prefixes: readonly string[]) => PathCoverage;
+  readonly unresolvedForFiles: (fileIds: readonly number[]) => readonly UnresolvedRef[];
+  /** The repo-wide skipped-path count (`reader.notIndexedCount()`). */
+  readonly notIndexedCount: () => number;
 }
 
-/** Binds the store's two coverage lookups to a connection. */
+/** Binds the store's coverage lookups to a connection. */
 export function coverageSource(conn: Conn): CoverageSource {
   return {
     rowsForPaths: (prefixes) => rowsForPaths(conn, prefixes),
     unresolvedForFiles: (fileIds) => unresolvedForFiles(conn, fileIds),
+    notIndexedCount: () => notIndexedCount(conn),
   };
 }
 
@@ -66,6 +75,9 @@ export interface CoverageAssembly {
   readonly coverage: Coverage;
   readonly unresolved: readonly UnresolvedRef[];
   readonly relation: TotalRelation;
+  /** `coverage.skipped` is scoped to `scope.paths`; this is the whole graph. Never smaller than
+   * `coverage.not_indexed.length`. */
+  readonly notIndexedTotal: number;
 }
 
 /** `partial` and `failed` parses are both "we did not fully read this file" (`DESIGN.md` §9.2). */
@@ -116,5 +128,5 @@ export function assemble(source: CoverageSource, scope: CoverageScope): Coverage
   };
 
   const relation: TotalRelation = complete && unresolved.length === 0 && fresh ? "eq" : "gte";
-  return { coverage, unresolved, relation };
+  return { coverage, unresolved, relation, notIndexedTotal: source.notIndexedCount() };
 }

@@ -21,8 +21,13 @@
         ],
         "verify": "`~/.bun/bin/bun run typecheck` exits 0 (no constructor broke); `~/.bun/bin/bun run lint` exits 0; `~/.bun/bin/bun test tests/envelope.test.ts tests/contract.test.ts` is green. Done when: `git diff --stat` shows only src/shared/envelope.ts, and `grep -n 'decisive\\|tests?: TestCensus' src/shared/envelope.ts` shows both members."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:09:46Z",
+          "detail": "Orchestrator verified. git diff: only src/shared/envelope.ts (+23, 0 deletions). TestCensusEntry/TestCensus above Coverage; Coverage.tests? after not_indexed; ReadStatus.decisive? after stale_checked_at plus interface doc extension. Checks: `bun run typecheck` exit 0; `bun run lint` exit 0 (107 files, no fixes); `bun test tests/envelope.test.ts tests/contract.test.ts` 25 pass / 0 fail. No tenth top-level field, no required member, Totals untouched. Only other dirty path is .ppm/issue-remediation/tasks/phase_0.json (ppm status bookkeeping, expected)."
+        }
+      ]
     },
     {
       "id": "TASK-002",
@@ -51,8 +56,13 @@
         ],
         "verify": "`~/.bun/bin/bun test tests/read.test.ts tests/read-files.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: on a graph with 3 skipped paths of which 2 sit under `src/`, `notIndexedCount() === 3` while `rowsForPaths([\"src\"]).notIndexed.length === 2`, and `testsCensus()` on a graph with no test nodes returns `{nodes: 0, languages: []}`."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:16:06Z",
+          "detail": "Orchestrator verified. coverage.ts: toSkippedPathRow + notIndexedAll (key coverage.notIndexedAll, ORDER BY path,reason) + notIndexedCount (COUNT(*)); rowsForPaths behaviour unchanged. files.ts: testsCensus (key files.testsCensus, exact SQL, null language -> \"unknown\", nodes summed). reader.ts: three required methods on GraphReader, wired in makeReader. Tests: notIndexedCount 3 vs rowsForPaths([\"src\"]).notIndexed 2; census empty corpus -> {nodes:0,languages:[]}. Checks: typecheck exit 0; lint exit 0; `bun test tests/read.test.ts tests/read-files.test.ts` 55 pass / 0 fail; full suite 699 pass (worker run). PLAN GAP RESOLVED BY ORCHESTRATOR: the three new required members broke 8 hand-written GraphReader fakes outside this task's ownership; orchestrator added the three one-line stubs in tests/freshness.test.ts and tests/tools-{expand,impact,index,search,status,summary,trace}.test.ts (+3 lines each). No other out-of-scope edit."
+        }
+      ]
     },
     {
       "id": "TASK-003",
@@ -78,8 +88,13 @@
         ],
         "verify": "`~/.bun/bin/bun test tests/domain.test.ts` green; `~/.bun/bin/bun run typecheck` exits 0. Done when: every existing `assemble` assertion still passes unchanged (the scoped `skipped` semantics did not move) and the new triple-scope case is green."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:18:52Z",
+          "detail": "Orchestrator verified. domain/coverage.ts: CoverageSource gains readonly notIndexedCount + coverageSource(conn) projection; CoverageAssembly gains notIndexedTotal = source.notIndexedCount(); coverage.skipped still skipped.length (scoped semantics unchanged); module doc explains the two counts. tests/domain.test.ts: fakeCoverageSource gains a 4th defaulted param so all 7 existing assertions are unchanged; new case scoped 1 vs total 3 -> skipped 1, notIndexedTotal 3, complete false, gte. Checks: typecheck exit 0; lint exit 0; `bun test tests/domain.test.ts` 50 pass / 0 fail. ORCHESTRATOR FIX for the two out-of-scope CoverageSource literals: added `notIndexedCount: () => ctx.reader.notIndexedCount(),` in src/tools/search/handler.ts:229 and src/tools/summary/handler.ts:825. These two handler files are owned by phase 1 tasks 006/007, which build on this line."
+        }
+      ]
     },
     {
       "id": "TASK-004",
@@ -104,8 +119,13 @@
         ],
         "verify": "All four commands exit 0, `boundary.test.ts` reports no violation, and `status --json` on an empty data dir answers `bootstrapping`. Done when the report quotes the exit codes and the test runner's summary line."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:21:12Z",
+          "detail": "Gate run by orchestrator (read-only, no file modified). Exit codes: `bun run typecheck` 0 ($ tsc --noEmit, no output); `bun run lint` 0 (Checked 107 files, no fixes); `bun test tests/envelope.test.ts tests/contract.test.ts tests/domain.test.ts tests/read.test.ts tests/read-files.test.ts tests/boundary.test.ts tests/budget.test.ts` 0 -> \"158 pass, 0 fail, 639 expect() calls, 7 files\"; full `bun run test` 0 -> \"700 pass, 0 fail, 4632 expect() calls, 45 files\"; `bun run db:drift` 0 -> \"No schema changes, nothing to migrate\"; `git status -- src/shared/store/migrations` empty (no generated file); `bun run acceptance` 0 -> \"9 pass, 0 fail\". boundary.test.ts reports no violation. Empty-data-dir probe (rc=0 twice, identical output): `status --data-dir /tmp/phase0-probe --json` prints \"no index at /tmp/phase0-probe/graph.db yet\" on stdout, exit 0. NOTE: the task's Done-when expected the word \"bootstrapping\" there; that expectation is wrong for the product as built — src/index.ts:807-812 deliberately answers an absent store for `status` with that line and exit 0, for `status` with or without --json. src/index.ts is untouched by this phase (`git diff --stat` has no entry for it), so the absent-store path is unchanged; discrepancy is in the task text, not the code. No pre-existing failures found; nothing red in the baseline."
+        }
+      ]
     }
   ]
 }

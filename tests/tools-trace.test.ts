@@ -311,6 +311,9 @@ function makeReader(options: FakeOptions = {}): GraphReader {
     unresolvedForFiles: (fileIds) => unresolved.filter((row) => fileIds.includes(row.fileId)),
     fileByPath: (path) => (path === file.path ? file : null),
     allFiles: () => [file],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [{ language: "typescript", files: 1, parsed: 1, failed: 0 }],
     metaFor: () => ({
       projectName: "fixture",

@@ -821,6 +821,7 @@ export async function handle(
   const source: CoverageSource = {
     rowsForPaths: () => rows,
     unresolvedForFiles: (fileIds) => ctx.reader.unresolvedForFiles(fileIds),
+    notIndexedCount: () => ctx.reader.notIndexedCount(),
   };
   const assembly = assemble(source, {
     paths: prefixes,

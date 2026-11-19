@@ -5,7 +5,12 @@ import { join } from "node:path";
 import { isUnderPrefix } from "#shared/paths";
 import { type Conn, db, openReader, openWriter, statementCacheStats } from "#shared/store/db";
 import { migrate } from "#shared/store/migrate";
-import { rowsForPaths, unresolvedForFiles } from "#shared/store/read/coverage";
+import {
+  notIndexedAll,
+  notIndexedCount,
+  rowsForPaths,
+  unresolvedForFiles,
+} from "#shared/store/read/coverage";
 import { inbound, inboundMany, outbound, outboundMany } from "#shared/store/read/edges";
 import { metricsFor } from "#shared/store/read/metrics";
 import { findByName, findByQn, members, nodesByFile } from "#shared/store/read/nodes";
@@ -216,7 +221,8 @@ function seed(writer: Conn): void {
     ])
     .run();
 
-  // One skipped file under the queried prefix, one beside an indexed sibling.
+  // Three skipped files: two under the queried prefix, one beside an indexed sibling, and one
+  // under a subdirectory of the prefix so the repo-wide total differs from any prefix slice.
   handle
     .insert(schema.notIndexed)
     .values([
@@ -228,6 +234,13 @@ function seed(writer: Conn): void {
         language: "typescript",
       },
       { id: 2, path: "src-old/skip.ts", reason: "binary", detail: null, language: null },
+      {
+        id: 3,
+        path: "src/vendor/bundle.min.js",
+        reason: "size_cap",
+        detail: "1 file over 2.0 MB",
+        language: "javascript",
+      },
     ])
     .run();
 
@@ -450,7 +463,10 @@ describe("read/coverage", () => {
 
   test("rowsForPaths returns the not_indexed half with its reason", () => {
     const coverage = rowsForPaths(reader, ["src"]);
-    expect(coverage.notIndexed.map((row) => row.path)).toEqual(["src/gen.ts"]);
+    expect(coverage.notIndexed.map((row) => row.path)).toEqual([
+      "src/gen.ts",
+      "src/vendor/bundle.min.js",
+    ]);
     expect(coverage.notIndexed[0]?.reason).toBe("grammar_unavailable");
     expect(coverage.notIndexed[0]?.detail).toBe("no grammar for .cts");
     expect(coverage.notIndexed[0]?.language).toBe("typescript");
@@ -490,6 +506,27 @@ describe("read/coverage", () => {
 
   test("no prefixes is an empty answer with no query", () => {
     expect(rowsForPaths(reader, [])).toEqual({ indexed: [], notIndexed: [] });
+  });
+
+  test("notIndexedAll is the repo-wide list a prefix can only be a slice of", () => {
+    // `src-old` is deliberately outside the prefix: a total summed from prefix slices would
+    // report 2 here, and the point of the repo-wide pair is that it reports 3.
+    expect(notIndexedAll(reader).map((row) => row.path)).toEqual([
+      "src-old/skip.ts",
+      "src/gen.ts",
+      "src/vendor/bundle.min.js",
+    ]);
+    expect(rowsForPaths(reader, ["src"]).notIndexed).toHaveLength(2);
+    expect(notIndexedCount(reader)).toBe(3);
+    expect(notIndexedCount(reader)).toBe(notIndexedAll(reader).length);
+  });
+
+  test("notIndexedAll keeps the row shape and the unattributed language", () => {
+    const skipped = notIndexedAll(reader).find((row) => row.path === "src-old/skip.ts");
+    expect(skipped?.id).toBe(2);
+    expect(skipped?.reason).toBe("binary");
+    expect(skipped?.detail).toBeNull();
+    expect(skipped?.language).toBeNull();
   });
 
   test("unresolvedForFiles returns the unbound call sites of the given files", () => {

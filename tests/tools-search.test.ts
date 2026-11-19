@@ -221,6 +221,9 @@ function fakeReader(options: FakeOptions = {}): GraphReader {
     unresolvedForFiles: () => [],
     fileByPath: () => null,
     allFiles: () => [...files],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [],
     metaFor: () => ({
       projectName: "fake",

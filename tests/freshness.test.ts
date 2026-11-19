@@ -134,6 +134,9 @@ function fakeReader(fixture: Fixture): GraphReader {
     unresolvedForFiles: () => [],
     fileByPath: () => null,
     allFiles: () => [...rows],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [],
     metaFor: (): GraphMeta => ({
       projectName: "sangkar",

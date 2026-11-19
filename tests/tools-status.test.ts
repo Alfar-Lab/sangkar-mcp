@@ -253,6 +253,9 @@ function fakeReader(fixture: Fixture): GraphReader {
       (fixture.unresolved ?? []).filter((row) => fileIds.includes(row.fileId)),
     fileByPath: (path) => files.find((file) => file.path === path) ?? null,
     allFiles: () => [...files],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => census,
     metaFor: () => ({
       projectName: orDefault(fixture.projectName, DEFAULT_PROJECT_NAME),

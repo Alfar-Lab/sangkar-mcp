@@ -96,6 +96,17 @@ function pathConditions(alias: string, prefixCount: number): string {
   return new Array<string>(prefixCount).fill(block).join(" OR ");
 }
 
+/** One `not_indexed` row, mapped in one place so every reader of that table agrees on the shape. */
+function toSkippedPathRow(row: SkippedSqlRow): SkippedPathRow {
+  return {
+    id: row.id,
+    path: row.path,
+    reason: row.reason,
+    detail: row.detail,
+    language: row.language,
+  };
+}
+
 /** The three bounds of every prefix, flattened to match {@link pathConditions} placeholder order. */
 function pathParams(prefixes: readonly string[]): string[] {
   const params: string[] = [];
@@ -147,14 +158,39 @@ export function rowsForPaths(conn: Conn, prefixes: readonly string[]): PathCover
       parseErrorRanges: row.parse_error_ranges,
       indexedGeneration: row.indexed_generation,
     })),
-    notIndexed: notIndexed.map((row) => ({
-      id: row.id,
-      path: row.path,
-      reason: row.reason,
-      detail: row.detail,
-      language: row.language,
-    })),
+    notIndexed: notIndexed.map(toSkippedPathRow),
   };
+}
+
+/**
+ * Every skipped path in the graph, with no prefix filter.
+ *
+ * {@link rowsForPaths} answers "is this scope covered", which is a slice by construction, so a
+ * caller that sums slices reports a smaller number than the graph holds whenever a skip sits
+ * outside every scope it asked about. This is the list that total is counted from.
+ */
+export function notIndexedAll(conn: Conn): SkippedPathRow[] {
+  return prepared(conn, "coverage.notIndexedAll", (sqlite) =>
+    sqlite.query<SkippedSqlRow, []>(
+      "SELECT ni.id, ni.path, ni.reason, ni.detail, ni.language FROM not_indexed ni" +
+        " ORDER BY ni.path, ni.reason",
+    ),
+  )
+    .all()
+    .map(toSkippedPathRow);
+}
+
+/**
+ * The repo-wide number of skipped paths: the one total every tool can quote.
+ *
+ * A separate `COUNT(*)` rather than `notIndexedAll().length` because the total is a headline
+ * number read on every `status`, and materialising every row to count it costs the whole table.
+ */
+export function notIndexedCount(conn: Conn): number {
+  const row = prepared(conn, "coverage.notIndexedCount", (sqlite) =>
+    sqlite.query<{ readonly n: number }, []>("SELECT COUNT(*) AS n FROM not_indexed"),
+  ).get();
+  return row === null ? 0 : row.n;
 }
 
 /**

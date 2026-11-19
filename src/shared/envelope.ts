@@ -43,6 +43,10 @@ export interface NotIndexedEntry {
  * Freshness of the answer itself. `stale_checked_at` is separate from `indexed_at` because
  * "when was this built" and "when did we last look" are different questions, and only the
  * second one lets an agent decide whether re-asking is worth it (TOOLS-SPEC.md §1.2).
+ *
+ * `decisive` is filled once, by the composition root: no handler knows whether the answer it
+ * produced is the one that should end the agent's search, and `route()` is the only place that
+ * sees both the handler's verdict and the freshness it was answered under.
  */
 export interface ReadStatus {
   generation: string;
@@ -50,6 +54,22 @@ export interface ReadStatus {
   stale: boolean;
   stale_reason?: string;
   stale_checked_at?: string;
+  /** `!stale`, filled by the composition root after the handler answered (src/index.ts,
+   * `route()` and `uncheckedReadStatus()`). Optional here because no handler sets it and a
+   * hand-written ReadStatus fake predating the field must still type-check. */
+  decisive?: boolean;
+}
+
+export interface TestCensusEntry {
+  language: string;
+  nodes: number;
+}
+
+/** The test corpus this graph indexed. `nodes: 0` with `languages: []` is "no test symbols
+ * were indexed", which is a different fact from "nothing covers this change". */
+export interface TestCensus {
+  nodes: number;
+  languages: TestCensusEntry[];
 }
 
 /** What the answer is allowed to claim. `complete` gates every absence claim. */
@@ -60,6 +80,9 @@ export interface Coverage {
   failed: number;
   unresolved_edges: number;
   not_indexed: NotIndexedEntry[];
+  /** Indexed test symbols and the languages they come from (TOOLS-SPEC.md §1.1). Optional: only
+   * the tools that render it pay the query. */
+  tests?: TestCensus;
 }
 
 /**

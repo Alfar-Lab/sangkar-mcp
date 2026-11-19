@@ -298,6 +298,9 @@ function makeFixture(): {
     unresolvedForFiles: () => [],
     fileByPath: (path) => files.get(path) ?? null,
     allFiles: () => [...files.values()],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [{ language: "typescript", files: 3, parsed: 3, failed: 0 }],
     metaFor: () => ({
       projectName: "fixture",

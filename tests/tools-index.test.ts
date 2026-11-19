@@ -76,6 +76,9 @@ function fakeReader(generation: string | null): GraphReader {
     unresolvedForFiles: () => [],
     fileByPath: () => null,
     allFiles: () => [],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [],
     metaFor: () => ({
       projectName: "fake",

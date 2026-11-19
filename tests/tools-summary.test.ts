@@ -328,6 +328,9 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
       (options.unresolvedRows ?? []).filter((row) => fileIds.includes(row.fileId)),
     fileByPath: (path) => files.find((row) => row.path === path) ?? null,
     allFiles: () => [...files],
+    notIndexedAll: () => [],
+    notIndexedCount: () => 0,
+    testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [{ language: "typescript", files: 1, parsed: 1, failed: 0 }],
     metaFor: () => ({
       projectName: "fake",
