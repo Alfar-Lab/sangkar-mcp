@@ -97,6 +97,9 @@ src/indexer/                the writer — runs in a spawned process, never in t
   worker.ts                 the index process: lock, incremental routing, publish, exit codes
   watch.ts                  debounced polling that spawns the worker
 tests/                      40 files, see the map below
+agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
+                            Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
+                            arguments, defaults or budget ceilings move here in the same commit
 docs/                       design record — read before changing behaviour
 .ppm/                       two completed PPM plans (see "Docs and plans")
 .sangkar/graph.db           this repo's graph (git-ignored); `.codegraph/` is the pre-rename store

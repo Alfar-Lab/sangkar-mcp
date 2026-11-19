@@ -118,6 +118,21 @@ sangkar mcp --repo-root /path/to/repo
 `--data-dir /path/to/dir` is the optional second flag. stdout carries the MCP protocol and nothing
 else; diagnostics are JSON lines on stderr, one record per event.
 
+## Agent skill
+
+`agent/SKILL.md` is a portable [Agent Skills](https://agentskills.io/specification) skill that tells
+an agent which of the seven tools to call, in what order, and how to read the envelope it gets back.
+`agent/install.sh` symlinks it into the skill directories of Claude Code, Codex, OpenCode and Pi
+(`--scope project` writes a `.agents/skills`-style path inside a repository instead):
+
+```sh
+./agent/install.sh --dry-run
+./agent/install.sh
+```
+
+See [agent/README.md](agent/README.md) for the per-harness paths and the server registration each
+client needs before the tools exist at all.
+
 ## The seven tools
 
 | Tool | What it answers |

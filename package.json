@@ -11,6 +11,7 @@
   "files": [
     "bin",
     "src",
+    "agent",
     "README.md"
   ],
   "imports": {
