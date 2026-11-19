@@ -115,9 +115,14 @@ bun run bin/sangkar.ts trace 'handleRequest' --depth 1
 bun run mcp                           # MCP server on stdio
 ```
 
+A script that shells out to `bun` (`test`, `acceptance`, `db:parity`) fails with
+`bun: command not found` unless the binary is on `PATH`, because the script body is a `bun …`
+command and not a re-entry through the same binary:
+`PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun run test`.
+
 | Script | Does |
 |---|---|
-| `bun run test` | whole suite (≈47 s, 564 tests) |
+| `bun run test` | whole suite (≈52 s, 726 tests) |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` | biome over `src tests bin` |
 | `bun run acceptance` | the 9 acceptance assertions, incl. latency and the builder-vs-prepared ratio |
