@@ -57,20 +57,63 @@ export const manifest = {
  * The argument schema. `query` is the only required argument (`TOOLS-SPEC.md` §1: at most one
  * required arg per tool, because argument count is a bigger error source than argument type).
  * `cursor` continues *this* query and replaces `limit`/`offset`/`max_results`.
+ *
+ * Each `description` says what the argument selects, and nothing else: the type, the enum values
+ * and the default are already in the same literal, and a caller reads this text in `tools/list`
+ * and in `sangkar trace --help`. The substance is §3's `why` column, one clause per argument.
  */
 export const input = {
-  query: { type: "string", required: true },
-  direction: { type: "enum", values: DIRECTIONS, default: "all" },
-  kinds: { type: "array", items: { type: "enum", values: NODE_KINDS } },
-  path: { type: "string" },
-  depth: { type: "integer", default: DEFAULT_DEPTH, min: MIN_DEPTH, max: MAX_DEPTH },
-  budget: { type: "integer", default: DEFAULT_BUDGET_TOKENS },
+  query: {
+    type: "string",
+    required: true,
+    description: "The symbol to look up: a name, dotted name, path or `@decorator`.",
+  },
+  direction: {
+    type: "enum",
+    values: DIRECTIONS,
+    default: "all",
+    description: "Which way to walk from the symbol: in, out or both.",
+  },
+  kinds: {
+    type: "array",
+    items: { type: "enum", values: NODE_KINDS },
+    description: "Narrow resolution to these node kinds when a name collides across kinds.",
+  },
+  path: {
+    type: "string",
+    description: "Repo-relative prefix: the path itself and everything under it.",
+  },
+  depth: {
+    type: "integer",
+    default: DEFAULT_DEPTH,
+    min: MIN_DEPTH,
+    max: MAX_DEPTH,
+    description: "How many hops of callers and callees to walk from the symbol.",
+  },
+  budget: {
+    type: "integer",
+    default: DEFAULT_BUDGET_TOKENS,
+    description: "Token ceiling for this result; exceeding it truncates and sets `next`.",
+  },
   // The taxonomy's own list, spread rather than restated: a bucket added to
   // `#shared/domain/unresolved.ts` is filterable here in the same commit, and a stale copy would
   // refuse a real bucket with `must be one of:`.
-  unresolved: { type: "enum", values: [...UNRESOLVED_BUCKETS] },
-  cursor: { type: "string" },
+  unresolved: {
+    type: "enum",
+    values: [...UNRESOLVED_BUCKETS],
+    description: "List only this unresolved bucket; the census stays unfiltered.",
+  },
+  cursor: {
+    type: "string",
+    description: "Continue this same query from the `next` cursor of a previous page.",
+  },
 } as const;
+
+/**
+ * One call a caller can paste verbatim: the schema says which arguments exist, not what a real
+ * one looks like, and an agent with no example reaches for a file reader instead.
+ */
+export const example: Record<string, unknown> = { query: "handleRequest", depth: 1 };
 
 /** The TypeScript mirror of {@link input}; every field but `query` is optional. */
 export interface TraceArgs {

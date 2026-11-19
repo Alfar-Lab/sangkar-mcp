@@ -34,6 +34,21 @@ export const manifest = {
  * request for that one path).
  */
 export const input = {
-  paths: { type: "array", items: { type: "string" }, default: [] },
-  budget: { type: "integer", default: STATUS_DEFAULT_TOKENS },
+  paths: {
+    type: "array",
+    items: { type: "string" },
+    default: [],
+    description: "Paths whose per-path coverage and skip count this answer reports.",
+  },
+  budget: {
+    type: "integer",
+    default: STATUS_DEFAULT_TOKENS,
+    description: "Token ceiling for the coverage report, so forty paths cannot blow it up.",
+  },
 } as const;
+
+/**
+ * A call an agent can paste: the one path it is unsure the index covers. A bare `status` asks the
+ * repository-wide question, which the retry interval already makes cheap to repeat.
+ */
+export const example: Record<string, unknown> = { paths: ["src"] };

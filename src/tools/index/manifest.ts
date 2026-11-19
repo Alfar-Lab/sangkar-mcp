@@ -48,6 +48,17 @@ export const input = {
 export type IndexMode = (typeof input.mode.values)[number];
 
 /**
+ * The one call the CLI usage block and the tool documentation show: a fast pass is the cheaper
+ * repair, and naming the mode is the only argument here that changes what the worker does. `force`
+ * stays out because an example that rebuilds from an empty stage is the expensive call, not the
+ * representative one.
+ *
+ * Nothing imports it yet. It lives beside the schema rather than inside a doc so that one example
+ * per tool has one home and cannot drift from the argument names it spells.
+ */
+export const example: Record<string, unknown> = { mode: "fast" };
+
+/**
  * A call's arguments. Every field is optional because the schema carries the defaults and an MCP
  * client may send neither, one, or both; the handler applies {@link input}'s defaults itself so a
  * direct call and a protocol call agree.

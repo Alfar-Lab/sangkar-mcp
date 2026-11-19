@@ -18,9 +18,35 @@ export const manifest = {
 } as const;
 
 export const input = {
-  paths: { type: "array", items: { type: "string" } },
-  base: { type: "string" },
-  depth: { type: "integer", default: 2, min: 1, max: 4 },
-  budget: { type: "integer", default: 2500 },
-  cursor: { type: "string" },
+  paths: {
+    type: "array",
+    items: { type: "string" },
+    description: "Explicit change set to analyse; omit it to measure the working-tree diff.",
+  },
+  base: {
+    type: "string",
+    description: "The git revision the change set is diffed against.",
+  },
+  depth: {
+    type: "integer",
+    default: 2,
+    min: 1,
+    max: 4,
+    description: "How many caller hops the impact walk follows from the change set.",
+  },
+  budget: {
+    type: "integer",
+    default: 2500,
+    description: "Token ceiling for the answer; a longer dependents list continues via cursor.",
+  },
+  cursor: {
+    type: "string",
+    description: "Continuation token a previous truncated answer returned.",
+  },
 };
+
+/**
+ * A call an agent can paste: the working-tree diff, two hops out, which is the question asked
+ * before an edit rather than after one.
+ */
+export const example: Record<string, unknown> = { depth: 2 };

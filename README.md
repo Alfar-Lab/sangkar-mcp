@@ -158,6 +158,39 @@ the repository's tracked `.gitignore` being edited. `.sangkar` is excluded from 
 working tree, including a linked `git worktree`; the database answering the session is always
 reported at `status.payload.project.db_path`.
 
+A linked worktree is therefore a second tree with a second database, and a client registers it as
+a second server — one `mcpServers` entry each, each passing its own `--repo-root` and its own
+`--data-dir`:
+
+```json
+{
+  "mcpServers": {
+    "sangkar-app": {
+      "command": "~/.bun/bin/bun",
+      "args": [
+        "run", "/path/to/bin/sangkar.ts", "mcp",
+        "--repo-root", "/work/app",
+        "--data-dir", "/work/app/.sangkar"
+      ]
+    },
+    "sangkar-app-feature": {
+      "command": "~/.bun/bin/bun",
+      "args": [
+        "run", "/path/to/bin/sangkar.ts", "mcp",
+        "--repo-root", "/work/app.feature",
+        "--data-dir", "/work/app.feature/.sangkar"
+      ]
+    }
+  }
+}
+```
+
+Sharing one data dir between the two is not a merge: the second server opens a graph recorded against
+a different root and answers every call with `wrong_project_db` — `the graph at … belongs to
+/work/app, not /work/app.feature` — plus the hint to point `--data-dir` at its own `.sangkar`. That is
+the guard whose `root_mismatch` case treats a different tree still sitting there as a refusal rather
+than a disclosure, because serving another tree's graph is the worst answer this design could give.
+
 ## Moving the data directory
 
 `--data-dir` is the only override; a relative value resolves against the repository root. It exists

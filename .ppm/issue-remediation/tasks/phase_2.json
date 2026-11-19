@@ -22,8 +22,13 @@
       "id": "TASK-013",
       "size": "S",
       "title": "Publish array item types and per-tool example calls in the input schema",
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:08:55Z",
+          "detail": "Orchestrator verified with an independent stdio `tools/list` probe (SANGKAR_NO_WATCH=1): all seven tools publish exactly one `inputSchema.examples` entry (status {paths:[\"src\"]}, summary {scope:\"change\"}, trace {query:\"handleRequest\",depth:1}, search {query:\"publish\",kind:\"function\"}, impact {depth:2}, expand {target:\"src/indexer/resolve.ts\",what:\"outline\"}, index {mode:\"fast\"}); expand.properties.range.items === {\"type\":\"integer\"}; no property is undescribed; stdout carried exactly 2 lines, the protocol only. src/index.ts (+70/-18): itemSchemaOf honours items.type (enum still publishes type \"string\" + values, because JSON Schema has no enum type) and items.values; RegisteredTool gains optional `example`; seven manifests imported as <tool>Example and registered beside `input`; inputSchemaOf/descriptorOf publish `examples: [example]` only when declared. No cast was needed (SDK inputSchema is a catchall); inputSchema.type/required unchanged; parseArgs/parseCliArgsAndNames/usageOf untouched. tests/mcp-surface.test.ts +52: pinned schemas extended with the new description keys and the seven examples, nothing loosened (the pre-existing pinned-schema failure this phase's manifest work caused is now fixed there rather than papered over). ORCHESTRATOR COMMENT FIXES (comment/prose only, no assertion or behaviour): src/shared/cli/args.ts itemOf's doc comment no longer claims array items are published as strings; tests/tools-expand.test.ts's test name/comment likewise. Checks: typecheck 0; lint 0 (108 files); `bun test tests/mcp-surface.test.ts tests/cli-args.test.ts tests/tools-expand.test.ts` 60 pass / 0 fail (947 expects)."
+        }
+      ],
       "pre_request": [
         "TASK-014",
         "TASK-015",
@@ -52,8 +57,13 @@
       "pre_request": [],
       "size": "M",
       "title": "Describe every trace and search argument and add their example calls",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:02:01Z",
+          "detail": "Orchestrator verified. trace/manifest.ts (+51/-8) and search/manifest.ts (+32/-6): every argument now carries a one-clause description naming what it selects (8 trace, 5 search), sourced from TOOLS-SPEC §3/§5 and the TraceArgs/SearchArgs JSDoc; argument order and names unchanged; each exports `example` ({query:\"handleRequest\", depth:1} / {query:\"publish\", kind:\"function\"}). Extra hits in `grep -c description:` are the tool-level DESCRIPTION, not an argument. Test pins updated only by adding the new strings to existing toEqual literals: tests/tools-trace.test.ts, tests/tools-search.test.ts and tests/mcp-surface.test.ts (trace schema pin) — the latter two are outside the task's listed files but are the natural pin update; no assertion loosened, tests/cli-args.test.ts needed no edit (toContain assertions). Checks: `bun test tests/tools-trace.test.ts tests/tools-search.test.ts tests/cli-args.test.ts` 85 pass / 0 fail (475 expects); typecheck 0; biome clean."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -77,8 +87,13 @@
       "pre_request": [],
       "size": "M",
       "title": "Describe every summary, impact and status argument and add their example calls",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:02:24Z",
+          "detail": "Orchestrator verified. summary/impact/status manifests (+72/-11): every argument described in one clause (summary 5, impact 5, status 2), sourced from TOOLS-SPEC §2/§4/§6 and the args JSDoc; argument order, names, types, defaults untouched; each exports `example` ({scope:\"change\"} / {depth:2} / {paths:[\"src\"]}), all valid against the declared schema. tests/cli-args.test.ts needed no edit (toContain/line-count assertions). Checks: `bun test tests/tools-summary.test.ts tests/tools-impact.test.ts tests/tools-status.test.ts` 59 pass / 0 fail (438 expects) run by orchestrator; worker's 4-file run incl. cli-args 84 pass; biome clean. KNOWN CROSS-TASK ITEM for TASK-017: tests/mcp-surface.test.ts pins the published propertySchemaOf output with toEqual, so every new description breaks it (status.paths observed by this worker, trace pins by the trace worker) — TASK-017 owns that file and must extend the pinned objects, not loosen them."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -101,8 +116,13 @@
       "pre_request": [],
       "size": "S",
       "title": "Describe expand's arguments and publish expand and index example calls",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:02:51Z",
+          "detail": "Orchestrator verified. expand/manifest.ts (+49): all five arguments described, `what` names the five values members/edges/source/coverage/outline and says outline is never inferred, `range` states the 1-based inclusive span inside the resolved node extent, clamped; argument order, names and the `what` values list unchanged. index/manifest.ts (+11): existing force/mode descriptions verified against src/indexer/worker.ts and left alone; `example` = {mode:\"fast\"} added. expand example = {target:\"src/indexer/resolve.ts\", what:\"outline\"}. Checks: `bun test tests/tools-expand.test.ts tests/tools-index.test.ts tests/cli-args.test.ts` 74 pass / 0 fail (993 expects); `bun run typecheck` exit 0 after the sibling workers finished; biome clean; usageOf render check shows the range clamp text. tests/cli-args.test.ts needed no edit. Deviation noted: expand's descriptions run longer than the ~12-word clause rule TASK-014/015 were held to (TASK-016 did not impose it, since `what` and `range` need the extra clause to be honest)."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -130,8 +150,13 @@
       ],
       "size": "S",
       "title": "Assert the schema invariants over all seven tools in the mcp surface test",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:13:56Z",
+          "detail": "Orchestrator verified. tests/mcp-surface.test.ts (+71): the property equalities became toMatchObject AND were extended with the new description keys (trace.query/depth/direction, status.paths, plus a fifth whole-property equality the audit had not listed — trace.kinds), so nothing was loosened; new invariants over all seven tools: every property must carry `enum ?? description` (the expectation carries {tool, unexplained} so a defect names the argument), and every tool's `inputSchema.examples` must be one object whose keys are all declared properties; expand.properties.range.items pinned `toEqual({type:\"integer\"})` with `not.toHaveProperty(\"enum\")`, and trace.kinds' enum item pinned. Both invariants were proven to bite by temporary mutations that were byte-restored (md5-verified): removing status.budget's description produced {tool:\"status\", unexplained:[\"budget\"]}; dropping the declared-key filter produced {tool:\"status\", undeclared:[\"paths\"]}. Checks: `bun test tests/mcp-surface.test.ts` 1 pass / 0 fail, 71 expects (baseline 36); typecheck 0; biome clean. No argument ships without an enum or description, so no defect to report. The fifth equality is a finding against the task's own audit and was converted, not exempted."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -160,8 +185,13 @@
       ],
       "size": "M",
       "title": "Record the read_status decision and document the examples in the design record",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:23:23Z",
+          "detail": "Orchestrator verified, plus three doc corrections of my own. TOOLS-SPEC (+53/-26): §1.2 gains the recorded decision (\"Decision: read_status keeps its field set\", with the tokens-vs-next_tools reason and the public-contract argument); §3/§5/§7/§8 each quote their tool's `inputSchema.examples` verbatim (verified equal to the manifests' `example` exports: {query:\"handleRequest\",depth:1}, {query:\"publish\",kind:\"function\"}, {target:\"src/indexer/resolve.ts\",what:\"outline\"}, {mode:\"fast\"}); §10 carries the \"every argument has an enum or a description\" sentence and names the seven example exports; the §7/§8 example envelopes now satisfy complete:false with failed:3 and eq->gte so they are internally consistent. DESIGN: §5 read_status row lists decisive with its one-writer rule, §5 rule 1 states \"stale is a warning, never a silent one\", §6's stale row and §10.2 record the re-open on a newer generation (a file-fingerprint comparison), the keep-the-old-reader disclosure and that a vanished file is not a newer generation. ORCHESTRATOR CORRECTIONS (docs only, code is authority): DESIGN §4.1 was describing an older surface — the five tool tables now list the shipped arguments (trace gains path/depth/unresolved/cursor and the real NODE_KINDS, search gains path, the cursor argument is `cursor` not `expand`, expand's row is replaced with target/what/path/range/budget since it has no cursor, index's \"fast = skip non-code files\" becomes \"fast republishes the changed paths only\"); and TOOLS-SPEC §1.1's \"coverage.skipped is not_indexed.length at every scope\" is now scoped to the tools that assemble coverage from the graph, with `index` named as the documented exception (its skipped is the run's count, list empty by construction). Verified: grep decisive DESIGN 3 / TOOLS-SPEC 6; the four example calls match source; no doc sentence I touched contradicts the code. Still divergent and reported, not papered over: src/tools/expand/handler.ts:1117 publishes totals.not_indexed_total as the prefix list length, documented as such in §7."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -184,8 +214,13 @@
       "pre_request": [],
       "size": "S",
       "title": "Add the two-worktree registration snippet and refresh AGENTS.md's current state",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:03:33Z",
+          "detail": "Orchestrator verified, including an independent re-measurement. README.md (+33): a two-worktree `mcpServers` block with two entries differing in both --repo-root and --data-dir, using the `~/.bun/bin/bun run /path/to/bin/sangkar.ts mcp` form (no PATH assumption), plus the prose on why a shared data dir is refused. `bun run bin/sangkar.ts mcp --help` -> \"usage: sangkar mcp [--repo-root <path>] [--data-dir <path>]\", so both flags exist; the cited `wrong_project_db` code and \"the graph at … belongs to …, not …\" message are real (src/index.ts:320-321, src/shared/errors.ts:6). AGENTS.md (+24/-14): the three open gaps restated from a fresh scratch index, plus the `.ppm/issue-remediation/` line under Docs and plans. Orchestrator re-measured on /tmp/agents-verify: nodes 1640, edges 9347, unresolved 11519, calls 5894, not_indexed 115 (all unsupported_ext), relative-import unresolved 0, is_test 547, kind test 12, kind method 31, tested_depth not null 368 — every number matches the doc. Gap-2's old claim that class members come out as `function` was disproved by the measurement (all 31 class children are `method`) and was rewritten to the measured cause; that is a correction of a stale claim, not a weakening."
+        }
+      ]
     },
     {
       "agent": "verify",
@@ -215,8 +250,13 @@
       ],
       "size": "S",
       "title": "Final gate: definition of done and the seven issue observations",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T08:27:26Z",
+          "detail": "Final gate, run by orchestrator, read-only. GATES: typecheck exit 0; lint exit 0 (108 files, no fixes); `bun run test` exit 0 -> \"726 pass, 0 fail, 4812 expect() calls, 46 files, 51.82s\"; db:drift exit 0 -> \"No schema changes, nothing to migrate\", `git status --porcelain -- src/shared/store/migrations` empty; acceptance exit 0 -> \"9 pass, 0 fail\" with criterion4 latency trace p50 21.07/p95 25.71 (threshold 40), search p50 6.37 (60), summaryChange p50 62.11/p95 102.68 (120) and criterion8 prepared ratio 6.88x (builder 47.17us vs prepared 6.85us per read, threshold 5x). SCRATCH INDEX: `index --data-dir /tmp/final-probe` exit 0. OBSERVATIONS. #1: tests/store-refresh.test.ts 7 pass / 0 fail — \"a published second generation is what the refreshed reader reports, and the old handle is closed\", \"a newer schema is a refusal, not a swap: the previous reader stays and admits it is behind\", \"a cursor minted under the pre-swap generation is refused after the swap\", \"absent becomes ready when a publish creates the file\", plus the stdio e2e asserting decisive === !stale. #4: status --json skipped 115, not_indexed length 22 with truncated:true + next (emit trimmed the list), totals.not_indexed_total 115; summary --json skipped 4, list 4, totals.not_indexed_total 115 — identical total for one generation, and no answer shows a count with an empty list and no total. #2: both report coverage.tests {nodes:548, languages:[{typescript,548}]}; impact reported \"64 of 195 covered by tests.\" (non-zero census, so no clause) and impact publishes no coverage.tests, by design; the zero-census clause is pinned by tests/tools-impact.test.ts. #6: `SELECT count(*) FROM unresolved WHERE evidence LIKE 'import:%' AND (raw_target LIKE './%' OR raw_target LIKE '../%')` -> 0. #7: throwaway git repo, one modified tracked file + one new untracked file -> changed_files_total: 2 with states [[\"src/a.ts\",\"modified\"],[\"src/c.ts\",\"untracked\"]]; temp repo deleted. #8: stdio tools/list probe -> all 7 tools publish one inputSchema.examples entry, zero undescribed properties, expand.range.items {\"type\":\"integer\"}, stdout 2 lines (protocol only). #9: README's mcpServers block at :165-190 carries two entries with distinct --repo-root/--data-dir, and TOOLS-SPEC §1.2 carries the recorded decision \"read_status keeps its field set\". RESIDUAL GAPS: (1) src/tools/expand/handler.ts:1117 still publishes totals.not_indexed_total as the prefix list length rather than the repo-wide count — same key, different meaning from status/summary; documented honestly in §7, no task in this plan owns the file. (2) index's coverage reports a run's skipped count beside an empty list by construction (§8 documents it; the §1.1 universal claim is now scoped)."
+        }
+      ]
     }
   ]
 }

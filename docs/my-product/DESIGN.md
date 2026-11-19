@@ -92,9 +92,12 @@ Returns: generation, `indexed_at`, staleness verdict, per-path coverage, languag
 |---|---|---|---|
 | `query` | string | — (**required**) | free text, dotted name, file path, or `@decorator` |
 | `direction` | enum | `all` | `all` \| `in` \| `out` |
-| `kinds` | array\<enum> | inferred | optional narrowing: `function`,`method`,`class`,`file` |
+| `kinds` | array\<enum> | — | narrow resolution to these node kinds when a name collides: `file`,`module`,`class`,`function`,`method`,`test`,`endpoint` |
+| `path` | string | — | repo-relative prefix applied when resolving the query |
+| `depth` | int | 2 | hops of callers and callees to walk, clamped 1–4 |
 | `budget` | int | 3200 | token budget |
-| `expand` | cursor | — | continuation token from a previous `trace` |
+| `unresolved` | enum | — | list only this unresolved bucket; the census stays unfiltered |
+| `cursor` | string | — | continuation token from a previous `trace` |
 
 Returns: resolution outcome (`ok` / `ambiguous` / `not_found`), the resolved node(s), neighbours ranked by hop distance, the edge type that connected each, confidence tier, and coverage. Never guesses on ties (§8).
 
@@ -122,8 +125,9 @@ Scope behaviour:
 |---|---|---|---|
 | `query` | string | — (**required**) | text, identifier, or natural language |
 | `kind` | enum | any | `function`,`method`,`class`,`file`,`decorator` |
+| `path` | string | — | repo-relative prefix to search under |
 | `budget` | int | 2000 | token budget |
-| `expand` | cursor | — | continuation |
+| `cursor` | string | — | continuation |
 
 Hybrid: FTS5/BM25 first, semantic rerank only when an embedding index exists. Never fails because embeddings are absent.
 
@@ -135,23 +139,26 @@ Hybrid: FTS5/BM25 first, semantic rerank only when an embedding index exists. Ne
 | `base` | string | last generation commit | diff base |
 | `depth` | int | 2 | expansion depth (clamped 1–4) |
 | `budget` | int | 2500 | token budget |
-| `expand` | cursor | — | continuation |
+| `cursor` | string | — | continuation |
 
 **`expand`**
 
 | arg | type | default | meaning |
 |---|---|---|---|
-| `cursor` | string | — (**required**) | opaque token from `next` |
+| `target` | string | — (**required**) | opaque handle copied from a prior payload: an id, a qualified name or a path |
+| `what` | enum | inferred | `members` \| `edges` \| `source` \| `coverage` \| `outline`; `outline` is never inferred |
+| `path` | string | — | repo-relative prefix applied when resolving the target |
+| `range` | array\<int> | the node's extent | 1-based inclusive line span for `source`, clamped to the resolved node's extent |
 | `budget` | int | 2500 | token budget |
 
-Expands exactly the result the cursor came from, pinned to the same generation and the same arguments. Rules in §7.
+Returns detail the other tools did not pre-ship for one target, addressed by the handle that payload carried. Rules in §7.
 
 **`index`** (repair tool, registered with the rest)
 
 | arg | type | default | meaning |
 |---|---|---|---|
-| `force` | bool | false | full rebuild instead of incremental |
-| `mode` | enum | `full` | `full` \| `fast` (fast = skip non-code files) |
+| `force` | bool | false | rebuild from an empty stage instead of routing incrementally |
+| `mode` | enum | `full` | `full` \| `fast` (fast republishes the changed paths only) |
 
 ---
 
@@ -163,8 +170,8 @@ One shape for everything. This is the single most important contract in the desi
 |---|---|---|---|
 | `status` | enum | yes | `ok` \| `ambiguous` \| `not_found` \| `error` \| `bootstrapping` |
 | `summary` | string | yes | one line, human-readable, `showing N of M` when truncated |
-| `read_status` | object | yes | `{generation, indexed_at, stale, stale_reason?}` — freshness of the answer itself |
-| `coverage` | object | yes | `{complete\|partial\|unknown, indexed: N, skipped: N, failed: N, unresolved_edges: N}` |
+| `read_status` | object | yes | `{generation, indexed_at, stale, stale_reason?, stale_checked_at?, decisive?}` — freshness of the answer itself; `decisive` is `!stale`, written once by the composition root (rule 1, below) |
+| `coverage` | object | yes | `{complete: bool, indexed: N, skipped: N, failed: N, unresolved_edges: N, not_indexed: [{path, reason}], tests?}` — `complete` is a boolean, not a tri-state (`TOOLS-SPEC.md` §1.1) |
 | `totals` | object | when lists exist | `{<list>_total, total_relation: "eq"\|"gte"}` |
 | `truncated` | bool | yes | true when `budget` cut the payload |
 | `truncation_reason` | string | when truncated | `budget` \| `item_cap` \| `depth` \| `page` |
@@ -174,7 +181,7 @@ One shape for everything. This is the single most important contract in the desi
 
 Rules:
 
-1. `stale: true` is a **warning, not a failure** — the answer is returned, flagged.
+1. `stale: true` is a **warning, not a failure** — the answer is returned, flagged, and never silently so: `read_status.decisive` is `false` exactly when `stale` is `true`, and is written once, by the composition root (`route()` in `src/index.ts`), after the `root_mismatch` downgrade — a handler knows its own verdict, not the freshness it answered under, so `stale: true` with `decisive: true` is unreachable.
 2. `total_relation: "gte"` whenever the total is a lower bound (truncation, partial coverage, unresolved edges).
 3. `status: "bootstrapping"` returns `{retry_after_ms}` instead of blocking the client past its deadline.
 4. Errors name the tool, the argument, and the fix. No bare stack traces.
@@ -194,7 +201,7 @@ This design uses **four distinct outcomes** and never collapses them:
 | **absent** | The scope was indexed, fresh, and no edge exists | `status: ok`, `total: 0`, `total_relation: "eq"`, `coverage.complete: true` |
 | **unresolved** | Call sites exist whose target did not bind | `total: 0`, `total_relation: "gte"`, `unresolved: [{file, line, name, evidence}]` |
 | **out of scope** | The path/file was skipped, ignored, failed to parse, or exceeds limits | `coverage.complete: false`, `not_indexed: [{path, reason}]` |
-| **stale** | The answer came from a generation older than the working tree | `read_status.stale: true` + `files_changed_since` |
+| **stale** | The answer came from a generation older than the working tree | `read_status.stale: true`, `read_status.stale_reason` (`status` words the drift there as "N of M indexed files changed on disk since the index"), `read_status.decisive: false` |
 
 The rule: **`total_relation: "eq"` is only permitted when all four hold** — coverage complete, no unresolved candidates in the queried files, generation fresh, no truncation. Anything else must be `gte`, and `summary` must say why in words (`"no callers in 530 indexed files; 321 call sites unresolved"`).
 
@@ -340,9 +347,11 @@ Identity: short name = repo basename + 4-char hash of the absolute path. Multi-r
 | Trigger | Behaviour |
 |---|---|
 | server start, index missing | do **not** index inline; first tool call returns `status: "bootstrapping"` + `retry_after_ms` (CBM does this for architecture jobs; the agent retries instead of dying on a client deadline) |
-| first tool call, index stale | refresh incrementally in the background, answer from the current generation with `stale: true` |
+| first tool call, index stale | the handle re-opens when the file on disk is a newer generation and answers from it; a tree that is stale but unchanged answers from the current generation with `stale: true`, because the watcher's first poll only records a baseline and spawns a run on a later change |
 | `index` (repair) | forced/repair path; call only when `status` reports a broken graph |
 | file watcher / VCS hook | coalesced debounce → incremental |
+
+A re-open that cannot be served — a newer schema, another tree's graph, a torn file — leaves the previous reader in place and keeps answering with `stale_reason: "a newer generation could not be opened"`, so a publish this build cannot read degrades to a disclosed staleness instead of an error the session cannot recover from. A vanished file is not a newer generation: an absent store stays absent and a ready one keeps serving what it already read.
 
 ### 10.3 Publish protocol (copied from CBM, because it is what survived concurrency)
 

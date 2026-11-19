@@ -281,12 +281,30 @@ describe("tools/search manifest", () => {
 
   test("declares five arguments with query as the only required one", () => {
     expect(Object.keys(input)).toEqual(["query", "kind", "path", "budget", "cursor"]);
-    expect(input.query).toEqual({ type: "string", required: true });
-    expect(input.kind).toEqual({ type: "enum", values: SEARCH_KINDS });
+    expect(input.query).toEqual({
+      type: "string",
+      required: true,
+      description: "Free text to find: an identifier, a substring or a phrase.",
+    });
+    expect(input.kind).toEqual({
+      type: "enum",
+      values: SEARCH_KINDS,
+      description: "Return only declarations of this kind, when you already know it.",
+    });
     expect(SEARCH_KINDS).toEqual(["function", "method", "class", "file", "decorator"]);
-    expect(input.budget).toEqual({ type: "integer", default: 2000 });
-    expect(input.path).toEqual({ type: "string" });
-    expect(input.cursor).toEqual({ type: "string" });
+    expect(input.budget).toEqual({
+      type: "integer",
+      default: 2000,
+      description: "Token ceiling for this result; exceeding it truncates and sets `next`.",
+    });
+    expect(input.path).toEqual({
+      type: "string",
+      description: "Repo-relative prefix: the path itself and everything under it.",
+    });
+    expect(input.cursor).toEqual({
+      type: "string",
+      description: "Continue this same search from the `next` cursor of a previous page.",
+    });
   });
 });
 

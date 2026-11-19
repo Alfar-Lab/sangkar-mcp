@@ -370,13 +370,24 @@ describe("manifest", () => {
   });
 
   test("the argument schema carries the documented defaults", () => {
-    expect(input.query).toEqual({ type: "string", required: true });
+    expect(input.query).toEqual({
+      type: "string",
+      required: true,
+      description: "The symbol to look up: a name, dotted name, path or `@decorator`.",
+    });
     expect(input.direction.values).toEqual(["all", "in", "out"]);
     expect(input.direction.default).toBe("all");
     expect(input.depth).toMatchObject({ type: "integer", default: 2, min: 1, max: 4 });
-    expect(input.budget).toEqual({ type: "integer", default: DEFAULT_BUDGET_TOKENS });
+    expect(input.budget).toEqual({
+      type: "integer",
+      default: DEFAULT_BUDGET_TOKENS,
+      description: "Token ceiling for this result; exceeding it truncates and sets `next`.",
+    });
     expect(DEFAULT_BUDGET_TOKENS).toBe(3200);
-    expect(input.cursor).toEqual({ type: "string" });
+    expect(input.cursor).toEqual({
+      type: "string",
+      description: "Continue this same query from the `next` cursor of a previous page.",
+    });
     expect("kinds" in input).toBe(true);
     // The bucket filter's values are the taxonomy's own list, never a copy that could fall behind.
     expect(input.unresolved.type).toBe("enum");

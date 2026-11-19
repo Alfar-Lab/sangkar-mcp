@@ -75,23 +75,48 @@ import { createTelemetry, nullTelemetry, type Telemetry } from "#shared/telemetr
 import { startWatch, type WatchHandle } from "./indexer/watch";
 import { runWorker, type WorkerMode } from "./indexer/worker";
 import { handle as expandHandle } from "./tools/expand/handler";
-import { input as expandInput, manifest as expandManifest } from "./tools/expand/manifest";
+import {
+  example as expandExample,
+  input as expandInput,
+  manifest as expandManifest,
+} from "./tools/expand/manifest";
 import { handle as impactHandle } from "./tools/impact/handler";
-import { input as impactInput, manifest as impactManifest } from "./tools/impact/manifest";
+import {
+  example as impactExample,
+  input as impactInput,
+  manifest as impactManifest,
+} from "./tools/impact/manifest";
 import { handle as indexHandle } from "./tools/index/handler";
-import { input as indexInput, manifest as indexManifest } from "./tools/index/manifest";
+import {
+  example as indexExample,
+  input as indexInput,
+  manifest as indexManifest,
+} from "./tools/index/manifest";
 import { handle as searchHandle } from "./tools/search/handler";
-import { input as searchInput, manifest as searchManifest } from "./tools/search/manifest";
+import {
+  example as searchExample,
+  input as searchInput,
+  manifest as searchManifest,
+} from "./tools/search/manifest";
 import { handle as statusHandle } from "./tools/status/handler";
 import {
   STATUS_RETRY_AFTER_MS,
+  example as statusExample,
   input as statusInput,
   manifest as statusManifest,
 } from "./tools/status/manifest";
 import { handle as summaryHandle } from "./tools/summary/handler";
-import { input as summaryInput, manifest as summaryManifest } from "./tools/summary/manifest";
+import {
+  example as summaryExample,
+  input as summaryInput,
+  manifest as summaryManifest,
+} from "./tools/summary/manifest";
 import { handle as traceHandle } from "./tools/trace/handler";
-import { input as traceInput, manifest as traceManifest } from "./tools/trace/manifest";
+import {
+  example as traceExample,
+  input as traceInput,
+  manifest as traceManifest,
+} from "./tools/trace/manifest";
 
 /** The graph file inside the resolved data dir (`DATABASE.md` §3.0). */
 const DB_FILE = "graph.db";
@@ -127,6 +152,11 @@ interface RegisteredTool {
   readonly name: string;
   readonly description: string;
   readonly input: InputLiteral;
+  /**
+   * One call the manifest declares as pasteable. Optional because a tool whose smallest useful
+   * call is not worth spelling publishes no `examples` rather than a made-up one.
+   */
+  readonly example?: Readonly<Record<string, unknown>> | undefined;
   readonly handle: ToolHandler;
 }
 
@@ -147,22 +177,34 @@ function bind<A>(
  * and the CLI alike; what keeps a repair out of the way is the instructions, not a filter.
  */
 const TOOLS: readonly RegisteredTool[] = [
-  { ...statusManifest, input: statusInput, handle: bind(statusHandle) },
-  { ...summaryManifest, input: summaryInput, handle: bind(summaryHandle) },
-  { ...traceManifest, input: traceInput, handle: bind(traceHandle) },
-  { ...searchManifest, input: searchInput, handle: bind(searchHandle) },
-  { ...impactManifest, input: impactInput, handle: bind(impactHandle) },
-  { ...expandManifest, input: expandInput, handle: bind(expandHandle) },
-  { ...indexManifest, input: indexInput, handle: bind(indexHandle) },
+  { ...statusManifest, input: statusInput, example: statusExample, handle: bind(statusHandle) },
+  { ...summaryManifest, input: summaryInput, example: summaryExample, handle: bind(summaryHandle) },
+  { ...traceManifest, input: traceInput, example: traceExample, handle: bind(traceHandle) },
+  { ...searchManifest, input: searchInput, example: searchExample, handle: bind(searchHandle) },
+  { ...impactManifest, input: impactInput, example: impactExample, handle: bind(impactHandle) },
+  { ...expandManifest, input: expandInput, example: expandExample, handle: bind(expandHandle) },
+  { ...indexManifest, input: indexInput, example: indexExample, handle: bind(indexHandle) },
 ];
 
 function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/**
+ * One array field's item schema, in the type the manifest declared and `parseArgs` therefore
+ * enforces: publishing `string` for `items: { type: "integer" }` would advertise a call the
+ * parser accepts only after coercing it, which is not the contract the schema is supposed to state.
+ * A declared `enum` is a string item carrying `values`, for the same reason `propertySchemaOf`
+ * spells an enum property as a string: JSON Schema has no `enum` type.
+ */
 function itemSchemaOf(field: InputField): Record<string, unknown> {
-  const values = field.items?.values;
-  return values === undefined ? { type: "string" } : { type: "string", enum: [...values] };
+  const items = field.items;
+  const declared = items?.type ?? "string";
+  const schema: Record<string, unknown> = { type: declared === "enum" ? "string" : declared };
+  if (items?.values !== undefined) {
+    schema.enum = [...items.values];
+  }
+  return schema;
 }
 
 /**
@@ -192,8 +234,15 @@ function propertySchemaOf(field: InputField): Record<string, unknown> {
   return schema;
 }
 
-/** The manifest's `input` table as the `inputSchema` `tools/list` publishes. */
-function inputSchemaOf(input: InputLiteral): Tool["inputSchema"] {
+/**
+ * The manifest's `input` table as the `inputSchema` `tools/list` publishes, plus the manifest's one
+ * example call when it declares one. `examples` is a JSON Schema keyword at object level, and the
+ * SDK's `inputSchema` shape is a catchall, so it travels to the client unchanged.
+ */
+function inputSchemaOf(
+  input: InputLiteral,
+  example: Readonly<Record<string, unknown>> | undefined,
+): Tool["inputSchema"] {
   const properties: Record<string, object> = {};
   const required: string[] = [];
   for (const [name, field] of Object.entries(input)) {
@@ -206,6 +255,9 @@ function inputSchemaOf(input: InputLiteral): Tool["inputSchema"] {
   if (required.length > 0) {
     schema.required = required;
   }
+  if (example !== undefined) {
+    schema.examples = [example];
+  }
   return schema;
 }
 
@@ -214,7 +266,7 @@ function descriptorOf(tool: RegisteredTool): Tool {
   return {
     name: tool.name,
     description: tool.description,
-    inputSchema: inputSchemaOf(tool.input),
+    inputSchema: inputSchemaOf(tool.input, tool.example),
   };
 }
 

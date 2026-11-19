@@ -145,8 +145,8 @@ function itemTypeOf(field: InputField): string {
  * One item in the declared item type, or `null` when it is not one.
  *
  * The integer read takes the text a shell hands over as well as a JSON number, because argv is
- * always text and the `inputSchema` published from this same table describes array items as
- * strings: refusing either spelling would refuse a call the manifest advertised.
+ * always text and a JSON client may still send the digits as a string: refusing either spelling
+ * would refuse a call the manifest advertised.
  */
 function itemOf(field: InputField, value: unknown): string | number | null {
   if (itemTypeOf(field) === "integer") {

@@ -65,6 +65,7 @@ interface ToolDescriptor {
     readonly type: string;
     readonly properties?: Record<string, Record<string, unknown>>;
     readonly required?: readonly string[];
+    readonly examples?: readonly Record<string, unknown>[];
   };
 }
 
@@ -227,27 +228,89 @@ describe("MCP surface: seven tools, one clean stdout", () => {
       expect(trace?.inputSchema.type).toBe("object");
       // `required` is `query` alone: at most one required argument per tool (TOOLS-SPEC.md §1).
       expect(trace?.inputSchema.required).toEqual(["query"]);
-      expect(trace?.inputSchema.properties?.query).toEqual({ type: "string" });
+      expect(trace?.inputSchema.properties?.query).toMatchObject({
+        type: "string",
+        description: "The symbol to look up: a name, dotted name, path or `@decorator`.",
+      });
       // `default`, `min` and `max` travel with the property, so a client can size its call.
-      expect(trace?.inputSchema.properties?.depth).toEqual({
+      expect(trace?.inputSchema.properties?.depth).toMatchObject({
         type: "integer",
         minimum: 1,
         maximum: 4,
         default: 2,
+        description: "How many hops of callers and callees to walk from the symbol.",
       });
-      expect(trace?.inputSchema.properties?.direction).toEqual({
+      expect(trace?.inputSchema.properties?.direction).toMatchObject({
         type: "string",
         enum: ["all", "in", "out"],
         default: "all",
+        description: "Which way to walk from the symbol: in, out or both.",
       });
 
       const status = toolsOf(run).find((tool) => tool.name === "status");
-      expect(status?.inputSchema.properties?.paths).toEqual({
+      expect(status?.inputSchema.properties?.paths).toMatchObject({
         type: "array",
         items: { type: "string" },
         default: [],
+        description: "Paths whose per-path coverage and skip count this answer reports.",
       });
       expect(status?.inputSchema.required).toBeUndefined();
+
+      // The declared item type travels with the array, so `expand.range` is published as the
+      // integer pair the parser enforces rather than as the strings argv happens to carry.
+      const expand = toolsOf(run).find((tool) => tool.name === "expand");
+      expect(expand?.inputSchema.properties?.range).toMatchObject({
+        type: "array",
+        items: { type: "integer" },
+      });
+      expect(expand?.inputSchema.properties?.range?.items).toEqual({ type: "integer" });
+      // An enum item is still a string item with values, never `type: "enum"`: that is not a
+      // JSON Schema type, and `trace.kinds` is the field that declares one.
+      expect(expand?.inputSchema.properties?.range?.items).not.toHaveProperty("enum");
+      expect(trace?.inputSchema.properties?.kinds).toMatchObject({
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["file", "module", "class", "function", "method", "test", "endpoint"],
+        },
+        description: "Narrow resolution to these node kinds when a name collides across kinds.",
+      });
+
+      // Each manifest's one pasteable call is published as `inputSchema.examples`, one entry per
+      // tool: the example is a whole argument object, not a per-argument keyword.
+      const examplesOf = (name: string): readonly Record<string, unknown>[] | undefined => {
+        return toolsOf(run).find((tool) => tool.name === name)?.inputSchema.examples;
+      };
+      expect(examplesOf("status")).toEqual([{ paths: ["src"] }]);
+      expect(examplesOf("summary")).toEqual([{ scope: "change" }]);
+      expect(examplesOf("trace")).toEqual([{ query: "handleRequest", depth: 1 }]);
+      expect(examplesOf("search")).toEqual([{ query: "publish", kind: "function" }]);
+      expect(examplesOf("impact")).toEqual([{ depth: 2 }]);
+      expect(examplesOf("expand")).toEqual([{ target: "src/indexer/resolve.ts", what: "outline" }]);
+      expect(examplesOf("index")).toEqual([{ mode: "fast" }]);
+
+      // Issue #8's acceptance criteria, stated over every published argument rather than over the
+      // sample above: an argument explains itself — enum values or a description, never neither —
+      // and every tool shows one pasteable call whose keys are arguments that tool declares. Both
+      // expectations carry the tool name into the diff, because a bare `undefined` does not say
+      // which of the published arguments is the defect; adding an argument without a description
+      // has to fail here rather than reach a client that cannot size its call.
+      for (const tool of toolsOf(run)) {
+        const properties = Object.entries(tool.inputSchema.properties ?? {});
+        const unexplained = properties
+          .filter(([, property]) => (property.enum ?? property.description) === undefined)
+          .map(([name]) => name);
+        expect({ tool: tool.name, unexplained }).toEqual({ tool: tool.name, unexplained: [] });
+
+        const examples = tool.inputSchema.examples;
+        expect(examples).toBeArray();
+        expect(examples).toHaveLength(1);
+        expect(examples?.[0]).toBeObject();
+        const undeclared = Object.keys(examples?.[0] ?? {}).filter((key) => {
+          return !properties.some(([name]) => name === key);
+        });
+        expect({ tool: tool.name, undeclared }).toEqual({ tool: tool.name, undeclared: [] });
+      }
     },
     HARD_TIMEOUT_MS,
   );

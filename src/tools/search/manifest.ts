@@ -40,12 +40,38 @@ export const DEFAULT_BUDGET_TOKENS = 2000;
 
 /**
  * The schema the composition root parses arguments against (`TECH-SPEC.md` §6). `required`
- * appears exactly once, on `query`.
+ * appears exactly once, on `query`. Each `description` says what the argument selects, sourced
+ * from §5's `why` column; the type, values and default it would otherwise restate live in the
+ * same literal and reach the caller through `tools/list` and `sangkar search --help`.
  */
 export const input = {
-  query: { type: "string", required: true },
-  kind: { type: "enum", values: SEARCH_KINDS },
-  path: { type: "string" },
-  budget: { type: "integer", default: DEFAULT_BUDGET_TOKENS },
-  cursor: { type: "string" },
+  query: {
+    type: "string",
+    required: true,
+    description: "Free text to find: an identifier, a substring or a phrase.",
+  },
+  kind: {
+    type: "enum",
+    values: SEARCH_KINDS,
+    description: "Return only declarations of this kind, when you already know it.",
+  },
+  path: {
+    type: "string",
+    description: "Repo-relative prefix: the path itself and everything under it.",
+  },
+  budget: {
+    type: "integer",
+    default: DEFAULT_BUDGET_TOKENS,
+    description: "Token ceiling for this result; exceeding it truncates and sets `next`.",
+  },
+  cursor: {
+    type: "string",
+    description: "Continue this same search from the `next` cursor of a previous page.",
+  },
 } as const;
+
+/**
+ * One call a caller can paste verbatim: the schema says which arguments exist, not what a real
+ * one looks like, and an agent with no example reaches for a file reader instead.
+ */
+export const example: Record<string, unknown> = { query: "publish", kind: "function" };

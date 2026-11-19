@@ -1015,9 +1015,9 @@ describe("expand: the range argument through the argument layer", () => {
     ]);
   });
 
-  test("a protocol call may send the items as numbers or as the published strings", () => {
-    // `inputSchema` is generated from this same table and describes array items as strings, so
-    // both spellings are read in the declared item type rather than only the JSON number.
+  test("a protocol call may send the items as numbers or as digit strings", () => {
+    // `inputSchema` publishes `items: {type: "integer"}` from this same table, and a client that
+    // sends `["1", "5"]` means the same call: both spellings are read in the declared item type.
     expect(parseArgs("expand", input, { target: "t", range: [1, 5] }).range).toEqual([1, 5]);
     expect(parseArgs("expand", input, { target: "t", range: ["1", "5"] }).range).toEqual([1, 5]);
   });

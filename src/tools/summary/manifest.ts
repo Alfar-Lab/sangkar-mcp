@@ -27,12 +27,32 @@ export const input = {
     type: "enum",
     values: ["change", "repo", "area"],
     default: "change",
+    description: "Which slice to summarize: working-tree diff, whole repository, or one path.",
   },
   /** Only meaningful for `area`; one param serving one scope keeps the scopes discoverable together. */
-  target: { type: "string" },
+  target: {
+    type: "string",
+    description: "The path the `area` scope describes; ignored by the other two scopes.",
+  },
   /** Defaults to the generation's `base_commit`, so the ordinary call spawns no git at all. */
-  base: { type: "string" },
-  budget: { type: "integer", default: 1200 },
+  base: {
+    type: "string",
+    description: "The git revision the working-tree diff is taken against.",
+  },
+  budget: {
+    type: "integer",
+    default: 1200,
+    description: "Token ceiling for the answer; this hot path must stay small.",
+  },
   /** Continuation for the scopes whose lists do not fit one page. */
-  cursor: { type: "string" },
+  cursor: {
+    type: "string",
+    description: "Continuation token a previous truncated answer returned.",
+  },
 } as const;
+
+/**
+ * A call an agent can paste: the default scope, which needs no other argument because the diff is
+ * read from the generation's own base commit.
+ */
+export const example: Record<string, unknown> = { scope: "change" };

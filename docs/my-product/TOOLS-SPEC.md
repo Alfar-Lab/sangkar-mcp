@@ -92,7 +92,7 @@ each answering a different question:
 
 | key | type | what it is |
 |---|---|---|
-| `coverage.skipped` | integer | the count of `not_indexed` rows in the scope this answer assembled — always the rows the list beside it holds, so `coverage.skipped` is `coverage.not_indexed.length` at every scope; what the *repository* never read is `totals.not_indexed_total`'s job |
+| `coverage.skipped` | integer | the count of `not_indexed` rows in the scope this answer assembled — the rows the list beside it holds, so `coverage.skipped` is `coverage.not_indexed.length` in every answer that assembles coverage from the graph (`status`, `summary`, `impact`, `trace`, `expand`); what the *repository* never read is `totals.not_indexed_total`'s job. `index` is the one answer this does not describe: it reports a run's accounting, so its `skipped` is the run's count of non-indexable paths and its list is empty by construction (§8) |
 | `coverage.tests` | object | `{ nodes, languages: [{ language, nodes }] }` — the test corpus this graph indexed. `nodes: 0` means no test symbols were indexed, a different fact from "nothing covers this change"; `status` and `summary` always carry it, and the other tools do not pay for the query |
 | `totals.not_indexed_total` | integer | the repo-wide count of paths the index never read, read from the graph rather than from this answer's list; `status` and `summary` report the same number for one generation, so a narrow scope cannot understate what the repository never read |
 
@@ -112,6 +112,15 @@ unless nothing else can pay for it.
 | `truncated` + `next` | truncation without a continuation is data loss the agent cannot detect. |
 | `next_tools` | with six tools and no prompt scaffolding, this is how the agent routes. CRG got 43 % of its calls from prompts that hard-coded exactly this chaining. |
 | `summary` | the one field a model can quote directly into its answer without re-serialising anything. |
+
+**Decision: `read_status` keeps its field set.** Issue #9's item 2 proposed a compact form for the
+common fresh answer, and this is the recorded answer: no. A fresh graph fills the first three members
+(`generation`, `indexed_at`, `stale`) and the rest by whichever layer knows them — `stale_reason` only
+when `stale` is true, `stale_checked_at` by the handler that ran the check, `decisive` by the
+composition root (§1.1) — so the whole set costs a measured few dozen tokens per answer, and
+`next_tools` on the same answer is worth more than a compact form would save. `read_status` is a public
+contract rather than an internal detail: `DESIGN.md` §5 fixes its members, and a second shape would
+have to say twice which of `stale` and `decisive` is authoritative.
 
 ---
 
@@ -254,6 +263,8 @@ An example of the census on its own:
 
 ### Parameters
 
+**Example call** (`inputSchema.examples`): `{"query": "handleRequest", "depth": 1}`
+
 | name | type | required | default | why |
 |---|---|---|---|---|
 | `query` | string | **required** | — | One free-form input is the whole point: the measured 884-vs-0 result says a constrained, single-entry API beats a structured one. Accepting name, dotted name, path and `@decorator` removes the "which tool do I use for this shape" decision entirely. |
@@ -282,7 +293,7 @@ are separate products.
   "status": "ok",
   "summary": "resolve_bare_call_targets: 2 callers, 15 callees (4 shown). 1 call site unresolved.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
   "totals": { "callers_total": 2, "callees_total": 15, "total_relation": "gte" },
   "truncated": true,
   "truncation_reason": "budget",
@@ -561,10 +572,12 @@ for an empty set. `null` means *not applicable to this scope*; unknown never app
 
 ### Parameters
 
+**Example call** (`inputSchema.examples`): `{"query": "publish", "kind": "function"}`
+
 | name | type | required | default | why |
 |---|---|---|---|---|
 | `query` | string | **required** | — | Same free-text rationale as `trace`. One entry point covers identifier, substring and natural language. |
-| `kind` | enum | optional | any | Occasionally you want only `class` or only `test`. Optional because a wrong `kind` hides the right answer, which is worse than a noisy list. |
+| `kind` | enum `function`\|`method`\|`class`\|`file`\|`decorator` | optional | any | Narrowing for when the caller already knows the shape. `test` is deliberately not a value: the index records tests as `node.is_test`, a flag rather than a kind, so these five are the whole enum. Optional because a wrong `kind` hides the right answer, which is worse than a noisy list. |
 | `path` | string | optional | repo root | Prefix filter. Justified because "find this name under `tests/`" is a common real need and there is no other way to express it now that every tool lost its structured args. |
 | `budget` | integer | optional | `2000` | Enough for ~20 results with degrees; the measured `semantic_search` equivalent was 880 calls at much larger defaults. |
 | `cursor` | string | optional | `null` | Continuation. |
@@ -587,8 +600,8 @@ target it resolves — so one sentence describes all three tools.
   "status": "ok",
   "summary": "Found 2 declarations for 'resolve_bare_call_targets', showing 2 of 2.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "results_total": 2, "total_relation": "eq" },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "results_total": 2, "total_relation": "gte" },
   "payload": {
     "mode": "bm25",
     "results": [
@@ -700,6 +713,8 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
 
 ### Parameters
 
+**Example call** (`inputSchema.examples`): `{"target": "src/indexer/resolve.ts", "what": "outline"}`
+
 | name | type | required | default | why |
 |---|---|---|---|---|
 | `target` | string | **required** | — | A single opaque handle copied verbatim from a prior payload. This is the whole reason the other tools can stay small: detail is addressable instead of pre-shipped. |
@@ -734,6 +749,12 @@ A target nothing answers for is `not_found` with `{ target, why, hint }`: the re
 resolved, and the address forms that would have been accepted. A folder prefix is answered only by
 `what: "coverage"`, and the hint says so instead of returning an empty expansion.
 
+A `what: "coverage"` answer is scoped to the prefix it was asked about, and its
+`totals.not_indexed_total` is that scope's count — `payload.not_indexed.length`, the rows the answer
+itself holds — not the repo-wide `totals.not_indexed_total` that `status` and `summary` publish (§1.1).
+Read a folder's coverage as "what this prefix never read", and `status` as "what the repository never
+read".
+
 ### Example output
 
 ```json
@@ -741,8 +762,8 @@ resolved, and the address forms that would have been accepted. A folder prefix i
   "status": "ok",
   "summary": "members of GraphStore, showing 25 of 214.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "members_total": 214, "total_relation": "eq" },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "members_total": 214, "total_relation": "gte" },
   "truncated": true,
   "truncation_reason": "budget",
   "next": "cur_9a02cc",
@@ -765,8 +786,8 @@ resolved, and the address forms that would have been accepted. A folder prefix i
   "status": "ok",
   "summary": "outline of src/graph.py: 26.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "members_total": 26, "total_relation": "eq" },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "members_total": 26, "total_relation": "gte" },
   "truncated": false,
   "truncation_reason": null,
   "next": null,
@@ -799,8 +820,8 @@ arity.
   "status": "ok",
   "summary": "lines 3201-3216 of src/graph.py.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false, "stale_checked_at": "2026-11-17T14:02:00Z" },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "lines_total": 16, "total_relation": "eq" },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "totals": { "lines_total": 16, "total_relation": "gte" },
   "truncated": false,
   "truncation_reason": null,
   "next": null,
@@ -881,10 +902,12 @@ shown" into one call instead of a reassembly from `file` and `lines`.
 
 ### Parameters
 
+**Example call** (`inputSchema.examples`): `{"mode": "fast"}`
+
 | name | type | required | default | why |
 |---|---|---|---|---|
 | `force` | boolean | optional | `false` | The only real need an agent has: "the graph looks wrong, rebuild it". |
-| `mode` | enum `full`\|`fast` | optional | `full` | `fast` skips non-code files; useful for a first pass on a huge repo. |
+| `mode` | enum `full`\|`fast` | optional | `full` | `fast` republishes only what changed instead of rebuilding from an empty stage — the cheaper first pass on a huge repository. |
 
 ### Example output
 
@@ -893,7 +916,7 @@ shown" into one call instead of a reassembly from `file` and `lines`.
   "status": "ok",
   "summary": "Full index published: 530 files, 13,955 nodes, 130,044 edges in 41.2s.",
   "read_status": { "generation": "g-9c02d1", "indexed_at": "2026-11-17T14:10:02Z", "stale": false },
-  "coverage": { "complete": false, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [{ "path": "docs/legacy.xslt", "reason": "grammar_unavailable" }] },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 0, "not_indexed": [] },
   "payload": {
     "mode": "full",
     "duration_ms": 41203,
@@ -950,6 +973,10 @@ budget and points at `depth: 1`, since that is a smaller query rather than a sma
 | `impact` | 0 | 5 | 5 |
 | `expand` | 1 | 4 | 5 |
 | `index` | 0 | 2 | 2 |
+
+Every declared argument carries an enum or a description in the published `inputSchema`, and the seven
+`example` exports the manifests carry are published as `inputSchema.examples` — §3, §5, §7 and §8
+quote theirs in full.
 
 **Seven tools, three required arguments in total.** For comparison: the two parents ship 47 tools and
 CBM's `detect_changes` alone takes 9 optional arguments.
