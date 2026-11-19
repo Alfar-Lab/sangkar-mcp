@@ -26,8 +26,17 @@
       "pre_request": [],
       "size": "M",
       "title": "Write docs/my-product/TELEMETRY.md: schemas, privacy reason, verb",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:03:07Z",
+          "detail": "Wrote docs/my-product/TELEMETRY.md (20763 B) in 9 sections: 1 What it is, 2 Consent, 3 Identity, 4 The record schemas (4.1 call 31 fields, 4.2 index_run 21, 4.3 session 14, 4.4 the three call notes), 5 The privacy prohibition, 6 The verb and its flags, 7 What the report shows, 8 Deliberately not done (incl. shared-file append rule), 9 Adding a field later. Field-name parity checked mechanically: a python script extracted each interface's fields from src/shared/telemetry/record.ts and the first column of each doc table — CallRecord 31/31 order-identical, IndexRunRecord 21/21, SessionRecord 14/14. Consent edits: README.md line 177 now \"Three settings remain, and all three are read from the environment rather than a flag:\", SANGKAR_TELEMETRY row added as 3rd data row (line 183); bin/sangkar.ts USAGE telemetry line now \"... (local only; recording is on by default)\". Verify outputs: `ls` -> 20763 docs/my-product/TELEMETRY.md; grep -c in TELEMETRY.md -> SANGKAR_TELEMETRY 2, install_id 7, session_id 6, arg_names_set 5, unresolved_ratio 1, \"--out\" 3, \"--since\" 7, report.html 1; `grep -n SANGKAR_TELEMETRY README.md` -> \"183:| `SANGKAR_TELEMETRY` | unset | usage telemetry under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables it, and when off no file and no directory is created |\"; `grep -n \"Two settings remain\" README.md` -> no match; `grep -n \"Three settings remain, and all three are read from the environment rather than a flag:\" README.md` -> \"177:Three settings remain, and all three are read from the environment rather than a flag:\"; `grep -c '^| `SANGKAR_' README.md` -> 3; `sed -n 177,184p README.md` -> that sentence, header, separator and exactly 3 variable rows; `grep -n \"local only\" bin/sangkar.ts` -> \"20:  telemetry  write a self-contained HTML report of the recorded usage (local only; recording is on by default)\". Extra checks: `bun x biome check bin/sangkar.ts` -> \"Checked 1 file in 4ms. No fixes applied.\"; `bun run typecheck` -> clean. `git status --porcelain` lists only docs/my-product/TELEMETRY.md (new), README.md, bin/sangkar.ts plus the pre-existing .ppm/** edits from other phases. Deviations found: (a) record.ts comments say generation_advanced is \"true only for a run that published\" but the code sets it from `spec.exitCode === 0`, so the doc states the exit-code rule; (b) bin/sangkar.ts intercepts `--help` for reserved verbs before dispatch, so `sangkar telemetry --help` prints bin's one-line VERB_USAGE and cli.ts's richer USAGE block is unreachable from the CLI (the documented promise \"prints usage and writes nothing\" holds either way); (c) session.languages is always [] by construction, documented as such because index_run.languages is the run-level truth."
+        },
+        {
+          "time": "2026-11-19T05:03:34Z",
+          "detail": "ORCHESTRATOR VERIFY: docs/my-product/TELEMETRY.md written (20,763 B) with sections 1 What it is, 2 Consent, 3 Identity, 4 record schemas (4.1 call 31 fields, 4.2 index_run 21, 4.3 session 14, 4.4 the three call rules), 5 privacy prohibition, 6 verb+flags, 7 report panels, 8 non-goals, 9 adding a field. Field parity checked mechanically against record.ts (31/31, 21/21, 14/14, order-identical). README.md: sentence at 177 is now \"Three settings remain, and all three are read from the environment rather than a flag:\", the SANGKAR_TELEMETRY row is the third data row (line 183), grep -c '^| `SANGKAR_' = 3. bin/sangkar.ts line 20 USAGE: \"(local only; recording is on by default)\". Deviations reported and documented honestly: generation_advanced is exit_code === 0 (the code's rule), bin's --help answers before dispatch so cli.ts's USAGE block is unreachable from the CLI (the documented promise still holds), session.languages is always [] by construction."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -51,8 +60,13 @@
       ],
       "size": "S",
       "title": "Cross-reference telemetry from TECH-SPEC §11 and the layout",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:04:12Z",
+          "detail": "DONE DIRECTLY BY ORCHESTRATOR (2 additive edits, +9 lines, no deletions). TECH-SPEC.md §5.1 (the shared/ specification list) gains a `telemetry/` row with its exported surface and the \"imports #shared/* only\" contract; §11 gains one paragraph after the rule table naming the local-only write path (<dataDir>/telemetry/YYYY-MM-DD.jsonl, never stdout, never the network, gated by SANGKAR_TELEMETRY), stating it changes none of the §11 rules, and linking [TELEMETRY.md](TELEMETRY.md) instead of restating the schema. grep TELEMETRY.md -> lines 205 (row reference) and 533 (link); grep telemetry/ -> 205, 529. The link target docs/my-product/TELEMETRY.md exists. DESIGN.md untouched."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -78,8 +92,13 @@
       ],
       "size": "M",
       "title": "Update AGENTS.md: layout, env exceptions, test map, recipe, state",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:04:48Z",
+          "detail": "DONE DIRECTLY BY ORCHESTRATOR (AGENTS.md only, +15/-3). Five edits: (1) the \"Tools never touch a connection\" bullet now names both config-file variables (SANGKAR_CURSOR_KEY, SANGKAR_TELEMETRY, read once in src/shared/config.ts) and the deliberate root-only SANGKAR_NO_WATCH read; (2) layout gains the `telemetry/` line and the bin line reads `mcp (default) | worker | index | telemetry`; (3) two test-map rows (record shape/consent/rotation/privacy -> telemetry.test.ts, telemetry-root.test.ts; report aggregation/escaping/verb -> telemetry-report.test.ts, cli.test.ts); (4) the \"Add a telemetry field\" recipe; (5) docs list gains TELEMETRY.md and the plan list marks .ppm/sangkar-telemetry/ in progress. The completion sentence at line 187 (\"Both plans are complete ...\") is untouched — it belongs to TASK-022. Pre-existing drift reported, not fixed: the docs list names GRAPH-MODEL.md, INDEXING-PIPELINE.md and STORAGE-ARCHITECTURE.md as docs/my-product/ although they live under docs/research/. grep SANGKAR_NO_WATCH -> one line (37); grep sangkar-telemetry -> line 217 (in progress)."
+        }
+      ]
     },
     {
       "agent": "verify",
@@ -107,8 +126,13 @@
       ],
       "size": "S",
       "title": "Final verification: definition of done plus every Done-when item",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:07:27Z",
+          "detail": "CLOSING GATE (orchestrator). All four definition-of-done commands exited 0: bun run typecheck 0, bun run lint 0 (\"Checked 103 files ... No fixes applied.\"), bun test 609 pass / 0 fail / 4082 expect() calls / 43 files / 49.48s, bun run db:drift 0 (\"No schema changes, nothing to migrate\"). Only then was AGENTS.md's Current-state sentence rewritten to three completed plans (18 insertions / 4 deletions in the file for all of phase_3's edits).\n2) bun run acceptance -> 9 pass / 0 fail / 32 expect() calls / 21.50s (regression confirmation only, not a gate).\n3) git diff --name-only ed16170 -- src/tools package.json bun.lock tests/boundary.test.ts -> empty; same for src/shared/instructions.ts and docs/INSTRUCTIONS.md.\n4) Consent end to end in /tmp/donecheck: bare `sangkar index` + `sangkar status` created <data>/telemetry/{2026-11-19.jsonl,install_id.json}; the same status with SANGKAR_TELEMETRY=off exited 0 and /tmp/donecheck/data2/telemetry does not exist.\n5) `sangkar telemetry` wrote <data>/telemetry/report.html (4 records, 0 unparsed lines); grep -c -E \"http://|https://|src=|<link|@import|url\\(\" -> 0. `--help` writes nothing (TASK-017). A torn line appended by hand was skipped and counted: rerun printed \"(4 records, 1 unparsed lines)\", the panel renders \"unparsed lines 1\", exit 0.\nDone-when check against plan.objective.md: (1) green above. (2) verified in 4 — session worker + index_run + session cli + call status all v:1, 14/21/14/31 fields. (3) verified: index_run mode full, exit_code 0, generation_advanced true, files_seen 1, files_indexed 1, languages {\"typescript\":1}, db_size_bytes 172032, was_forced true. (4) tests/telemetry.test.ts deep-walks the serialised record (redaction) and pins stale_reason \"other\"; 14 pass. (5) verified in 5. (6) empty diff. (7) boundary 11 pass unmodified; grep process.env -> exactly the four baseline files; SANGKAR_TELEMETRY only in src/shared/config.ts. (8) TELEMETRY.md (9 sections, field parity 31/21/14), README row + \"Three settings\" sentence + USAGE clause, AGENTS.md layout / env sentence / test map / recipe / docs list / Current state.\nResidual note: the Current-state edit is written as the one permitted edit; the telemetry instrument is named inside that completion sentence rather than in a separate paragraph, per TASK-022's single-edit contract.\nFull evidence for the plan's 22 tasks is in each task's Progress entry."
+        }
+      ]
     }
   ]
 }

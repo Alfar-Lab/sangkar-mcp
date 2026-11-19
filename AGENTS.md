@@ -32,7 +32,10 @@ Other invariants that break the product when violated:
   asserted end-to-end by `tests/mcp-surface.test.ts`.
 - **Tools never touch a connection.** A handler receives `ToolContext` from `#shared/store/read/context.ts`
   (`reader`, `cursor`, `log`, `now`, `config`). It does not open a database, does not import `drizzle-orm`,
-  does not read `process.env` (the single exception is `SANGKAR_CURSOR_KEY`, read by `src/shared/config.ts`).
+  does not read `process.env`: the two settings that do come from the environment are read once, in
+  `src/shared/config.ts` (`SANGKAR_CURSOR_KEY`, `SANGKAR_TELEMETRY`), and `src/index.ts` reads
+  `SANGKAR_NO_WATCH` deliberately because it is not a tool setting — it is this process deciding whether
+  it owns a poller.
 - **Never build a Drizzle query inside a handler or a loop.** Prepared statements only, via the cache in
   `store/db.ts` (LRU, cap 200). Measured on `bun:sqlite`: a re-built builder costs 42.7 µs per read, a reused
   prepared query 1.7 µs. `tests/acceptance.test.ts` fails if the prepared path is not ≥5× faster than the
@@ -55,7 +58,7 @@ Other invariants that break the product when violated:
 ## Layout
 
 ```
-bin/sangkar.ts              entry point: mcp (default) | worker | index, then a tool name
+bin/sangkar.ts              entry point: mcp (default) | worker | index | telemetry, then a tool name
 src/index.ts                composition root: builds ToolContext, registers tools, starts the watcher,
                             installs SIGINT/SIGTERM, maps handler throws to envelopes
 src/shared/                 kernel + engine — the only cross-module import target
@@ -79,6 +82,8 @@ src/shared/                 kernel + engine — the only cross-module import tar
                             reader.ts (aggregate interface), context.ts (ToolContext)
   domain/                   resolve (ambiguity), neighbors (grouped), coverage (absence), risk, diff,
                             freshness
+  telemetry/                records, JSONL sink, aggregator, HTML report; imports #shared/* only,
+                            never a tool or the indexer
 src/tools/<name>/           one private module per tool: manifest.ts (name, description, schema) +
                             handler.ts. Seven tools: status, summary, trace, search, impact, expand, index
 src/indexer/                the writer — runs in a spawned process, never in the server
@@ -138,6 +143,8 @@ after the first `sangkar index` (`.gitignore` says as much).
 | one tool's payload or defaults | `tools-<name>.test.ts` |
 | registration, profiles, stdio discipline | `mcp-surface.test.ts`, `tools-smoke.test.ts` |
 | the CLI surface | `cli.test.ts`, `cli-args.test.ts`, `cli-render.test.ts` |
+| the telemetry record shape, the consent switch, the daily id rotation and the privacy invariant | `telemetry.test.ts`, `telemetry-root.test.ts` |
+| the report's aggregation, escaping and self-containment, and the verb | `telemetry-report.test.ts`, `cli.test.ts` |
 | budgets and latency end to end | `acceptance.test.ts` |
 | the shipped binary | `binary-smoke.test.ts` |
 
@@ -155,6 +162,9 @@ it explicitly in `src/index.ts` — registration is an explicit import list, nev
 
 **Change a payload field.** Update `docs/TOOLS-SPEC.md` and the tool's `handler.ts` together, keep the nine
 envelope fields intact, and add an assertion to that tool's test. Payload keys are a public contract.
+
+**Add a telemetry field.** `src/shared/telemetry/record.ts`, `docs/my-product/TELEMETRY.md` §4 and the report
+panel in `html.ts` change in the same commit; a record field the doc does not name is a defect.
 
 **Add a table or column.** Edit `src/shared/store/schema.ts` → `bun run db:generate` → commit both
 `0000_*.sql` and `migrations/meta/**` → `bun run db:parity`. If the object is not modelable (FTS5, a trigger,
@@ -174,7 +184,9 @@ query; `unresolved` next to `edge.calls` is the binding failure rate.
 
 ## Current state and known gaps
 
-Both plans are complete (`ppm plan_status`): `codegraph-mvp` 36/36, `cgraph-cli` 22/22. The suite is green.
+All three plans are complete (`ppm plan_status`): `codegraph-mvp` 36/36, `cgraph-cli` 22/22,
+`sangkar-telemetry` 22/22 — local usage records under `<dataDir>/telemetry/` (`SANGKAR_TELEMETRY=off`
+disables them) and `sangkar telemetry`, the offline HTML report they are read with. The suite is green.
 
 Three things measured on 2026-11-18 that the tests do **not** catch — treat them as the open work:
 
@@ -197,13 +209,15 @@ the shared corpus) because the edge taxonomies differ. If you add edge kinds, de
 ## Docs and plans
 
 - `docs/my-product/` — the design record: `DESIGN.md` (objectives, contracts, absence semantics, acceptance),
+  `TELEMETRY.md` (record schemas, the privacy prohibition, the verb, the report),
   `TOOLS-SPEC.md` (per-tool params, payload keys, budgets), `DATABASE.md` (tables, index plan, publish
   protocol), `TECH-SPEC.md` (runtime facts, module isolation, Drizzle, parser strategy), `GRAPH-MODEL.md`,
   `INDEXING-PIPELINE.md`, `STORAGE-ARCHITECTURE.md`.
 - `docs/research/` — the two reference implementations' analysis and the real MCP payloads captured from them
   (`tool-outputs/`). Those numbers are the oracles the parity tests use.
 - `docs/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`.
-- `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/` — completed plans; task JSON is the execution record. Do not edit
+- `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/` — completed plans; `.ppm/sangkar-telemetry/` — in progress; task
+  JSON is the execution record for each. Do not edit
   `.ppm/*/tasks/*.json` by hand.
 
 Changing behaviour that a doc specifies means changing the doc in the same commit.

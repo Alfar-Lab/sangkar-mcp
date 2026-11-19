@@ -17,7 +17,7 @@ verbs
   mcp     MCP server on stdio (default): the tool surface a client talks to
   worker  index worker process, spawned by the server
   index   index the repository; also a tool, with identical arguments
-  telemetry  write a self-contained HTML report of the recorded usage (local only)
+  telemetry  write a self-contained HTML report of the recorded usage (local only; recording is on by default)
 
 tools
   status   report index status: five human lines, or the envelope with --json
