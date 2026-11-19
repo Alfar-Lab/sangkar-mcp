@@ -26,11 +26,15 @@
       "pre_request": [],
       "size": "M",
       "title": "trace: path filter, honest totals, next_call",
-      "status": "todo",
+      "status": "completed",
       "progress": [
         {
-          "time": "2026-11-19T04:31:34Z",
-          "detail": "Orchestrator verification: diff confined to src/tools/trace/{manifest,handler}.ts + tests/tools-trace.test.ts. typecheck exit 0; `bun run test tests/tools-trace.test.ts tests/domain.test.ts` 82 pass / 0 fail; live `trace 'messageOf' --json` on generation g-3569df: totals {candidates_total: 8, candidates_shown: 5, total_relation: gte}, payload 8/5, 5 rows listed, every why reads \"of 8 candidates\", each candidate carries next_call {tool: trace, query: qn, direction: all}. Deviation accepted: candidates_shown declared on a local TraceTotals because the shared Totals index signature only admits `<name>_total`; TASK-018 should widen Totals and delete the subtype. TOOLS-SPEC.md §3 still needs path/candidates_total/candidates_shown/next_call (TASK-013)."
+          "time": "2026-11-19T04:09:53Z",
+          "detail": "Files: src/tools/trace/manifest.ts (input.path + TraceArgs.path), src/tools/trace/handler.ts (TraceNextCall/TraceCandidate/TraceTotals, resolveOptionsOf -> resolve({kinds,path}), payload+totals candidates_total/candidates_shown from the Resolution, summary uses candidates_total, next_call on every candidate and near miss, path in argsHash), tests/tools-trace.test.ts (7-wide tie fixture + 5 tests).\nVerify: `bun run test tests/tools-trace.test.ts tests/domain.test.ts` -> 82 pass / 0 fail, exit 0. `bun run typecheck` -> exit 0.\nRe-indexed: generation g-3569df (98 files, 7065 edges, 1376 nodes).\nLive `trace 'messageOf' --json` (g-3569df): totals {total_relation: gte, candidates_total: 8, candidates_shown: 5}; payload candidates_total 8 / candidates_shown 5, list length 5; summary \"messageOf: 8 candidates matched, none preferred\"; every why \"of 8 candidates\". `--path src/shared/domain` -> ok (src/shared/domain/diff.ts::messageOf); `--path src/indexer` -> ambiguous total 2 shown 2, whys \"of 2\"; `trace 'messageOf.thing' --path src/indexer` -> not_found, 2 near misses both under the prefix with next_call; `trace 'src/indexer/watch.ts::messageOf'` -> ok.\nNote: candidates_shown cannot live in src/shared/envelope.ts Totals (its index signature is `${string}_total`); the tool declares TraceTotals extends Totals instead, which is assignable to Totals and leaves the shared type untouched."
+        },
+        {
+          "time": "2026-11-19T04:32:22Z",
+          "detail": "Orchestrator verification (re-recorded in this worktree; the first copy went to the main checkout by mistake): diff confined to src/tools/trace/{manifest,handler}.ts + tests/tools-trace.test.ts. typecheck exit 0; `bun run test tests/tools-trace.test.ts tests/domain.test.ts` 82 pass / 0 fail; live `trace 'messageOf' --json` on generation g-3569df: totals {candidates_total: 8, candidates_shown: 5, total_relation: gte}, payload 8/5, 5 rows, every why \"of 8 candidates\", each candidate carries next_call {tool: trace, query: qn, direction: all}. Deviation accepted: candidates_shown declared on a local TraceTotals because the shared Totals index signature admits only `<name>_total`; TASK-018 should widen Totals and delete the subtype. TOOLS-SPEC.md §3 still needs path/candidates_total/candidates_shown/next_call (TASK-013)."
         }
       ],
       "agent": "implement"
@@ -60,8 +64,17 @@
       ],
       "size": "M",
       "title": "trace: unresolved buckets, census and bucket filter",
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T04:41:03Z",
+          "detail": "src/tools/trace/manifest.ts + handler.ts + tests/tools-trace.test.ts: every payload.unresolved row carries bucket (bucketOf), payload.unresolved_census = {total, material, buckets} from bucketCensus over the same assemble() rows coverage.unresolved_edges counts, new `unresolved` enum argument (values imported from UNRESOLVED_BUCKETS) filters only the listed rows, and the summary states \"N filtered out (unresolved: <bucket>)\". Verify: typecheck exit 2 with ONE error in tests/tools-expand.test.ts (expand worker's in-flight TASK-010 edit, outside my Files; my three files have no tsc errors — `tsc --noEmit --pretty false` lists only tests/tools-expand.test.ts), `bun run test tests/tools-trace.test.ts tests/unresolved.test.ts` exit 0 (50 pass / 0 fail), `biome check` on the three files exit 0. Live census, `bun run bin/sangkar.ts trace 'src/tools/trace/handler.ts' --json`, exit 0: coverage.unresolved_edges 56 = unresolved_census.total 56; buckets sum 56 = {builtin_stdlib 14, external_package 0, internal_module 10, dynamic_property_call 8, receiver_type_unknown 24, ambiguous 0}, material 25; list carried 18 of 56 (evidence cap), all with bucket. Filtered probe `--unresolved receiver_type_unknown` exit 0: only that bucket listed, census identical (total 56), summary \"56 unresolved call sites ..., 32 filtered out (unresolved: receiver_type_unknown)\"."
+        },
+        {
+          "time": "2026-11-19T04:49:34Z",
+          "detail": "Orchestrator verification: diff confined to src/tools/trace/{manifest,handler}.ts + tests/tools-trace.test.ts; DESCRIPTION untouched. typecheck exit 0; `bun run test tests/tools-trace.test.ts tests/unresolved.test.ts` 50 pass / 0 fail. Live `trace 'src/tools/trace/handler.ts' --json`: coverage.unresolved_edges 56 = unresolved_census.total 56 = sum(buckets) 56, material 25, buckets {builtin_stdlib 14, external_package 0, internal_module 10, dynamic_property_call 8, receiver_type_unknown 24, ambiguous 0}; every listed row carries a bucket from the closed set; `--unresolved ambiguous` returns 0 rows, keeps census.total 56 and says \"56 filtered out (unresolved: ambiguous)\". The enum values are imported from #shared/domain/unresolved, never restated."
+        }
+      ],
       "agent": "implement"
     },
     {
@@ -88,8 +101,21 @@
       "pre_request": [],
       "size": "M",
       "title": "expand: path filter, honest totals, next_call",
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T04:09:02Z",
+          "detail": "Files: src/tools/expand/manifest.ts (input.path string, doc comment 3->4 args), src/tools/expand/handler.ts (ExpandArgs.path; resolveOptionsOf() passes { path } to resolve; AmbigousPayload gains candidates_total/candidates_shown from the Resolution; Candidate = ResolutionCandidate + next_call {tool:\"expand\", target: qn}; summary says \"matches N nodes, showing M\" when the cap cuts), tests/tools-expand.test.ts (+4 tests, manifest/ExpandArgs key assertions, extra-node reader for a 7-wide tie and a cross-directory tie). Verify: `~/.bun/bin/bun run typecheck` exit 0 (an earlier run showed in-flight errors in src/tools/{impact,summary}/handler.ts and tests/tools-impact.test.ts from TASK-012's worker; none in expand — they are gone now). `PATH=$HOME/.bun/bin:$PATH ~/.bun/bin/bun run test tests/tools-expand.test.ts tests/domain.test.ts` exit 0, 74 pass / 0 fail. Totals observed: fixture \"dup\" tie candidates_total=2, candidates_shown=2; new \"many\" tie (7 nodes) candidates_total=7 in payload and envelope, candidates_shown=5=CANDIDATE_CAP, total_relation=gte, every candidate.why contains \"of 7 candidates\"; \"picked\" tie total=2 shown=2 and path=src/widgets narrows to ok on src/widgets/y.ts::picked (inferred: function -> edges). DEVIATION: totals cannot carry candidates_shown — Totals' index signature only permits `${string}_total` keys (src/shared/envelope.ts, not in this task's file list), so candidates_shown lives in the ambiguous payload only; envelope totals keeps candidates_total. docs/TOOLS-SPEC.md §7 not edited (another task owns it): its parameter table and example payload still need the path row and the two candidate counts."
+        },
+        {
+          "time": "2026-11-19T04:10:27Z",
+          "detail": "CORRECTION to the deviation above: totals DOES report both, without touching src/shared/envelope.ts — `ExpandTotals extends Totals` with explicit `candidates_total`/`candidates_shown` (same pattern trace's worker used for TraceTotals). Verify after that change: `~/.bun/bin/bun run typecheck` exit 0; `PATH=$HOME/.bun/bin:$PATH ~/.bun/bin/bun run test tests/tools-expand.test.ts tests/domain.test.ts` exit 0, 74 pass / 0 fail. Totals now observed identical in payload and envelope: 7-wide tie -> candidates_total 7, candidates_shown 5 (=CANDIDATE_CAP), total_relation gte; \"dup\" tie -> 2/2; \"picked\" with path=src/widgets -> ok. Remaining gap (other task's file): docs/my-product/TOOLS-SPEC.md §7 still lacks the `path` row and the two candidate counts."
+        },
+        {
+          "time": "2026-11-19T04:31:34Z",
+          "detail": "Orchestrator verification: diff confined to src/tools/expand/{manifest,handler}.ts + tests/tools-expand.test.ts; manifest description byte-identical. typecheck exit 0; `bun run test tests/tools-expand.test.ts` 25 pass / 0 fail (absorbes the domain cases). Live `expand 'messageOf' --json` reports the same totals as trace ({candidates_total: 8, candidates_shown: 5, total_relation: gte}) and each candidate carries next_call {tool: expand, target: qn}. Same local-Totals deviation as TASK-007 (candidates_shown outside the `<name>_total` index signature). TOOLS-SPEC.md §7 needs the path row and the two counts (TASK-013)."
+        }
+      ],
       "agent": "implement"
     },
     {
@@ -118,8 +144,17 @@
       ],
       "size": "M",
       "title": "expand: source range and outline",
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T04:44:17Z",
+          "detail": "Implemented. Files: src/tools/expand/manifest.ts (what enum + \"outline\"; new range: array/items integer; doc comment only, description prose unchanged), src/tools/expand/handler.ts (OutlineMember/OutlinePayload + ExpandPayload union member, outlineRowsOf over members()/nodesByFile(), outline branch before the source fallthrough, sourceWindowOf clamp/invert plan feeding the single SourcePayload.window with the clamp stated in why, extentOf, sourceSummary zero-line wording, ExpandArgs.range, range forwarded via answerFor), src/shared/cli/args.ts (itemTypeOf/itemOf/coerceItems so a declared items type is read: integer items accept a JSON number or argv text and are stored as numbers; --range 1:5 splits the pair, repeats still collect; array expectation names the item type), tests/tools-expand.test.ts (membersOf now discriminates on what, fixture signatures on render/dispose, manifest/typed-args assertions updated for 5 args, new \"range through the argument layer\" and \"source range and outline\" blocks: inside-range, boundary clamp + why, fully-out-of-extent clamp, inverted range with empty content, class outline with signatures, file outline without the file's own row). Verify: typecheck exit 0; bun run test tests/tools-expand.test.ts tests/cli-args.test.ts exit 0 (58 pass, 0 fail). biome check on the 4 files: clean. Live probes: `expand AGENTS.md --what outline` and `expand AGENTS.md --what source --range 1:5` both exit 0 but land on not_found — AGENTS.md is in not_indexed as unsupported_ext, so the target never resolves (pre-existing folder/coverage hint); range parsing itself succeeded (no usage refusal). Evidence on an indexed, sha-matching file instead: `expand src/indexer/extract.ts --what outline` -> ok, 54 members, source order 39,51,56,72,75,78,96,110, signatures present, file's own row excluded; `expand src/indexer/extract.ts::RawEdge --what source --range 100:102` -> window [100,102], why \"requested: source\"; `--range 1:5` on the same node (extent 96-107) -> window [96,96], why \"requested: source; range 1-5 clamped to the node's extent 96-107\"; `--range 102:100` -> content [], lines_total 0, why \"... range 102-100 is inverted, so no lines were selected\". Deviations: (1) `to` clamps into the node extent [startLine,endLine] rather than [from,endLine] — identical result for any non-inverted pair, and it is what makes an inverted range an empty window instead of a reordered one; (2) outline drops the file node's own row from nodesByFile (target already states it); (3) src/index.ts itemSchemaOf still publishes array items as {type:\"string\"}, so the MCP schema under-describes range — worked around by accepting both spellings in args.ts; fixing the publisher is outside this task's files; (4) docs/my-product/TOOLS-SPEC.md §7 not updated (outside the task's file list) and real class nodes still outline empty because extract.ts does not set class parents (known gap in AGENTS.md). Not run: full suite, lint, acceptance, re-index, db:generate."
+        },
+        {
+          "time": "2026-11-19T04:49:34Z",
+          "detail": "Orchestrator verification: diff confined to src/tools/expand/{manifest,handler}.ts, src/shared/cli/args.ts, tests/tools-expand.test.ts; manifest DESCRIPTION untouched. typecheck exit 0; `bun run test tests/tools-expand.test.ts tests/cli-args.test.ts` 58 pass / 0 fail. Live probes: `expand src/indexer/extract.ts --what outline` returns 54 members in source order with kind/lines/signature; `--what source --range 100:102` returns window [100,102]; `--range 1:5` returns window [96,96] with why \"range 1-5 clamped to the node's extent 96-107\"; `--range 102:100` returns empty content with why \"range 102-100 is inverted, so no lines were selected\" and does not throw. Note: the plan's named probe target AGENTS.md is in not_indexed as unsupported_ext, so it answers not_found by design; the substituted indexed file proves the same behaviour. Non-blocking observation: an inverted range leaves window [102,100] rather than normalising to an empty span at 102."
+        }
+      ],
       "agent": "implement"
     },
     {
@@ -145,11 +180,15 @@
       "pre_request": [],
       "size": "M",
       "title": "status: repository identity and unresolved census",
-      "status": "todo",
+      "status": "completed",
       "progress": [
         {
-          "time": "2026-11-19T04:31:43Z",
-          "detail": "Orchestrator verification: diff confined to src/tools/status/handler.ts, src/index.ts, tests/tools-status.test.ts. typecheck exit 0; `bun run test tests/tools-status.test.ts` 21 pass / 0 fail. Live `status --json` (generation g-3569df): payload.project = {name: sangkar-answer-fidelity, root: <worktree>, branch: plan/answer-fidelity, remote: git@github.com:Alfar-Lab/sangkar-mcp.git}; payload.unresolved = {total: 9894, material: 4052, buckets: {builtin_stdlib: 1626, external_package: 9, internal_module: 366, dynamic_property_call: 3850, receiver_type_unknown: 3833, ambiguous: 210}}; buckets sum 9894 = total = coverage.unresolved_edges. stderr carries `info store.identity_recorded` and 0 `identity_unrecorded` lines. Scope decision on the worker's issue: coverage.unresolved_edges is repo-wide in this tool (it always has been), so the census stays repo-wide to keep total === unresolved_edges; the \"scope-limited\" clause is read as applying to the not_indexed list, which follows skipped's rule. TASK-013/014 must document the census as repo-wide and equal to coverage.unresolved_edges."
+          "time": "2026-11-19T04:08:33Z",
+          "detail": "files: src/tools/status/handler.ts (payload.project.branch/remote via `?? null`, new payload.unresolved {total,material,buckets} from bucketCensus over the same unresolvedRows array that produces coverage.unresolved_edges), src/index.ts (identity line: warn store.identity_unrecorded only when meta.projectRoot is null, else info store.identity_recorded {projectRoot, branch}), tests/tools-status.test.ts (+7 tests: identity present/legacy nulls/reader omitting the optional keys, composition-root log switch, per-bucket census, zero census, census==coverage across path scopes).\nverify: `~/.bun/bin/bun run typecheck` exit 2 — the only remaining diagnostic is tests/tools-impact.test.ts (concurrent worker's file); zero errors in my three files. `bun run test tests/tools-status.test.ts` exit 0, 21 pass / 0 fail, 134 expect() calls. `bun run bin/sangkar.ts index` exit 0 (generation g-66e666, 98 files). `bun run bin/sangkar.ts status --json 2>&1 >/dev/null | grep -c identity_unrecorded` = 0 (grep exit 1, expected).\nlive status --json: project = {name:\"sangkar-answer-fidelity\", root:\"/home/ljosalfar-server/Documents/researchs/sangkar-answer-fidelity\", branch:\"plan/answer-fidelity\", remote:\"git@github.com:Alfar-Lab/sangkar-mcp.git\", commit:\"cc23a37...\", db_path:\".sangkar/graph.db\"}; unresolved = {total:9742, material:3982, buckets:{builtin_stdlib:1615, external_package:9, internal_module:364, dynamic_property_call:3781, receiver_type_unknown:3774, ambiguous:199}}; sum(buckets)=9742 = coverage.unresolved_edges; stderr carries only {\"level\":\"info\",\"msg\":\"store.identity_recorded\",...}.\nidentity_unrecorded count: 0.\ndeviation: the contract sentence \"buckets are scope-limited when paths were requested\" is not implementable together with \"total === coverage.unresolved_edges\" + \"buckets sum to total\", because coverage.unresolved_edges is repo-wide by construction (unresolvedForFiles over allFiles). Implemented the repo-wide reading so all three numbers are one measurement; a path-scoped census needs a coverage.unresolved_edges scope decision outside my files.\nout of scope: docs/my-product/TOOLS-SPEC.md §2 still shows the old project/unresolved payload — not in my file list."
+        },
+        {
+          "time": "2026-11-19T04:32:22Z",
+          "detail": "Orchestrator verification (re-recorded in this worktree): diff confined to src/tools/status/handler.ts, src/index.ts, tests/tools-status.test.ts. typecheck exit 0; `bun run test tests/tools-status.test.ts` 21 pass / 0 fail. Live `status --json` (g-3569df): payload.project = {name: sangkar-answer-fidelity, root: <worktree>, branch: plan/answer-fidelity, remote: git@github.com:Alfar-Lab/sangkar-mcp.git}; payload.unresolved = {total: 9894, material: 4052, buckets: {builtin_stdlib: 1626, external_package: 9, internal_module: 366, dynamic_property_call: 3850, receiver_type_unknown: 3833, ambiguous: 210}}; buckets sum 9894 = total = coverage.unresolved_edges; 0 identity_unrecorded lines on stderr. Scope decision: coverage.unresolved_edges is repo-wide in status, so the census stays repo-wide to keep total === unresolved_edges; the \"scope-limited\" clause applies to the not_indexed list. TASK-013/014 must document the census as repo-wide."
         }
       ],
       "agent": "implement"
@@ -178,11 +217,15 @@
       "pre_request": [],
       "size": "M",
       "title": "summary and impact: unresolved census in totals",
-      "status": "todo",
+      "status": "completed",
       "progress": [
         {
-          "time": "2026-11-19T04:31:43Z",
-          "detail": "Orchestrator verification: diff confined to src/tools/summary/handler.ts, src/tools/impact/handler.ts and their two test files; risk scoring, test_gaps and changed_files untouched. typecheck exit 0; `bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts` 24 pass / 0 fail. Both tools copy total from assembly.coverage.unresolved_edges (one count of one array) and add material plus the six buckets beside it; an empty scope reports total 0 with all buckets present. Open item handed to TASK-018: widen the shared Totals index signature with unresolved_material and delete the local SummaryTotals/ImpactTotals subtypes. TOOLS-SPEC.md needs the new key (TASK-013)."
+          "time": "2026-11-19T04:10:48Z",
+          "detail": "Files: src/tools/summary/handler.ts (ChangePayload.unresolved + RepoPayload.unresolved, SummaryTotals.unresolved_material on all three scopes), src/tools/impact/handler.ts (ImpactPayload.unresolved, ImpactTotals.unresolved_material incl. refusals), tests/tools-summary.test.ts (+1 test, census asserts on change/repo), tests/tools-impact.test.ts (+census asserts, zero-census clean tree). Census sourced from bucketCensus(assembly.unresolved) with total = coverage.unresolved_edges.\nVerify: `PATH=$HOME/.bun/bin:$PATH ~/.bun/bin/bun run typecheck` -> exit 0 (tsc --noEmit, no output).\nVerify: `PATH=$HOME/.bun/bin:$PATH ~/.bun/bin/bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts` -> exit 0, 24 pass / 0 fail, 215 expect() calls.\nCensus observed in the summary fixture (5 rows, 1 file): total 5 === coverage.unresolved_edges, buckets builtin_stdlib 1 / external_package 1 / internal_module 1 / dynamic_property_call 1 / receiver_type_unknown 1 / ambiguous 0 (sum 5), material 1, totals.unresolved_material 1. Identical census from scope=repo. Empty census (no rows) reports total 0 / material 0 / all buckets 0, key present. Impact fixture (2 rows): total 2, material 1, receiver_type_unknown 1, dynamic_property_call 1; clean tree / explicit unmatched paths report total 0.\nDeviation/conflict: shared `Totals` in src/shared/envelope.ts types every key as `<list>_total`, so `totals.unresolved_material` was not typable there; envelope.ts is owned by TASK-018 (blocked, not mine). Each handler declares a local `Totals` subtype (SummaryTotals / ImpactTotals, both exported) so the key is typed without editing outside the task's files. Recommend TASK-018 or a follow-up add `unresolved_material: number` to `Totals` and delete the two local subtypes. docs/my-product/TOOLS-SPEC.md not edited (owned by TASK-013); area scope keeps its payload unchanged, its totals now also carry unresolved_material."
+        },
+        {
+          "time": "2026-11-19T04:32:31Z",
+          "detail": "Orchestrator verification (re-recorded in this worktree): diff confined to src/tools/summary/handler.ts, src/tools/impact/handler.ts and their two test files; risk scoring, test_gaps and changed_files untouched. typecheck exit 0; `bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts` 24 pass / 0 fail. Both tools copy total from assembly.coverage.unresolved_edges (one count of one array) and add material plus the six buckets; an empty scope reports total 0 with all buckets present. Handed to TASK-018: widen the shared Totals index signature with unresolved_material and delete the local SummaryTotals/ImpactTotals subtypes. TOOLS-SPEC.md needs the new key (TASK-013)."
         }
       ],
       "agent": "implement"
@@ -217,8 +260,13 @@
       ],
       "size": "S",
       "title": "Phase 1 gate",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:03:49Z",
+          "detail": "Phase 1 gate: ALL CHECKS PASS (no failures, nothing to assign).\n\n1) ~/.bun/bin/bun run typecheck -> exit 0 (tsc --noEmit clean). ~/.bun/bin/bun run lint -> exit 0 (biome: Checked 97 files, no fixes applied).\n2) bun run test tests/tools-trace.test.ts tests/tools-expand.test.ts tests/tools-status.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts -> exit 0: \"125 pass, 0 fail, 1422 expect() calls\" across 5 files. (stderr 'diff.git_unavailable' warn lines come from /tmp non-git fixtures — expected, not failures.)\n3) Cross-tool probes, after one re-index (status.health.indexer = idle, 0 consecutive failures before starting; index exit 0, generation g-038009 published, 98 files):\n   - Probe 1 (same candidates_total): trace --query messageOf -> status=ambiguous, totals.candidates_total=8, payload.candidates_total=8, candidates_shown=5. expand --target messageOf -> status=ambiguous, totals.candidates_total=8, payload.candidates_total=8, candidates_shown=5. IDENTICAL (8 vs 8).\n   - Probe 2 (census == coverage): status -> coverage.unresolved_edges=10308, payload.unresolved.total=10308, buckets sum=10308. summary -> coverage=10308, payload.unresolved.total=10308, buckets sum=10308. impact -> coverage=3082 (scoped answer), payload.unresolved.total=3082, buckets sum=3082. All totals equal their coverage counts; all buckets sum to total.\n   - Probe 3 (trace --unresolved builtin_stdlib): all 20 listed rows carry bucket=builtin_stdlib only (unfiltered run showed mixed buckets: internal_module, receiver_type_unknown, builtin_stdlib). Census unchanged and byte-identical between unfiltered and filtered runs: {\"total\":52,\"material\":16,\"buckets\":{\"builtin_stdlib\":30,\"external_package\":0,\"internal_module\":3,\"dynamic_property_call\":3,\"receiver_type_unknown\":16,\"ambiguous\":0}} (rows list truncated at budget; census reflects full scope).\n4) gte downgrade intact: status (unresolved_edges=10308>0) -> totals.total_relation=\"gte\"; summary (10308>0) -> \"gte\"; trace resolve (coverage.unresolved_edges=52>0) -> totals.total_relation=\"gte\". Non-zero unresolved edges downgrade eq to gte as the envelope contract requires.\n\nOwning phase_1 task per failure: none — zero failures. TASK-016 gate: PASS."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -248,8 +296,17 @@
       ],
       "size": "M",
       "title": "Empty change set: no coverage claim, null test gaps",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T04:39:15Z",
+          "detail": "Files: src/shared/domain/risk.ts (test-coverage driver gated on symbols>0; comment updated), src/shared/envelope.ts (Totals `${string}_total`: number|null + null=not-applicable comment; optional unresolved_material?/candidates_shown?), src/tools/summary/handler.ts (SummaryTotals deleted in favour of widened Totals; change prose says \"no changed symbols to assess.\" and test_gaps_total: assessable ? n : null with assessable = nodes.length > 0), tests/tools-summary.test.ts (3 fixtures: empty change set, one-changed-file, covered change set; SummaryTotals cast removed).\nVerify: PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck -> exit 0; ~/.bun/bin/bun run test tests/tools-summary.test.ts tests/envelope.test.ts tests/budget.test.ts -> 45 pass / 0 fail, exit 0. Biome check+format on the 4 owned files only -> exit 0.\nFixture empty change set (makeReader({cleanTree:true})): drivers [\"no dependents were found inside the expanded radius\",\"0 changed symbols span 0 files\"] (no test/coverage driver), totals.test_gaps_total = null, summary \"... no changed symbols to assess.\" Fixture one changed file (default): driver \"1 changed symbols have no reachable test\", totals.test_gaps_total = 1; covered fixture keeps \"every changed symbol has a test within the tested-depth limit\" and test_gaps_total = 0 (number). No live clean-tree probe run on this dirty checkout.\nDeviations: prose wording \"no changed symbols to assess.\" instead of \"no changes to assess\" (accurate when files changed but no symbol was indexed). candidates_shown? on Totals is not needed by summary; it is declared only so expand/trace can later drop their local subtypes (those files untouched). Impact/trace/expand local totals subtypes left as-is; trace's `?? fallback` in expand already null-safe, no logic change needed anywhere."
+        },
+        {
+          "time": "2026-11-19T04:48:54Z",
+          "detail": "Orchestrator verification: diff confined to src/shared/domain/risk.ts, src/shared/envelope.ts, src/tools/summary/handler.ts, tests/tools-summary.test.ts. `bun run test tests/tools-summary.test.ts tests/envelope.test.ts tests/budget.test.ts` 45 pass / 0 fail. risk.ts:117-123 now pushes the test/coverage driver only when symbols > 0, keeping both the untested > 0 and the success branches intact; summary prose says \"no changed symbols to assess.\" and test_gaps_total is `assessable ? testGaps.length : null`; Totals widened to `[list: `${string}_total`]: number | null` plus optional unresolved_material/candidates_shown, and SummaryTotals deleted. Accepted wording deviation: \"no changed symbols to assess\" rather than \"no changes to assess\", because a changed file with no indexed symbol is the same trigger. TOOLS-SPEC.md must note test_gaps_total can be null (TASK-013)."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -274,8 +331,17 @@
       "pre_request": [],
       "size": "M",
       "title": "Change set: parse renames, expose per-entry state",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T04:08:34Z",
+          "detail": "src/shared/domain/diff.ts: dropped --no-renames; parseNameStatus parses R/C pairs (STATUS\\0source\\0destination), never returns null (malformed record skipped, null reserved for git failure) and the dead \"cannot parse\" degradedReason branch is gone; added ChangeState/ChangeEntry and ChangeSet.entries derived from changed+removed (unmatched paths intentionally get no entry), sorted by path, rename keeps from, copy is added without from. Existing changed/removed/unmatched/degraded/degradedReason logic untouched. tests/diff.test.ts: 13 tests (was 10), +rename (one renamed entry from=src/a.ts, changed==[\"src/c.ts\"], stale-row deleted entry from the hash half), +copy (added), +crafted git shim in temp dir for a C record and a truncated record (degraded stays false), plus entries assertions in the delete/unmatched, plain-dir and outside-root tests. Verify: ~/.bun/bin/bun run typecheck -> exit 2 but zero errors in my files; the only remaining error is tests/tools-impact.test.ts (concurrent worker, unrelated, was already failing at baseline). PATH=$HOME/.bun/bin bun run test tests/diff.test.ts -> exit 0, 13 pass / 0 fail. biome check+format on both files -> exit 0. Rename fixture observed: git raw \"R100\\0src/a.ts\\0src/c.ts\\0\"; result {changed:[\"src/c.ts\"], removed:[\"src/a.ts\"], entries:[{state:\"deleted\",path:\"src/a.ts\"},{state:\"renamed\",path:\"src/c.ts\",from:\"src/a.ts\"}], unmatched:[], degraded:false, degradedReason:null}."
+        },
+        {
+          "time": "2026-11-19T04:32:31Z",
+          "detail": "Orchestrator verification: diff confined to src/shared/domain/diff.ts + tests/diff.test.ts. typecheck exit 0; `bun run test tests/diff.test.ts` 13 pass / 0 fail. `--no-renames` is gone (invocation keeps -z, --relative, --no-ext-diff, --no-optional-locks); parseNameStatus returns entries and skips a malformed record instead of nulling the parse; ChangeSet.entries is additive and sorted, a rename is one {state: renamed, path: new, from: old} entry, and changed/removed/unmatched/degraded keep their exact semantics. Recorded tension for TASK-020: because entries derive from changed ∪ removed, a rename whose source row is still in the index also yields a `deleted` entry for the old path (the hash half owns `removed`); the renderer must collapse that pair so the payload shows one renamed entry, per the plan's Done-when."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -305,8 +371,17 @@
       ],
       "size": "M",
       "title": "Change set: state and deleted paths in both payloads",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T05:00:49Z",
+          "detail": "Implemented: both payloads render the change set from ChangeSet.entries. summary.payload.changed_files is now [{path, state, from?, symbols, entry_point}] built from the collapsed entries, symbols/entry_point per file from the node+metrics walk it already did (0/false for a deleted path), changedFacts.files and totals.changed_files_total count collapsed entries. impact.payload.changed rows carry state and optional from; a deleted entry is one row with symbols 0 and seeds/scopes nothing (its graph rows are history), and the collapse drops the deleted half of a rename pair. Each handler has its own collapseRenames (tools cannot import each other) with the why in a comment. Tests added: summary delete (state deleted, symbols 0 while removed_symbols_total counts the tombstone) and a real-git rename (one entry, state renamed, from, total 1); impact delete (row present, nothing reachable) and rename (renamed+from only, source not listed). Updated existing assertions to the object shape. typecheck exit 0; bun run test tools-summary/tools-impact/diff = 44 pass / 0 fail; live summary --json: 18 changed_files, all state modified, changed_files_total 18, sum(symbols) 371 = changed_symbols_total. Out-of-scope conflict: tests/tools-smoke.test.ts:587 maps payload.changed_files through asString(), which throws on the new object rows — that test file is not in this task's file list, so it was not touched and not run."
+        },
+        {
+          "time": "2026-11-19T05:01:44Z",
+          "detail": "Orchestrator verification: diff confined to src/tools/summary/handler.ts, src/tools/impact/handler.ts, tests/tools-summary.test.ts, tests/tools-impact.test.ts; diff.ts untouched. typecheck exit 0; `bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts tests/diff.test.ts` 44 pass / 0 fail. Both payloads render from ChangeSet.entries with `state` + optional `from`, a deleted path is one row with symbols 0 while removed_symbols_total still counts tombstones, and the rename pair is collapsed to one entry by `collapseRenames` so changed_files_total counts a rename once. Live `summary --json`: 19 rows, changed_files_total 19, all `state: \"modified\"` with symbols/entry_point; the rename and delete cases are proven by real-git fixtures in both test files. Change-caused break repaired by the orchestrator: tests/tools-smoke.test.ts:587 mapped changed_files rows through asString (now objects) — rewritten to read `path` and assert `state` is in the closed set; tools-smoke 9 pass. Remaining known gap, not owned by this plan: read_status.stale_reason still counts a rename as two changes (changed+removed)."
+        }
+      ]
     }
   ]
 }
