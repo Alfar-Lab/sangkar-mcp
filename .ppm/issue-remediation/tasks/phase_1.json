@@ -24,8 +24,13 @@
       "id": "TASK-005",
       "size": "M",
       "title": "Re-open the store on a newer generation and stamp read_status.decisive",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:35:39Z",
+          "detail": "Orchestrator verified. src/index.ts (+167/-34): FileFingerprint + fingerprintOf(statSync, null on ENOENT/EACCES); ready store carries fingerprint; refreshStore decides on the file (null -> unchanged, same print -> identical object, else build-then-close, failure -> log.warn store.refresh_failed + previous reader kept with staleReason \"a newer generation could not be opened\"); runMcp uses `let store`, refreshes at the top of CallToolRequestSchema ahead of the absent/refused short-circuits, lifecycle.conn re-pointed per call so shutdown closes the live handle; decisive filled only in uncheckedReadStatus (false) and route (from the final stale after the root_mismatch downgrade). New tests/store-refresh.test.ts covers identity, ready->newer, schema-too-new keeps the old reader, cursor refused after swap, absent->ready, and a stdio e2e with SANGKAR_NO_WATCH=1. Checks: `bun test tests/store-refresh.test.ts tests/cursor.test.ts tests/mcp-surface.test.ts tests/freshness.test.ts` 55 pass / 0 fail (151 expects); biome clean on both paths. Note: openStore/refreshStore/fingerprintOf/FileFingerprint/Store are now exported for the test seam; src/index.ts stays the only importer of the indexer and tool handlers (root-privileges intact)."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -49,8 +54,13 @@
       "id": "TASK-006",
       "size": "M",
       "title": "Scope status coverage to its own list and publish the repo-wide total and test census",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:36:02Z",
+          "detail": "Orchestrator verified. status/handler.ts (+52/-15): one notIndexedAll() per call; `scoped = requested.length === 0 ? allSkipped : rows.notIndexed` so `skipped === not_indexed.length` always and a no-paths call lists the repository instead of `[]`; `complete` is now the scope's own verdict; the census subtraction and its `max` guard are gone (census identity documented as sum(languages[].files) === indexed + not_indexed rows); totals.not_indexed_total = reader.notIndexedCount(); coverage.tests = reader.testsCensus(); summary line says \"<n> skipped of <total> repo-wide\" only when the scope is narrower. New skippedClause helper. Tests: 3 new cases (3 skipped / 2 under prefix, no-paths list, census identity); all exact-shape assertions updated. Checks: `bun test tests/tools-status.test.ts tests/tools-smoke.test.ts tests/budget.test.ts` 50 pass / 0 fail (446 expects); acceptance.test.ts 9 pass (worker). OPEN ITEM for phase 2: docs/my-product/TOOLS-SPEC.md still shows `\"skipped\": 12` beside `\"not_indexed\": []` and documents neither totals.not_indexed_total nor coverage.tests — the docs tasks own that file."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -74,8 +84,13 @@
       "id": "TASK-007",
       "size": "M",
       "title": "Publish the repo-wide skipped total and test census from summary",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:36:27Z",
+          "detail": "Orchestrator verified. summary/handler.ts (+11/-5): the list-length not_indexed_total derivation removed from buildRepo; one `totals = {...built.totals, not_indexed_total: assembly.notIndexedTotal}` and one `coverage = {...assembly.coverage, tests: ctx.reader.testsCensus()}` shared by all three scopes (change/repo/area) plus the budget-floor refusal path; coverage.skipped still the prefix scope and topLevelPrefixes untouched; one-line doc states skipped is the scope, not_indexed_total the graph. Tests (+83/-19): fake reader now honest (rowsForPaths filters by prefix, notIndexedCount repo-wide, testsCensus fixture); fixture gains one in-prefix and one out-of-prefix skip; new describe asserts skipped 1 vs total 2 and one identical total + census across all three scopes; cursor fixture budget 600 -> PAGE_BUDGET 800 because the larger envelope no longer produced a page boundary. Checks: `bun test tests/tools-summary.test.ts` 19 pass / 0 fail (150 expects) run by orchestrator; `tests/tools-summary.test.ts tests/tools-impact.test.ts` 35 pass (worker); typecheck 0; boundary 11 pass."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -100,8 +115,13 @@
       "id": "TASK-008",
       "size": "M",
       "title": "Bind relative imports against the importer directory and collapse ..",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:37:13Z",
+          "detail": "Orchestrator verified. paths.ts (+43): resolveFrom(importer, specifier) collapses . and .., strips a trailing extension (dot>0 keeps a dotfile), returns null for rooted/Windows-drive/empty specifiers and for any specifier that climbs above the root; normalizeRel untouched. resolve.ts (+40/-18): moduleCandidates(module, fromFile?) tries the importer-relative stem first (exact #stems entry else the same sorted suffix list) then falls through unchanged; body extracted to #matchingStems; memo keyed `${module}\\0${fromFile ?? \"\"}`; bindRaw imports and importHits thread the importer. Tests: 7 new cases incl. the memo-key test. Orchestrator re-ran the acceptance probe: `sangkar index --data-dir /tmp/import-fix-verify` exit 0; `SELECT count(*) FROM unresolved WHERE evidence LIKE 'import:%' AND (raw_target LIKE './%' OR raw_target LIKE '../%')` -> c: 0 (was 71); bin/sangkar.ts imports edges -> src/shared/runtime.ts::runtime.ts (2 edges). Checks: `bun test tests/resolve.test.ts tests/persist.test.ts` 41 pass / 0 fail (258 expects); parser-parity 12 pass, unresolved 45560 vs oracle 44338 = +2.76 % (inside the ±15 % band); boundary 11 pass."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -126,8 +146,13 @@
       "id": "TASK-009",
       "size": "M",
       "title": "Union git status --porcelain into the change set with an untracked state",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:37:42Z",
+          "detail": "Orchestrator verified. diff.ts (+193/-41): ChangeState gains \"untracked\"; runGit extracted (same spawn/timeout race/SIGKILL/failure-as-value shape) with gitNameStatus argv and parseNameStatus untouched; gitStatusPorcelain = `rev-parse --show-prefix` then `status --porcelain -z --untracked-files=all` with the same two guards and no --relative/--no-ext-diff (both rejected by git 2.53.0, documented); parseStatusPorcelain strips the sub-root prefix and only takes `??` records; the union runs after the hash loop behind the existing classify gate, skips paths already owned by changed/removed/gitState, and both git reads run concurrently (Promise.all) so a hung git costs one bound. Item 5 choice: untracked paths also join changeSet.changed (double-report impossible because entries derive from changed), so the drift count grows with the set. Failure of the status read degrades with its own `diff.status_unavailable` warning, never throws. tests/diff.test.ts +113: five git-repo cases incl. -uall proof and the sub-root prefix; tests/tools-smoke.test.ts:592 left unedited because its fixture yields no untracked row (reported, not silently extended). Checks: `bun test tests/diff.test.ts tests/tools-summary.test.ts tests/tools-impact.test.ts tests/tools-smoke.test.ts` 62 pass / 0 fail (533 expects); typecheck 0; biome clean."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -149,8 +174,13 @@
       "id": "TASK-010",
       "size": "S",
       "title": "Explain a zero test numerator in impact's coverage sentence",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:38:12Z",
+          "detail": "Orchestrator verified. impact/handler.ts (+15/-1): SummaryFacts gains testSymbols, read once per call as ctx.reader.testsCensus().nodes near the top of handle (never per node); summaryOf appends \" ; this graph indexes no test symbols (test census: 0 nodes).\" only when testSymbols === 0, and the non-zero branch is byte-identical to the old sentence. No payload field added. tests/tools-impact.test.ts: FakeGraph gains an optional testsCensus (default still {nodes:0}), two new cases pin both sentences and assert the pair differs only by the clause. Checks: `bun test tests/tools-impact.test.ts` 16 pass / 0 fail (127 expects); typecheck 0; biome clean on both paths."
+        }
+      ]
     },
     {
       "agent": "implement",
@@ -179,8 +209,13 @@
       ],
       "size": "M",
       "title": "Document the phase 1 payload changes in TOOLS-SPEC",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:51:09Z",
+          "detail": "Orchestrator verified. docs/my-product/TOOLS-SPEC.md (+63/-14, one file, no code): §1.1 example gains read_status.decisive and coverage.tests and totals.not_indexed_total; new bold blocks document decisive (false iff stale, written by route() after the root_mismatch downgrade, uncheckedReadStatus() is decisive:false) and the three-key table (coverage.skipped = the scope's list length, coverage.tests = {nodes, languages}, totals.not_indexed_total = repo-wide); §2 `paths` now documents that it scopes the count by scoping the list, and the status example reads \"1 skipped of 12 repo-wide\" with skipped 1 + one row + not_indexed_total 12; §4 changed_files gains the `untracked` state row plus the paragraph on git status --porcelain -z --untracked-files=all, the classify gate and \"another source's state wins\"; §6 impact example scoped to the change set (skipped 0). Greps: `decisive` 4 hits, `not_indexed_total|coverage.tests|untracked` in §1, §2, §4, §6. Tests still green: `bun test tests/tools-status.test.ts tests/tools-summary.test.ts tests/diff.test.ts tests/store-refresh.test.ts` 68 pass. REPORTED, NOT FIXED (no task owns them): (a) src/tools/expand/handler.ts:1117 still sets totals.not_indexed_total to the prefix list length, so the same key means \"scope list length\" in expand and \"repo-wide\" in status/summary — §7 docs are phase 2's, and the §1.1 row is scoped to status/summary; (b) §3/§5/§7/§8 examples still show skipped 12 beside not_indexed [] (phase 2); (c) pre-existing examples vs code mismatches (stale_reason wording, changed_symbols state always modified, unmatched reason enum)."
+        }
+      ]
     },
     {
       "agent": "verify",
@@ -209,8 +244,13 @@
       ],
       "size": "S",
       "title": "Phase 1 gate: full suite, acceptance, drift and the parity band",
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T07:53:23Z",
+          "detail": "Gate run by orchestrator, read-only. 1) `bun run typecheck` exit 0 ($ tsc --noEmit). 2) `bun run lint` exit 0 (Checked 108 files, no fixes). 3) `bun run test` exit 0 -> \"726 pass, 0 fail, 4766 expect() calls, 46 files, 50.14s\". 4) `bun run acceptance` exit 0 -> \"9 pass, 0 fail\"; latency/criterion numbers from the run: phase1.parity p50Ms 2.3464 / p95Ms 17.8039, corpus edges 62536, accepted publish criterion7 workerExit 0, generationBefore g-e1e155 -> after g-1445ff with the held handle still on g-e1e155. 5) `bun run db:drift` exit 0 -> \"No schema changes, nothing to migrate\"; `git status --porcelain -- src/shared/store/migrations` empty, so drizzle-kit generated nothing. 6) `bun test tests/parser-parity.test.ts` exit 0 -> 12 pass, unresolved 45560 against oracle callsUnresolved 44338 = +2.76 %, inside the ±15 % band [37687, 50988]; the import fix moved it from 45577 to 45560 while imports rose to 2335. No pre-existing failures; nothing red."
+        }
+      ]
     }
   ]
 }

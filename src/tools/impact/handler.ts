@@ -186,6 +186,8 @@ interface SummaryFacts {
   readonly impactedFiles: number;
   readonly entryPoints: number;
   readonly tested: number;
+  /** The graph's whole test corpus (`testsCensus().nodes`), so a zero numerator can be explained. */
+  readonly testSymbols: number;
   readonly unmatched: number;
 }
 
@@ -346,10 +348,18 @@ function summaryOf(facts: SummaryFacts): string {
   if (facts.impacted === 0) {
     return `${scope} reach no dependents within ${facts.depth} hops`;
   }
+  // A zero numerator means one of two very different things, and only the census can say which:
+  // "nothing covers this change" is news about the code, "no test symbol was indexed" is news
+  // about the index. Without the clause the second reads as the first.
+  const coverage =
+    facts.testSymbols === 0
+      ? `${facts.tested} of ${facts.impacted} covered by tests; this graph indexes no test symbols` +
+        ` (test census: ${facts.testSymbols} nodes).`
+      : `${facts.tested} of ${facts.impacted} covered by tests.`;
   return (
     `${scope} reach ${facts.impacted} nodes in ${facts.impactedFiles} files. ` +
     `${facts.entryPoints} entry points affected. ` +
-    `${facts.tested} of ${facts.impacted} covered by tests.`
+    coverage
   );
 }
 
@@ -609,6 +619,9 @@ export async function handle(
   };
 
   const baseLabel = base === "" ? "HEAD" : base;
+  // One census per answer, never per node: the sentence explains its own numerator, and the
+  // published census itself belongs to `status` and `summary`.
+  const testSymbols = ctx.reader.testsCensus().nodes;
   const summary = summaryOf({
     explicit: paths.length > 0,
     requested: paths.length,
@@ -619,6 +632,7 @@ export async function handle(
     impactedFiles: impactedFiles.size,
     entryPoints: impactedEntryPoints,
     tested: testedCount,
+    testSymbols,
     unmatched: unmatchedRows.length,
   });
 

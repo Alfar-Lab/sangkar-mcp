@@ -6,7 +6,7 @@ import { join } from "node:path";
 import { BYTES_PER_TOKEN } from "#shared/budget";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
-import type { Envelope } from "#shared/envelope";
+import type { Envelope, TestCensus } from "#shared/envelope";
 import { log } from "#shared/log";
 import { isUnderPrefix } from "#shared/paths";
 import type { ToolContext } from "#shared/store/read/context";
@@ -116,6 +116,8 @@ interface Fixture {
   readonly consecutiveFailures?: number;
   /** What the fake handle's statement cache holds; absent models a reader without one. */
   readonly statementCacheEntries?: number;
+  /** The test corpus `reader.testsCensus()` reports; absent means the graph indexed no tests. */
+  readonly testsCensus?: TestCensus;
   /**
    * Identity as `meta` records it. An explicit `null` models a store published before the key
    * existed (or a publish where git could not answer); absent takes the default below.
@@ -220,6 +222,11 @@ function generationRowOf(files: readonly IndexedFileRow[]): GenerationRow {
   };
 }
 
+/** `notIndexedAll()` orders by `path, reason`; the fake has to reproduce it to be a reader. */
+function byPathThenReason(a: SkippedPathRow, b: SkippedPathRow): number {
+  return a.path < b.path ? -1 : a.path > b.path ? 1 : a.reason < b.reason ? -1 : 1;
+}
+
 /** A hand-written reader; every method present, and only `#shared/*` types in its signatures. */
 function fakeReader(fixture: Fixture): GraphReader {
   const files = fixture.files;
@@ -253,9 +260,9 @@ function fakeReader(fixture: Fixture): GraphReader {
       (fixture.unresolved ?? []).filter((row) => fileIds.includes(row.fileId)),
     fileByPath: (path) => files.find((file) => file.path === path) ?? null,
     allFiles: () => [...files],
-    notIndexedAll: () => [],
-    notIndexedCount: () => 0,
-    testsCensus: () => ({ nodes: 0, languages: [] }),
+    notIndexedAll: () => [...notIndexed].sort(byPathThenReason),
+    notIndexedCount: () => notIndexed.length,
+    testsCensus: () => fixture.testsCensus ?? { nodes: 0, languages: [] },
     censusByLanguage: () => census,
     metaFor: () => ({
       projectName: orDefault(fixture.projectName, DEFAULT_PROJECT_NAME),
@@ -306,6 +313,18 @@ function expectOk(env: StatusEnvelope): StatusPayload {
     throw new Error(`expected an ok envelope with a payload, got ${env.status}: ${env.summary}`);
   }
   return env.payload;
+}
+
+/**
+ * One `<list>_total` as a number. `Totals` reaches its keys through an index signature, so this is
+ * where a count becomes arithmetic — and a missing or `null` total fails instead of computing NaN.
+ */
+function totalOf(env: Envelope<unknown>, key: `${string}_total`): number {
+  const value = env.totals[key];
+  if (typeof value !== "number") {
+    throw new Error(`totals.${key} is not a number: ${String(value)}`);
+  }
+  return value;
 }
 
 const CLEAN: Fixture = {
@@ -440,8 +459,15 @@ describe("status: complete coverage", () => {
       failed: 0,
       unresolved_edges: 0,
       not_indexed: [],
+      // The graph indexed no test symbol, which the census says with zeros rather than by omitting
+      // the key: a reader never has to guess whether this build reports tests at all.
+      tests: { nodes: 0, languages: [] },
     });
-    expect(env.totals).toEqual({ total_relation: "eq", paths_total: 1 });
+    expect(env.totals).toEqual({
+      total_relation: "eq",
+      paths_total: 1,
+      not_indexed_total: 0,
+    });
 
     expect(payload.project).toEqual({
       name: "sangkar",
@@ -478,7 +504,11 @@ describe("status: complete coverage", () => {
     const payload = expectOk(env);
     expect(env.summary).toBe("2 files indexed, generation g-7f3a91. Whole repository.");
     expect(payload.paths).toEqual([]);
-    expect(env.totals).toEqual({ total_relation: "eq", paths_total: 0 });
+    expect(env.totals).toEqual({
+      total_relation: "eq",
+      paths_total: 0,
+      not_indexed_total: 0,
+    });
   });
 
   test("a directory request expands to the files and skips under it", () => {
@@ -495,8 +525,14 @@ describe("status: complete coverage", () => {
       expect(Object.hasOwn(entry, "symbols")).toBe(false);
     }
     expect(env.summary).toBe(
-      "3 files indexed, generation g-7f3a91, 3 skipped, 1 failed to parse. 0 of 1 requested paths indexed.",
+      // Two of the three skipped paths sit under `docs`; the third is named only as the repo-wide
+      // total, so the number in front of "skipped" is always the one the list behind it backs.
+      "3 files indexed, generation g-7f3a91, 2 skipped of 3 repo-wide, 1 failed to parse." +
+        " 0 of 1 requested paths indexed.",
     );
+    expect(env.coverage.skipped).toBe(2);
+    expect(env.coverage.not_indexed).toHaveLength(2);
+    expect(env.totals.not_indexed_total).toBe(3);
   });
 });
 
@@ -644,16 +680,19 @@ describe("status: paths that were never parsed", () => {
     expect(payload.paths).toEqual([
       { path: "docs/legacy.xslt", indexed: false, reason: "grammar_unavailable" },
     ]);
-    // The skipped list is scope-limited to the requested paths while the counts are repo-wide, which
-    // is why `skipped: 3` and a one-element `not_indexed` describe the same database.
+    // The count is the scope's own: `skipped` and `not_indexed` are the same row set read once, so a
+    // scoped answer never pairs a skip count with an empty list. The repository's total — all three
+    // skipped paths — travels in `totals.not_indexed_total`.
     expect(env.coverage).toEqual({
       complete: false,
       indexed: 3,
-      skipped: 3,
+      skipped: 1,
       failed: 1,
       unresolved_edges: 2,
       not_indexed: [{ path: "docs/legacy.xslt", reason: "grammar_unavailable" }],
+      tests: { nodes: 0, languages: [] },
     });
+    expect(env.totals.not_indexed_total).toBe(3);
     expect(env.totals.total_relation).toBe("gte");
   });
 
@@ -683,11 +722,15 @@ describe("status: paths that were never parsed", () => {
       failed: 1,
     });
 
-    // The arithmetic the handler's coverage relies on, checked against the census it was given.
+    // The arithmetic the handler's coverage rests on, checked against the census it was given. The
+    // census is repo-wide, so its skipped half is `totals.not_indexed_total`, never the scope's
+    // `coverage.skipped`.
     const censusFiles = payload.languages.reduce((total, row) => total + row.files, 0);
     const censusFailed = payload.languages.reduce((total, row) => total + row.failed, 0);
-    expect(censusFiles).toBe(env.coverage.indexed + env.coverage.skipped);
-    expect(censusFailed).toBe(env.coverage.failed + env.coverage.skipped);
+    const notIndexedTotal = totalOf(env, "not_indexed_total");
+    expect(notIndexedTotal).toBe(3);
+    expect(censusFiles).toBe(env.coverage.indexed + notIndexedTotal);
+    expect(censusFailed).toBe(env.coverage.failed + notIndexedTotal);
   });
 
   test("a path in neither file nor not_indexed is reported as not_indexed_unknown", () => {
@@ -700,6 +743,101 @@ describe("status: paths that were never parsed", () => {
     expect(env.summary).toContain("0 of 1 requested paths indexed");
     expect(env.coverage.complete).toBe(false);
     expect(env.totals.total_relation).toBe("gte");
+  });
+});
+
+/**
+ * Two of these three skipped paths sit under `src`, so the scope's count and the graph's differ —
+ * the case that used to report `skipped: 3` beside a two-row `not_indexed` list.
+ */
+const SCOPED: Fixture = {
+  files: [fileRow(1, "src/a.ts", "typescript"), fileRow(2, "docs/guide.ts", "typescript")],
+  notIndexed: [
+    skippedRow(21, "src/gen/bundle.js", "size_limit", "javascript"),
+    skippedRow(22, "src/vendor/lib.min.js", "size_limit", "javascript"),
+    skippedRow(23, "docs/legacy.xslt", "grammar_unavailable", "xslt"),
+  ],
+  testsCensus: { nodes: 3, languages: [{ language: "typescript", nodes: 3 }] },
+};
+
+describe("status: skipped count and the repo-wide total", () => {
+  test("a scoped request counts its own skipped paths and quotes the graph total beside it", () => {
+    const env = handle(contextFor(SCOPED), { paths: ["src"] });
+
+    expect(env.coverage.skipped).toBe(2);
+    expect(env.coverage.not_indexed).toEqual([
+      { path: "src/gen/bundle.js", reason: "size_limit" },
+      { path: "src/vendor/lib.min.js", reason: "size_limit" },
+    ]);
+    // The invariant the payload has to keep: a positive skip count always has a list behind it.
+    expect(env.coverage.skipped).toBe(env.coverage.not_indexed.length);
+    expect(env.coverage.complete).toBe(false);
+    // Repo-wide, and larger than this scope skipped: the number the scope's list cannot back.
+    expect(env.totals.not_indexed_total).toBe(3);
+    expect(env.summary).toContain("2 skipped of 3 repo-wide");
+    // `coverage.tests` is the reader's census passed through unchanged.
+    expect(env.coverage.tests).toEqual({
+      nodes: 3,
+      languages: [{ language: "typescript", nodes: 3 }],
+    });
+  });
+
+  test("a request with no paths lists every skipped path the graph holds", () => {
+    const env = handle(contextFor(SCOPED));
+    const payload = expectOk(env);
+
+    expect(payload.paths).toEqual([]);
+    // Assembling the scope from `notIndexedAll()` is what keeps this call from answering
+    // `not_indexed: []` about a repository whose skip list is not empty.
+    expect(env.coverage.skipped).toBe(3);
+    expect(env.coverage.not_indexed).toEqual([
+      { path: "docs/legacy.xslt", reason: "grammar_unavailable" },
+      { path: "src/gen/bundle.js", reason: "size_limit" },
+      { path: "src/vendor/lib.min.js", reason: "size_limit" },
+    ]);
+    expect(env.coverage.complete).toBe(false);
+    // One scope, one count: the graph total and the scope's count are the same measurement here.
+    expect(env.coverage.skipped).toBe(totalOf(env, "not_indexed_total"));
+    expect(env.summary).toContain("3 skipped");
+    expect(env.summary).not.toContain("repo-wide");
+    expect(env.truncated).toBe(false);
+  });
+
+  test("a budget that cuts the no-paths skip list keeps every count exact", () => {
+    const skippedRows = Array.from({ length: 60 }, (_unused, index) =>
+      skippedRow(
+        100 + index,
+        `assets/binary_${String(index).padStart(2, "0")}.png`,
+        "binary",
+        null,
+      ),
+    );
+    const ctx = contextFor({
+      files: [fileRow(1, "src/a.ts", "typescript")],
+      notIndexed: skippedRows,
+    });
+    // The tightest budget that still cuts is found rather than guessed: below it `status` refuses
+    // with the floor instead of answering over the allowance.
+    const wholeTokens = Math.ceil(
+      Buffer.byteLength(JSON.stringify(handle(ctx)), "utf8") / BYTES_PER_TOKEN,
+    );
+    let budget = wholeTokens - 1;
+    for (; budget > 1; budget -= 1) {
+      const cut = handle(ctx, { budget });
+      if (cut.status === "ok" && cut.truncated) {
+        break;
+      }
+    }
+    expect(budget).toBeGreaterThan(1);
+    const env = handle(ctx, { budget });
+
+    expect(env.status).toBe("ok");
+    expect(env.truncated).toBe(true);
+    expect(env.truncation_reason).toBe("budget");
+    expect(env.coverage.not_indexed.length).toBeLessThan(60);
+    // Truncation cuts the list, never the arithmetic: the counts stay the numbers that were counted.
+    expect(env.coverage.skipped).toBe(60);
+    expect(totalOf(env, "not_indexed_total")).toBe(60);
   });
 });
 

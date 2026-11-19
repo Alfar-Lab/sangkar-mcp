@@ -63,6 +63,10 @@ interface IndexedFile {
 function openGraph(root: string, files: readonly IndexedFile[]): Conn {
   const path = join(root, ".sangkar", "graph.db");
   mkdirSync(dirname(path), { recursive: true });
+  // The indexer writes the data dir's own `.gitignore` (`*`) so the store never shows up in the
+  // target repo's status; a fixture without it would hand `git status` an untracked graph.db that
+  // no real graph produces.
+  writeFileSync(join(root, ".sangkar", ".gitignore"), "*\n", "utf8");
   const writer = openWriter(path);
   try {
     migrate(writer.sqlite);
@@ -288,6 +292,115 @@ describe("changedSince against a git fixture", () => {
       { state: "modified", path: "src/broken.ts" },
       { state: "added", path: "src/copy.ts" },
     ]);
+  });
+
+  test("an untracked file is in the change set with its own state", async () => {
+    const root = makeGitRepo();
+    const reader = openGraph(root, [{ path: "src/a.ts", language: "typescript", bytes: TS_A }]);
+
+    // Nothing but `git status` can see this one: the file has no `base` side for the diff and no
+    // `file` row for the hash comparison, which is why the summary used to answer "nothing changed".
+    write(root, "src/new.ts", TS_B);
+
+    const result = await changedSince(root, "HEAD", reader);
+
+    expect(result.degraded).toBe(false);
+    expect(result.changed).toEqual(["src/new.ts"]);
+    expect(result.removed).toEqual([]);
+    expect(result.unmatched).toEqual([]);
+    expect(result.entries).toEqual([{ state: "untracked", path: "src/new.ts" }]);
+  });
+
+  test("an untracked directory yields one entry per file, not one for the directory", async () => {
+    const root = makeGitRepo();
+    const reader = openGraph(root, [{ path: "src/a.ts", language: "typescript", bytes: TS_A }]);
+    write(root, "src/pkg/one.ts", TS_A);
+    write(root, "src/pkg/deep/two.ts", TS_B);
+
+    const result = await changedSince(root, "HEAD", reader);
+
+    // Two files in two levels of a directory git has never seen: `--untracked-files=normal` would
+    // have reported the single record `src/pkg/` and lost both paths.
+    expect(result.degraded).toBe(false);
+    expect(result.entries).toEqual([
+      { state: "untracked", path: "src/pkg/deep/two.ts" },
+      { state: "untracked", path: "src/pkg/one.ts" },
+    ]);
+  });
+
+  test("a modified tracked file plus an untracked one is two changed files", async () => {
+    const root = makeGitRepo();
+    const reader = openGraph(root, [{ path: "src/a.ts", language: "typescript", bytes: TS_A }]);
+    write(root, "src/a.ts", TS_A_CHANGED);
+    write(root, "src/new.ts", TS_B);
+
+    const result = await changedSince(root, "HEAD", reader);
+
+    // Two entries, so `changed_files_total` (the entries count) is 2, and a drift count taken from
+    // `changed` grows with it: both halves of the change set agree on how far the tree has moved.
+    expect(result.changed).toEqual(["src/a.ts", "src/new.ts"]);
+    expect(result.entries).toEqual([
+      { state: "modified", path: "src/a.ts" },
+      { state: "untracked", path: "src/new.ts" },
+    ]);
+    expect(result.entries.length).toBe(2);
+  });
+
+  test("a sub-directory root reports only its own paths, relative to that root", async () => {
+    const root = makeGitRepo();
+    // A graph indexed from the subdirectory stores paths relative to it, as the indexer would.
+    const reader = openGraph(root, [{ path: "a.ts", language: "typescript", bytes: TS_A }]);
+    write(root, "src/a.ts", TS_A_CHANGED);
+    write(root, "src/fresh.ts", TS_B);
+    // Untracked at the toplevel: outside this root, so neither `git status` prefix nor the diff may
+    // report it here.
+    write(root, "toplevel-fresh.ts", TS_A);
+
+    const result = await changedSince(join(root, "src"), "HEAD", reader);
+
+    expect(result.degraded).toBe(false);
+    expect(result.changed).toEqual(["a.ts", "fresh.ts"]);
+    expect(result.entries).toEqual([
+      { state: "modified", path: "a.ts" },
+      { state: "untracked", path: "fresh.ts" },
+    ]);
+  });
+
+  test("a failing git status degrades the set without throwing", async () => {
+    const root = makeGitRepo();
+    const shim = join(root, "shim");
+    mkdirSync(shim, { recursive: true });
+    // `git status` and `rev-parse` fail while `git diff` still answers, so the untracked read is the
+    // only degraded half: a stubbed stream cannot prove that, and a missing binary would fail both.
+    const realGit = new TextDecoder()
+      .decode(Bun.spawnSync({ cmd: ["sh", "-c", "command -v git"], stdout: "pipe" }).stdout)
+      .trim();
+    writeFileSync(
+      join(shim, "git"),
+      [
+        "#!/bin/sh",
+        'for arg in "$@"; do',
+        '  if [ "$arg" = "rev-parse" ] || [ "$arg" = "status" ]; then',
+        '    echo "fatal: simulated status failure" >&2',
+        "    exit 128",
+        "  fi",
+        "done",
+        `exec ${realGit} "$@"`,
+        "",
+      ].join("\n"),
+      { mode: 0o755 },
+    );
+    const reader = openGraph(root, [{ path: "src/a.ts", language: "typescript", bytes: TS_A }]);
+    write(root, "src/a.ts", TS_A_CHANGED);
+    write(root, "src/new.ts", TS_B);
+
+    const result = await changedSince(root, "HEAD", reader, { env: { PATH: shim } });
+
+    expect(result.degraded).toBe(true);
+    expect(result.degradedReason).toContain("128");
+    // The diff still answered, so its half is intact; the untracked path is simply not claimed.
+    expect(result.changed).toEqual(["src/a.ts"]);
+    expect(result.entries).toEqual([{ state: "modified", path: "src/a.ts" }]);
   });
 
   test("a git invocation that exceeds the bound degrades instead of hanging", async () => {

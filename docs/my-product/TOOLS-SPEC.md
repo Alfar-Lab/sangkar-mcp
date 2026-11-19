@@ -39,17 +39,19 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
     "indexed_at": "2026-11-17T13:50:15Z",
     "stale": true,
     "stale_reason": "3 files changed since index",
-    "stale_checked_at": "2026-11-17T14:02:00Z"
+    "stale_checked_at": "2026-11-17T14:02:00Z",
+    "decisive": false
   },
   "coverage": {
     "complete": false,
     "indexed": 530,
-    "skipped": 12,
+    "skipped": 1,
     "failed": 3,
     "unresolved_edges": 321,
-    "not_indexed": [{"path": "docs/legacy.xslt", "reason": "grammar_unavailable"}]
+    "not_indexed": [{"path": "docs/legacy.xslt", "reason": "grammar_unavailable"}],
+    "tests": { "nodes": 842, "languages": [{"language": "python", "nodes": 812}, {"language": "typescript", "nodes": 30}] }
   },
-  "totals": { "callers_total": 2, "total_relation": "gte" },
+  "totals": { "callers_total": 2, "not_indexed_total": 12, "total_relation": "gte" },
   "truncated": false,
   "truncation_reason": null,
   "next": null,
@@ -76,6 +78,29 @@ of an ambiguity this answer served, beside `candidates_total`, the size of the t
 `emit()` remains the single truncation point: it preserves each `<list>_total` untouched, and
 when it cuts it downgrades `total_relation` from `eq` to `gte` itself. A handler neither restates
 a total nor widens a relation.
+
+**`read_status.decisive`.** `false` exactly when `stale` is `true`; filled by the composition root,
+never by a handler; a stale answer is self-describing, not silently wrong. A handler knows its own
+verdict and not the freshness it answered under, so the one place that sees both — `route()` in
+`src/index.ts` — writes this field, and it writes it after the `root_mismatch` downgrade, which is
+the last word on staleness: `stale: true` with `decisive: true` is unreachable. An answer that
+skipped a handler entirely (`bootstrapping`, `error`) is `decisive: false` by construction, because
+nothing that bypassed the tool can be the answer that ends a search.
+
+**`coverage.skipped`, `coverage.tests`, `totals.not_indexed_total`.** Two counts and one census,
+each answering a different question:
+
+| key | type | what it is |
+|---|---|---|
+| `coverage.skipped` | integer | the count of `not_indexed` rows in the scope this answer assembled — always the rows the list beside it holds, so `coverage.skipped` is `coverage.not_indexed.length` at every scope; what the *repository* never read is `totals.not_indexed_total`'s job |
+| `coverage.tests` | object | `{ nodes, languages: [{ language, nodes }] }` — the test corpus this graph indexed. `nodes: 0` means no test symbols were indexed, a different fact from "nothing covers this change"; `status` and `summary` always carry it, and the other tools do not pay for the query |
+| `totals.not_indexed_total` | integer | the repo-wide count of paths the index never read, read from the graph rather than from this answer's list; `status` and `summary` report the same number for one generation, so a narrow scope cannot understate what the repository never read |
+
+`emit()` is the one thing that can leave the list shorter than the count beside it: a tight budget
+trims `coverage.not_indexed` from the low-path end (`DESIGN.md` §7.1), `coverage.skipped` stays
+exact, and the envelope says `truncated: true` with a `next` cursor. An entry for a path the payload
+itself names is pinned to the last pass, so the reason for a path in the answer survives the cut
+unless nothing else can pay for it.
 
 ### 1.2 Why every tool carries these six things
 
@@ -129,6 +154,14 @@ repo-wide count, so a per-path census would make two numbers inside one answer d
 populations. `paths` scopes `payload.paths` and `coverage.not_indexed`; it does not scope
 `payload.unresolved`.
 
+`paths` scopes the skip count too, and only by scoping the list beneath it: `coverage.skipped` is
+the number of `not_indexed` rows under the requested paths, so it is always the length of the list
+printed beside it, and `totals.not_indexed_total` carries the graph's own count for the same
+generation. That is what lets one line read "1 skipped of 12 repo-wide" without claiming the other
+eleven were read. `coverage.tests` is not scoped at all — the test corpus is a property of the
+generation, so every answer reports the same census, and `nodes: 0` says the graph indexed no test
+symbols rather than that this scope has none.
+
 An example of the census on its own:
 
 ```json
@@ -151,7 +184,7 @@ An example of the census on its own:
 ```json
 {
   "status": "ok",
-  "summary": "530 files indexed, generation g-7f3a91, 3 files changed since index. 2 of 2 requested paths indexed.",
+  "summary": "530 files indexed, generation g-7f3a91, 1 skipped of 12 repo-wide, 3 failed to parse, 3 changed on disk since the index. 1 of 2 requested paths indexed.",
   "read_status": {
     "generation": "g-7f3a91",
     "indexed_at": "2026-11-17T13:50:15Z",
@@ -160,14 +193,15 @@ An example of the census on its own:
     "stale_checked_at": "2026-11-17T14:02:00Z"
   },
   "coverage": {
-    "complete": true,
+    "complete": false,
     "indexed": 530,
-    "skipped": 12,
+    "skipped": 1,
     "failed": 3,
     "unresolved_edges": 321,
-    "not_indexed": []
+    "not_indexed": [{"path": "docs/legacy.xslt", "reason": "grammar_unavailable"}],
+    "tests": { "nodes": 842, "languages": [{"language": "python", "nodes": 812}, {"language": "typescript", "nodes": 30}] }
   },
-  "totals": { "paths_total": 2, "total_relation": "gte" },
+  "totals": { "paths_total": 2, "not_indexed_total": 12, "total_relation": "gte" },
   "truncated": false,
   "truncation_reason": null,
   "next": null,
@@ -405,8 +439,8 @@ uniformly.
   "status": "ok",
   "summary": "3 files changed, 5 symbols touched, risk 0.62 (medium). Top impact: GraphStore (41 dependents). 2 untested changes.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": true, "stale_reason": "3 files changed since index" },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
-  "totals": { "changed_files_total": 3, "changed_symbols_total": 5, "test_gaps_total": 2, "removed_symbols_total": 0, "impacted_total": 41, "unresolved_material": 188, "total_relation": "eq" },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 1, "failed": 3, "unresolved_edges": 321, "not_indexed": [{ "path": "docs/legacy.xslt", "reason": "grammar_unavailable" }], "tests": { "nodes": 842, "languages": [ { "language": "python", "nodes": 812 }, { "language": "typescript", "nodes": 30 } ] } },
+  "totals": { "changed_files_total": 3, "changed_symbols_total": 5, "test_gaps_total": 2, "removed_symbols_total": 0, "impacted_total": 41, "unresolved_material": 188, "not_indexed_total": 12, "total_relation": "gte" },
   "truncated": false,
   "next": null,
   "next_tools": ["impact", "trace", "expand"],
@@ -437,7 +471,7 @@ uniformly.
   "status": "ok",
   "summary": "530 files, 13,955 nodes, 130,044 edges. Python-dominant. 3 entry points. Largest coupling: GraphStore (41 in, 88 out).",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": false },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 1, "failed": 3, "unresolved_edges": 321, "not_indexed": [{ "path": "docs/legacy.xslt", "reason": "grammar_unavailable" }], "tests": { "nodes": 842, "languages": [ { "language": "python", "nodes": 812 }, { "language": "typescript", "nodes": 30 } ] } },
   "payload": {
     "size": { "files": 530, "nodes": 13955, "edges": 130044 },
     "languages": [ { "language": "python", "files": 408 }, { "language": "typescript", "files": 28 } ],
@@ -457,7 +491,7 @@ uniformly.
 ### `changed_files` rows: `state`, `from` and `symbols`
 
 Every row is `{ path, state, from?, symbols, entry_point }`, and `state` is one of `modified`,
-`added`, `deleted`, `renamed`:
+`added`, `deleted`, `renamed`, `untracked`:
 
 | state | what it says | `from` | `symbols` |
 |---|---|---|---|
@@ -465,6 +499,17 @@ Every row is `{ path, state, from?, symbols, entry_point }`, and `state` is one 
 | `added` | a path the graph does not hold, or did not parse; a git copy reports `added` too | absent | `0` when nothing indexed it |
 | `deleted` | the path was indexed and its bytes are gone | absent | `0` — its symbols are history, not part of the change to review |
 | `renamed` | one move, reported once | the path it came from | declarations the graph has for the new path |
+| `untracked` | present on disk with nothing in git's index: git has never tracked the path | absent | `0` when the graph holds no `file` row for it, its declarations when it does |
+
+`untracked` is the one state `git diff` alone cannot produce. The diff needs a committed side to
+compare against and a path git has never tracked has none, so it comes from a second read —
+`git status --porcelain -z --untracked-files=all`, where `--untracked-files=all` is what names a new
+file inside a new directory instead of that directory. An untracked path passes the same gate as
+every other: a path the graph already holds, or one whose extension a grammar covers, takes a row
+like any other change and counts in `changed_files_total`; a path with neither is named in
+`unmatched_files` with its reason instead (§6). A path the diff, a rename or the digest comparison
+already spoke about keeps that more specific state — `untracked` only describes a path no other
+source claimed, which is why one file never appears twice.
 
 A rename is one row, not two: `{ "path": "src/graph.py", "state": "renamed", "from": "src/old_graph.py", "symbols": 3, "entry_point": true }`.
 `changed_files_total` counts rows, so a rename contributes one. A deleted row keeps its place in
@@ -594,7 +639,7 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
   "status": "ok",
   "summary": "3 changed files reach 41 nodes in 12 files. 2 entry points affected. 6 of 41 covered by tests.",
   "read_status": { "generation": "g-7f3a91", "indexed_at": "2026-11-17T13:50:15Z", "stale": true },
-  "coverage": { "complete": true, "indexed": 530, "skipped": 12, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
+  "coverage": { "complete": false, "indexed": 530, "skipped": 0, "failed": 3, "unresolved_edges": 321, "not_indexed": [] },
   "totals": { "impacted_total": 41, "unresolved_material": 188, "total_relation": "gte" },
   "truncated": true,
   "truncation_reason": "budget",
@@ -628,6 +673,10 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
   `test_gaps` because that is the review-oriented view.
 - **`unmatched_files`** — CRG has this and it matters: a changed file with no nodes (docs, config,
   generated) silently disappears from an impact analysis, and the agent will assume it was analysed.
+- **`coverage` scoped to the change set, not to the repository** — `skipped` counts the skip rows
+  among the changed paths, so a change under `src/` reports `0` while `status` reports `1 skipped of
+  12 repo-wide` (§2). The list and the count always describe the same paths; the repository-wide
+  number is not this tool's to publish.
 - **`changed` rows carry the same `state`/`from` as `summary`** — one row shape across the two tools
   that report a change set, so a rename is visible as a move and a deletion keeps its place with
   `symbols: 0`. A path with no node at all stays out of `changed` and into `unmatched_files`, where

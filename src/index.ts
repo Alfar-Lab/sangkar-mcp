@@ -218,17 +218,70 @@ function descriptorOf(tool: RegisteredTool): Tool {
   };
 }
 
+/**
+ * What the store's *file* looked like when the handle was opened. A publish renames a new inode
+ * over the live path (`store/publish.ts`), so `ino` is the signal; `size` and `mtimeMs` are what
+ * catch a filesystem that hands the replacement the inode of the file it replaced.
+ */
+export interface FileFingerprint {
+  readonly ino: number;
+  readonly size: number;
+  readonly mtimeMs: number;
+}
+
 /** One claim the open-time guard can make about the database it found (`DATABASE.md` §5). */
-type Store =
+export type Store =
   | {
       readonly kind: "ready";
       readonly conn: Conn;
       readonly context: ToolContext;
       /** The one non-fatal disagreement: the same tree, recorded under its old path. */
       readonly staleReason: string | null;
+      /** The file this handle is serving, so a newer one is a comparison rather than a guess. */
+      readonly fingerprint: FileFingerprint | null;
     }
   | { readonly kind: "absent"; readonly reason: string }
   | { readonly kind: "refused"; readonly error: AppError };
+
+/**
+ * The file's identity as the OS reports it, or `null` when there is nothing to fingerprint. A
+ * missing file is the ordinary "nothing published yet" answer, and an unreadable one is the same
+ * answer from this side: neither is a newer generation.
+ */
+export function fingerprintOf(dbPath: string): FileFingerprint | null {
+  try {
+    const stat = statSync(dbPath);
+    return { ino: stat.ino, size: stat.size, mtimeMs: stat.mtimeMs };
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "EACCES") {
+      return null;
+    }
+    throw error;
+  }
+}
+
+/**
+ * Whether two fingerprints name the same publication. An unknown fingerprint (`null`) is never the
+ * same one: the safe direction is re-opening a handle that was already current.
+ */
+function sameFile(a: FileFingerprint | null, b: FileFingerprint): boolean {
+  return a !== null && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs;
+}
+
+/**
+ * The refusal a graph written by a newer build deserves. One message for both open paths: a
+ * generation this build cannot read is a refusal, never a swap.
+ */
+function newerSchemaError(found: number, dbPath: string): AppError {
+  return new AppError(
+    "schema_too_new",
+    `the graph at ${dbPath} is schema v${found}; this build ships v${schemaVersion()}`,
+    {
+      hint: "upgrade the server, or move the data dir aside and re-index with `sangkar index`",
+    },
+  );
+}
 
 /** `realpath` where the path exists, `resolve` otherwise: two spellings of one tree must compare equal. */
 function canonical(path: string): string {
@@ -303,33 +356,30 @@ function buildContext(config: AppConfig, reader: GraphReader): ToolContext {
  * missing (or empty) file as "nothing indexed yet" rather than as an error — a first `mcp` session
  * before the first publish is normal, and every tool already knows how to answer `bootstrapping`.
  *
- * The handle is opened once, here, and never re-opened: DATABASE.md §5 says a reader keeps serving
- * the generation it opened, so freshness across a publish belongs to the freshness work, not to a
- * reconnect per call.
+ * The handle is re-opened whenever the file on disk is a newer generation ({@link refreshStore}).
+ * DATABASE.md §5's guarantee is about a reader that is *not* refreshed — it keeps serving the
+ * generation it opened — not about a server that must answer questions about a tree; an unchanged
+ * file still costs a fingerprint comparison, never an `open()`.
  */
-function openStore(config: AppConfig): Store {
+export function openStore(config: AppConfig): Store {
   const dbPath = join(config.dataDir, DB_FILE);
   if (!existsSync(dbPath)) {
     return { kind: "absent", reason: `no index at ${dbPath} yet` };
   }
   let conn: Conn | null = null;
   try {
-    if (statSync(dbPath).size === 0) {
+    // Fingerprinted before the handle is opened: a file replaced in between is then recorded as
+    // *older* than the generation this connection read, so the next call refreshes again. Stamping
+    // the newer print would leave the process serving the older graph until the following change.
+    const fingerprint = fingerprintOf(dbPath);
+    if (fingerprint === null || fingerprint.size === 0) {
       return { kind: "absent", reason: `the index at ${dbPath} is empty` };
     }
     conn = openReader(dbPath);
     const found = readSchemaVersion(conn.sqlite);
-    const shipped = schemaVersion();
-    if (found > shipped) {
-      const error = new AppError(
-        "schema_too_new",
-        `the graph at ${dbPath} is schema v${found}; this build ships v${shipped}`,
-        {
-          hint: "upgrade the server, or move the data dir aside and re-index with `sangkar index`",
-        },
-      );
+    if (found > schemaVersion()) {
       conn.close();
-      return { kind: "refused", error };
+      return { kind: "refused", error: newerSchemaError(found, dbPath) };
     }
     const reader = makeReader(conn);
     const meta = reader.metaFor();
@@ -355,10 +405,73 @@ function openStore(config: AppConfig): Store {
       conn,
       context: buildContext(config, reader),
       staleReason: guard.staleReason,
+      fingerprint,
     };
   } catch (error) {
     conn?.close();
     return { kind: "refused", error: refusalOf(error) };
+  }
+}
+
+/**
+ * Re-opens the store when the file on disk is a newer generation.
+ *
+ * The decision is made on the *file*, not on the store variant: an absent store whose file has just
+ * appeared must become ready, which is the flow a server started before the first index goes
+ * through on its very next call.
+ *
+ * A replacement is built before anything is destroyed, so a generation that cannot be served — a
+ * newer schema, another tree's graph, a torn file — leaves the previous reader in place with the
+ * warning attached instead of dropping the session to an error it cannot recover from.
+ */
+export function refreshStore(store: Store, config: AppConfig): Store {
+  const dbPath = join(config.dataDir, DB_FILE);
+  const now = fingerprintOf(dbPath);
+  if (now === null) {
+    // A vanished file is not a newer generation: an absent store stays absent, and a ready one keeps
+    // serving what it already read.
+    return store;
+  }
+  if (store.kind === "ready" && sameFile(store.fingerprint, now)) {
+    return store;
+  }
+
+  let conn: Conn | null = null;
+  try {
+    conn = openReader(dbPath);
+    const found = readSchemaVersion(conn.sqlite);
+    if (found > schemaVersion()) {
+      throw newerSchemaError(found, dbPath);
+    }
+    const reader = makeReader(conn);
+    const meta = reader.metaFor();
+    const guard = guardRoot(meta.projectRoot, config.repoRoot, dbPath);
+    if (guard.error !== null) {
+      throw guard.error;
+    }
+    const replacement: Store = {
+      kind: "ready",
+      conn,
+      context: buildContext(config, reader),
+      staleReason: guard.staleReason,
+      fingerprint: now,
+    };
+    // Ownership moves to `replacement` before the previous handle is closed, so the `catch` below
+    // can never close the connection this call just built.
+    conn = null;
+    if (store.kind === "ready") {
+      store.conn.close();
+    }
+    return replacement;
+  } catch (error) {
+    conn?.close();
+    log.warn("store.refresh_failed", { reason: messageOf(error), dbPath });
+    if (store.kind === "ready") {
+      // The reader still answers, but from a generation this process now knows is behind: the
+      // disclosure is what keeps that answer honest rather than silently old.
+      return { ...store, staleReason: "a newer generation could not be opened" };
+    }
+    return store;
   }
 }
 
@@ -392,7 +505,14 @@ function uncheckedReadStatus(store: Store, reason: string): ReadStatus {
       // The reader is the thing that failed; the empty generation is the honest answer.
     }
   }
-  return { generation, indexed_at: indexedAt, stale: true, stale_reason: reason };
+  // Nothing that skipped the handler can be the answer that ends an agent's search.
+  return {
+    generation,
+    indexed_at: indexedAt,
+    stale: true,
+    stale_reason: reason,
+    decisive: false,
+  };
 }
 
 /** The spec every non-handler answer is built from, including the `next_tools` routing promise. */
@@ -406,22 +526,26 @@ function boundarySpec(store: Store, tool: string, summary: string, reason: strin
 }
 
 /**
- * The tool's answer with the root's two post-conditions applied: `next_tools` from the routing
- * table (replacing whatever the handler set, never dropping the field), and the guard's
- * `root_mismatch` as a staleness disclosure rather than a silent difference.
+ * The tool's answer with the root's three post-conditions applied: `next_tools` from the routing
+ * table (replacing whatever the handler set, never dropping the field), the guard's `root_mismatch`
+ * as a staleness disclosure rather than a silent difference, and `decisive` derived from the
+ * staleness that survived both.
  */
 function route(
   envelope: Envelope<unknown>,
   tool: string,
   staleReason: string | null,
 ): Envelope<unknown> {
-  const routed: Envelope<unknown> = { ...envelope, next_tools: nextToolsFor(tool) };
-  if (staleReason === null) {
-    return routed;
-  }
+  // The `root_mismatch` downgrade is the last word on staleness, so `decisive` is read from the
+  // final value: `stale && decisive` must not be able to describe the same answer.
+  const readStatus: ReadStatus =
+    staleReason === null
+      ? envelope.read_status
+      : { ...envelope.read_status, stale: true, stale_reason: staleReason };
   return {
-    ...routed,
-    read_status: { ...routed.read_status, stale: true, stale_reason: staleReason },
+    ...envelope,
+    next_tools: nextToolsFor(tool),
+    read_status: { ...readStatus, decisive: !readStatus.stale },
   };
 }
 
@@ -648,7 +772,7 @@ function watcherDisabled(env: Record<string, string | undefined>): boolean {
 }
 
 async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> {
-  const store = openStore(config);
+  let store = openStore(config);
   if (store.kind === "refused") {
     // Refused once, logged once, and every call answers with that refusal: the session stays usable
     // so the agent can read the reason instead of losing the whole server to one path mismatch.
@@ -656,6 +780,16 @@ async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> 
   }
 
   const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
+
+  // Built before the request handler so a refresh can move `conn` to the generation the next call
+  // will answer from, and `shutdown` closes whichever handle is live rather than the startup one.
+  const lifecycle: Lifecycle = {
+    watcher: null,
+    conn: store.kind === "ready" ? store.conn : null,
+    telemetry,
+    lock: null,
+    closed: false,
+  };
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -668,19 +802,18 @@ async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     pending.begin();
     try {
+      // The handle was opened for the generation that was on disk when this process started, and a
+      // publish renames a new file over the live path. Refreshing here — ahead of the
+      // absent/refused short-circuits — is what lets a server that answered `bootstrapping` answer
+      // from the first generation on its next call.
+      store = refreshStore(store, config);
+      lifecycle.conn = store.kind === "ready" ? store.conn : null;
       return await callTool(store, byName, request.params, telemetry);
     } finally {
       pending.end();
     }
   });
 
-  const lifecycle: Lifecycle = {
-    watcher: null,
-    conn: store.kind === "ready" ? store.conn : null,
-    telemetry,
-    lock: null,
-    closed: false,
-  };
   const onSignal = (signal: NodeJS.Signals): void => {
     log.info("mcp.signal", { signal });
     void shutdown(lifecycle, signal).then(() => process.exit(0));

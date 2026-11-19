@@ -20,11 +20,17 @@
  *   the path is derived from the injected `ctx.config.dataDir` — never from the environment — and
  *   the size is a `stat` of that file.
  *
- * The arithmetic behind `coverage` is the one place this handler has to be careful.
- * `censusByLanguage` folds `not_indexed` into the census (a skipped path is one more file of its
- * language that failed), so `sum(languages[].files) === file rows + not_indexed rows`. The counts
- * therefore come from `allFiles()` for the indexed side and from that identity for the skipped
- * side, and `sum(languages[].failed) === failed parses + skipped paths`, which the tests assert.
+ * The arithmetic behind `coverage` is the one place this handler has to be careful. A scope answers
+ * about itself: `coverage.skipped` counts exactly the rows `coverage.not_indexed` lists, so the two
+ * can never describe two populations, and `coverage.complete` is that scope's verdict. The
+ * repository's own count travels beside it as `totals.not_indexed_total`, which is why the two
+ * numbers may differ without either lying.
+ *
+ * The census identity those numbers rest on is `sum(languages[].files) === indexed files +
+ * not_indexed rows`: `censusByLanguage` folds `not_indexed` into the census (a skipped path is one
+ * more file of its language that failed), so the skipped side of the census is the *graph's*, not
+ * the scope's. The same holds for `sum(languages[].failed) === failed parses + skipped paths`,
+ * which the tests assert.
  *
  * `payload.unresolved` is the bucket breakdown of the flat `coverage.unresolved_edges` count, taken
  * from the one row set that produced it: a census over different rows would let two numbers in the
@@ -158,7 +164,13 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
   }
 
   const files = ctx.reader.allFiles();
+  // One skipped-path list answers one call: a request that names paths scopes to those paths, and a
+  // request that names none scopes to the repository. `rowsForPaths([])` matches nothing at all, so
+  // the no-paths case has to assemble its list from the graph or report `not_indexed: []` about a
+  // repository it never looked at.
+  const allSkipped = ctx.reader.notIndexedAll();
   const rows = ctx.reader.rowsForPaths(requested);
+  const scoped = requested.length === 0 ? allSkipped : rows.notIndexed;
   const census = ctx.reader.censusByLanguage();
   // One row set, read once: `coverage.unresolved_edges` and `payload.unresolved.total` are the same
   // measurement, so the census can never contradict the count it explains.
@@ -167,20 +179,24 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
   const unresolvedTotal = unresolvedRows.length;
 
   const failed = files.filter((file) => file.parseStatus === "failed").length;
-  const censusFiles = census.reduce((total, row) => total + row.files, 0);
-  // `max` guards the subtraction rather than assuming the two tables agree: a negative skip count
-  // would be a writer bug, and reporting a negative number to the agent would be worse than 0.
-  const skipped = Math.max(0, censusFiles - files.length);
+  // Read once: the summary names it and `totals.not_indexed_total` publishes it, and the two must
+  // be the same measurement.
+  const notIndexedTotal = ctx.reader.notIndexedCount();
 
   const coverage: Coverage = {
-    complete: files.length > 0 && skipped === 0 && failed === 0,
+    // The scope's own verdict: its lists and its parse failures. The repository-wide count lives in
+    // `totals.not_indexed_total`, so it does not gate whether *this* answer is complete.
+    complete: files.length > 0 && scoped.length === 0 && failed === 0,
     indexed: files.length,
-    skipped,
+    // `skipped` counts the assembled scope and `totals.not_indexed_total` counts the graph, so the
+    // number always equals the length of the `not_indexed` list printed beside it.
+    skipped: scoped.length,
     failed,
     unresolved_edges: unresolvedTotal,
-    // Scope-limited by construction: `not_indexed` lists the skipped paths under the requested
-    // paths, which is why the repo-wide `skipped` count can be larger than this list.
-    not_indexed: rows.notIndexed.map((row) => ({ path: row.path, reason: row.reason })),
+    not_indexed: scoped.map((row) => ({ path: row.path, reason: row.reason })),
+    // The test corpus the graph indexed: `nodes: 0` is "this index saw no test symbols", which is a
+    // different fact from "nothing covers this change".
+    tests: ctx.reader.testsCensus(),
   };
 
   const staleFiles = files.filter((file) => file.indexedGeneration !== generation).length;
@@ -236,12 +252,16 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
       freshness.files_changed_since,
       requested.length,
       report.indexedPaths,
+      notIndexedTotal,
     ),
     read_status: readStatus,
     coverage,
     totals: {
       total_relation: relationFor(readStatus, coverage),
       paths_total: report.entries.length,
+      // Repo-wide, read from the graph rather than from `scoped`: the same number `summary` and
+      // `expand` publish, so a narrow scope cannot understate what the repository never read.
+      not_indexed_total: notIndexedTotal,
     },
     // `expand` is the tool that consumes a `next` cursor, and it is the only useful continuation
     // this tool has: everything else `status` reports is already in the payload.
@@ -515,6 +535,22 @@ function argsHashOf(requested: readonly string[], budget: number): string {
   return `sha256:${createHash("sha256").update(canonical).digest("hex")}`;
 }
 
+/**
+ * The skipped clause of the summary line: the count that matches the scope, and the repository's
+ * total only when it says more than the scope did — otherwise the line would name one number under
+ * the other's label.
+ */
+function skippedClause(skipped: number, notIndexedTotal: number): string[] {
+  if (skipped === 0) {
+    return [];
+  }
+  return [
+    notIndexedTotal > skipped
+      ? `${skipped} skipped of ${notIndexedTotal} repo-wide`
+      : `${skipped} skipped`,
+  ];
+}
+
 function summaryOf(
   coverage: Coverage,
   generation: string,
@@ -522,11 +558,12 @@ function summaryOf(
   filesChanged: number,
   requestedCount: number,
   indexedPaths: number,
+  notIndexedTotal: number,
 ): string {
   const counts = [
     `${coverage.indexed} files indexed`,
     `generation ${generation}`,
-    ...(coverage.skipped > 0 ? [`${coverage.skipped} skipped`] : []),
+    ...skippedClause(coverage.skipped, notIndexedTotal),
     ...(coverage.failed > 0 ? [`${coverage.failed} failed to parse`] : []),
     ...(staleFiles > 0 ? [`${staleFiles} written by an earlier generation`] : []),
     ...(filesChanged > 0 ? [`${filesChanged} changed on disk since the index`] : []),

@@ -564,3 +564,171 @@ describe("bind: import failures carry their cause", () => {
     expect(importFailureAt(6)).toBeUndefined();
   });
 });
+
+/*
+ * Relative specifiers, on a TypeScript tree because `./x.js` naming `x.ts` is the shape an import
+ * takes there. `src/a/thing.ts` and `src/other/thing.ts` share the stem `thing`, so only the
+ * importer's own directory can separate them; `src/outside.ts` sits at the root so an escaping
+ * `../../../outside` has a real unit of that name it must still fail to bind.
+ */
+const REL_B_MODULE = "src/a/b.ts::b";
+const REL_B_RUN = "src/a/b.ts::run";
+const REL_AX_FILE = "src/a/x.ts::x.ts";
+const REL_AX_HELPER = "src/a/x.ts::helper";
+const REL_DIR_FILE = "src/a/dir/index.ts::index.ts";
+const REL_THING_FILE = "src/a/thing.ts::thing.ts";
+const REL_X_FILE = "src/x.ts::x.ts";
+
+/** A unit carrying the two nodes every real file has — its file node and its module node. */
+function sourceUnit(
+  relPath: string,
+  rawEdges: readonly RawEdge[] = [],
+  nodes: readonly ExtractedNode[] = [],
+): FileUnit {
+  const name = relPath.slice(relPath.lastIndexOf("/") + 1);
+  return unit(
+    relPath,
+    [decl("file", relPath, "", name), decl("module", relPath, "", stemOf(name)), ...nodes],
+    [contains(`${relPath}::${name}`, `${relPath}::${stemOf(name)}`, 1), ...rawEdges],
+  );
+}
+
+/** `index.ts` → `index`, the module name a file node's sibling carries. */
+function stemOf(name: string): string {
+  return name.replace(/\.[^./]+$/u, "");
+}
+
+const RELATIVE_UNITS: readonly FileUnit[] = [
+  sourceUnit(
+    "src/a/b.ts",
+    [
+      // One relative specifier per rule the importer-relative lookup has to get right.
+      raw("imports", REL_B_MODULE, "./x.js", 2, { localName: "helper", evidence: "import:./x.js" }),
+      raw("imports", REL_B_MODULE, "./dir/index.js", 3, {
+        localName: "dirIndex",
+        evidence: "import:./dir/index.js",
+      }),
+      raw("imports", REL_B_MODULE, "./thing.js", 4, {
+        localName: "thing",
+        evidence: "import:./thing.js",
+      }),
+      raw("imports", REL_B_MODULE, "../x.js", 5, {
+        localName: "parent",
+        evidence: "import:../x.js",
+      }),
+      raw("imports", REL_B_MODULE, "./nope.js", 6, {
+        localName: "nope",
+        evidence: "import:./nope.js",
+      }),
+      raw("imports", REL_B_MODULE, "../../../outside", 7, {
+        localName: "outside",
+        evidence: "import:../../../outside",
+      }),
+      raw("calls", REL_B_RUN, "helper", 9, { evidence: "call:helper" }),
+    ],
+    [decl("function", "src/a/b.ts", "", "run", 8)],
+  ),
+  sourceUnit("src/a/x.ts", [], [decl("function", "src/a/x.ts", "", "helper", 2)]),
+  sourceUnit("src/a/dir/index.ts"),
+  sourceUnit("src/a/thing.ts"),
+  sourceUnit("src/other/thing.ts"),
+  sourceUnit("src/other/b.ts"),
+  sourceUnit("src/other/x.ts"),
+  sourceUnit("src/x.ts"),
+  sourceUnit("src/outside.ts"),
+];
+
+const RELATIVE_INDEX = SymbolIndex.from(RELATIVE_UNITS);
+const RELATIVE_RESULT = bind(RELATIVE_UNITS, RELATIVE_INDEX);
+
+function relativeImportAt(line: number): string | undefined {
+  return RELATIVE_RESULT.edges.find(
+    (edge) => edge.file === "src/a/b.ts" && edge.kind === "imports" && edge.line === line,
+  )?.dst;
+}
+
+function relativeFailureAt(line: number) {
+  return RELATIVE_RESULT.unresolved.find(
+    (entry) => entry.file === "src/a/b.ts" && entry.line === line,
+  );
+}
+
+describe("relative specifiers resolve from the importing file's directory", () => {
+  test("the importer is what makes the specifier mean a unit; without one it is only a stem", () => {
+    expect(RELATIVE_INDEX.moduleCandidates("./x.js", "src/a/b.ts")).toEqual(["src/a/x.ts"]);
+    expect(RELATIVE_INDEX.moduleFile("./x.js", "src/a/b.ts")).toBe("src/a/x.ts");
+    // `x` alone ties between `src/a/x.ts` and `src/other/x.ts`, so the old reading cannot answer.
+    expect(RELATIVE_INDEX.moduleFile("./x.js")).toBeNull();
+  });
+
+  test("1. ./x.js binds x.ts, for the import edge and for the call the import feeds", () => {
+    expect(relativeImportAt(2)).toBe(REL_AX_FILE);
+    expect(RELATIVE_RESULT.edges).toContainEqual(
+      expect.objectContaining({
+        kind: "imports",
+        file: "src/a/b.ts",
+        line: 2,
+        src: REL_B_MODULE,
+        dst: REL_AX_FILE,
+        tier: "extracted",
+      }),
+    );
+    // Step 2 of the call order reads the same import table, so the name it made visible has to
+    // resolve through the importer-relative rule too — `inferred` would mean it fell through to
+    // the unique-name tier instead.
+    expect(
+      RELATIVE_RESULT.edges.find((edge) => edge.kind === "calls" && edge.line === 9),
+    ).toMatchObject({ src: REL_B_RUN, dst: REL_AX_HELPER, tier: "extracted" });
+  });
+
+  test("2. ./dir/index.js lands in the directory's index unit", () => {
+    expect(relativeImportAt(3)).toBe(REL_DIR_FILE);
+    expect(RELATIVE_INDEX.moduleFile("./dir/index.js", "src/a/b.ts")).toBe("src/a/dir/index.ts");
+  });
+
+  test("3. a duplicate basename is beaten by the importer's own directory", () => {
+    // The specifier `thing` alone cannot decide: two units carry that stem.
+    expect(RELATIVE_INDEX.moduleCandidates("thing")).toEqual([
+      "src/a/thing.ts",
+      "src/other/thing.ts",
+    ]);
+    expect(RELATIVE_INDEX.moduleFile("thing")).toBeNull();
+
+    // `./thing.js` in `src/a/` names the neighbour, so this binds instead of reporting the tie.
+    expect(relativeImportAt(4)).toBe(REL_THING_FILE);
+    expect(relativeFailureAt(4)).toBeUndefined();
+  });
+
+  test("4. ../ climbs out of the importer's directory and still binds", () => {
+    expect(relativeImportAt(5)).toBe(REL_X_FILE);
+    expect(RELATIVE_INDEX.moduleFile("../x.js", "src/a/b.ts")).toBe("src/x.ts");
+
+    // The memo is keyed by specifier *and* importer: the same `./x.js` names a different unit for
+    // an importer in another directory, so the two cannot share a cache entry.
+    expect(RELATIVE_INDEX.moduleFile("./x.js", "src/other/b.ts")).toBe("src/other/x.ts");
+    expect(RELATIVE_INDEX.moduleFile("./x.js", "src/a/b.ts")).toBe("src/a/x.ts");
+  });
+
+  test("5. a relative target that is not in the tree stays missing_module", () => {
+    expect(relativeImportAt(6)).toBeUndefined();
+    expect(relativeFailureAt(6)).toEqual({
+      file: "src/a/b.ts",
+      line: 6,
+      rawTarget: "./nope.js",
+      evidenceKind: "missing_module",
+      evidence: "import:./nope.js (no file matched)",
+    });
+  });
+
+  test("6. a specifier that climbs above the root does not bind, even onto a real basename", () => {
+    // `src/outside.ts` is the unit that name would reach, and it must still not be chosen: the
+    // specifier leaves the tree, so it falls back to the module-string reading and matches nothing.
+    expect(RELATIVE_INDEX.moduleCandidates("outside")).toEqual(["src/outside.ts"]);
+    expect(RELATIVE_INDEX.moduleCandidates("../../../outside", "src/a/b.ts")).toEqual([]);
+    expect(relativeImportAt(7)).toBeUndefined();
+    expect(relativeFailureAt(7)).toMatchObject({
+      rawTarget: "../../../outside",
+      evidenceKind: "missing_module",
+    });
+  });
+});

@@ -3,10 +3,15 @@
  * attributed to a file row. `summary(change)` and `impact` both read this and neither recomputes
  * it (plan.constraint_invariant.md: one change-set, never one per caller).
  *
- * Two sources are unioned, because neither is right alone:
+ * Three reads are unioned, because none is right alone:
  * - `git diff --name-status` knows what changed against a commit, including deletions and renames,
  *   and it still sees paths the indexer never parsed (a modified `README.md`). It never sees
  *   untracked files.
+ * - `git status --porcelain -z --untracked-files=all` is the second git read, and it exists only
+ *   because the diff cannot see a file git does not track yet: it contributes untracked paths and
+ *   nothing else (the diff carries every tracked state). `git status` accepts neither `--relative`
+ *   nor `--no-ext-diff` (git 2.53.0 rejects both as unknown options), so the sub-root scope comes
+ *   from `rev-parse --show-prefix`.
  * - hashing every `file` row's working-tree bytes against `file.sha256` — the column the indexer
  *   already stores — is the only source in a directory git cannot read, and the only one that
  *   notices a changed indexed file that git ignores.
@@ -43,8 +48,15 @@ export interface UnmatchedChange {
   readonly reason: UnmatchedReason;
 }
 
-/** What happened to one path in the change set, in the vocabulary a payload can render. */
-export type ChangeState = "modified" | "added" | "deleted" | "renamed";
+/**
+ * What happened to one path in the change set, in the vocabulary a payload can render.
+ *
+ * `untracked` is the fifth state and only `git status` can report it: the bytes are in the working
+ * tree and git records nothing for the path, so the diff has no other side to compare against. It
+ * is a state of its own rather than `added`, because `added` means "git has this in its index and
+ * `base` did not", which is a different fact from "git has never seen this".
+ */
+export type ChangeState = "modified" | "added" | "deleted" | "renamed" | "untracked";
 
 /**
  * One path of the change set with its state. A rename is a single entry — the destination path
@@ -62,7 +74,10 @@ export interface ChangeEntry {
 
 /** The change set both change-aware tools read; the arrays are sorted and repo-relative. */
 export interface ChangeSet {
-  /** Differ from `base`, or no longer match `file.sha256`; sorted, forward slashes. */
+  /**
+   * Differ from `base`, or no longer match `file.sha256`, or are in the working tree with nothing
+   * in git's index (`untracked`); sorted, forward slashes.
+   */
   readonly changed: readonly string[];
   /** Had a `file` row and their bytes are gone from the working tree; sorted. */
   readonly removed: readonly string[];
@@ -161,6 +176,61 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+/** One git argv run through the same bound and the same failure-as-value shape as its siblings. */
+async function runGit(
+  cmd: readonly string[],
+  repoRoot: string,
+  label: string,
+  timeoutMs: number,
+  env: Readonly<Record<string, string | undefined>> | undefined,
+): Promise<GitOutcome> {
+  let proc: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
+  try {
+    proc = Bun.spawn({
+      cmd: [...cmd],
+      cwd: repoRoot,
+      // Closed stdin plus piped output: the child has no terminal to prompt on.
+      stdin: "ignore",
+      stdout: "pipe",
+      stderr: "pipe",
+      // Omitted, so Bun inherits the parent environment; a caller that must override it passes
+      // `options.env` instead of this module reading the environment.
+      ...(env === undefined ? {} : { env }),
+    });
+  } catch (error) {
+    // The binary is missing or the cwd is unreadable: both are "git is unavailable" here.
+    return { ok: false, failure: `git could not be spawned: ${messageOf(error)}` };
+  }
+
+  // The timeout wins the race rather than being checked after the pipes close: a killed git can
+  // leave a child (a clean filter, say) holding the stderr pipe open, and waiting for that EOF
+  // would make the bound meaningless.
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const expired = new Promise<GitOutcome>((report) => {
+    timer = setTimeout(() => {
+      proc.kill("SIGKILL");
+      report({ ok: false, failure: `${label} exceeded ${timeoutMs} ms and was killed` });
+    }, timeoutMs);
+  });
+  const collected = Promise.all([
+    new Response(proc.stdout).text(),
+    new Response(proc.stderr).text(),
+    proc.exited,
+  ]).then(([stdout, stderr, code]): GitOutcome => {
+    if (code !== 0) {
+      return { ok: false, failure: `${label} exited ${code}: ${firstLine(stderr)}` };
+    }
+    return { ok: true, stdout };
+  });
+  try {
+    return await Promise.race([collected, expired]);
+  } catch (error) {
+    return { ok: false, failure: `${label} failed: ${messageOf(error)}` };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * `git diff --name-status` against `base`, bounded by `timeoutMs` and never interactive. Rename
  * detection is left on (git's default): a rename has to arrive as one `R` record, because only then
@@ -193,51 +263,98 @@ async function gitNameStatus(
     base,
     "--",
   ];
-  let proc: ReturnType<typeof Bun.spawn<"ignore", "pipe", "pipe">>;
-  try {
-    proc = Bun.spawn({
-      cmd,
-      cwd: repoRoot,
-      // Closed stdin plus piped output: the child has no terminal to prompt on.
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-      // Omitted, so Bun inherits the parent environment; a caller that must override it passes
-      // `options.env` instead of this module reading the environment.
-      ...(env === undefined ? {} : { env }),
-    });
-  } catch (error) {
-    // The binary is missing or the cwd is unreadable: both are "git is unavailable" here.
-    return { ok: false, failure: `git could not be spawned: ${messageOf(error)}` };
-  }
+  return runGit(cmd, repoRoot, "git diff", timeoutMs, env);
+}
 
-  // The timeout wins the race rather than being checked after the pipes close: a killed git can
-  // leave a child (a clean filter, say) holding the stderr pipe open, and waiting for that EOF
-  // would make the bound meaningless.
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const expired = new Promise<GitOutcome>((report) => {
-    timer = setTimeout(() => {
-      proc.kill("SIGKILL");
-      report({ ok: false, failure: `git diff exceeded ${timeoutMs} ms and was killed` });
-    }, timeoutMs);
-  });
-  const collected = Promise.all([
-    new Response(proc.stdout).text(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]).then(([stdout, stderr, code]): GitOutcome => {
-    if (code !== 0) {
-      return { ok: false, failure: `git diff exited ${code}: ${firstLine(stderr)}` };
-    }
-    return { ok: true, stdout };
-  });
-  try {
-    return await Promise.race([collected, expired]);
-  } catch (error) {
-    return { ok: false, failure: `git diff failed: ${messageOf(error)}` };
-  } finally {
-    clearTimeout(timer);
+/** What the untracked read produced: the paths it named, or the reason it could not answer. */
+type UntrackedOutcome =
+  | { readonly ok: true; readonly untracked: readonly string[] }
+  | { readonly ok: false; readonly failure: string };
+
+/**
+ * `rev-parse --show-prefix` then `status --porcelain -z --untracked-files=all`, the second git read.
+ *
+ * It exists because `git diff` cannot see a file git does not track yet — a freshly written file
+ * has no `base` side, so `diff --name-status` omits it and a change set built from the diff alone
+ * answers "nothing changed" for the commonest agent action.
+ *
+ * Two options the diff read passes are not options of `git status` at all: `--relative` and
+ * `--no-ext-diff` are both rejected as unknown (verified against git 2.53.0, exit 129), so the
+ * sub-root scope has to come from `rev-parse --show-prefix` and `parseStatusPorcelain` applies it
+ * itself. The extension-diff guarantee stays `git diff`'s: `status` runs no external diff, so there
+ * is nothing to disable. `--untracked-files=all` is what makes two files inside a new directory two
+ * records instead of one directory record.
+ */
+async function gitStatusPorcelain(
+  repoRoot: string,
+  timeoutMs: number,
+  env: Readonly<Record<string, string | undefined>> | undefined,
+): Promise<UntrackedOutcome> {
+  const prologue = [
+    "git",
+    "--no-pager",
+    // The same two guards as the diff read: no optional index lock, so `git status` cannot refresh
+    // and rewrite `.git/index`, and no credential or askpass helper it could consult.
+    "--no-optional-locks",
+    "-c",
+    "credential.helper=",
+    "-c",
+    "core.askpass=",
+    "-C",
+    repoRoot,
+  ];
+  const prefixOutcome = await runGit(
+    [...prologue, "rev-parse", "--show-prefix"],
+    repoRoot,
+    "git rev-parse",
+    timeoutMs,
+    env,
+  );
+  if (!prefixOutcome.ok) {
+    return prefixOutcome;
   }
+  // `sub/dir/` at a sub-root, empty at the toplevel: one trailing-slash form for both.
+  const prefix = prefixOutcome.stdout.trim();
+  const statusOutcome = await runGit(
+    [...prologue, "status", "--porcelain", "-z", "--untracked-files=all"],
+    repoRoot,
+    "git status",
+    timeoutMs,
+    env,
+  );
+  if (!statusOutcome.ok) {
+    return statusOutcome;
+  }
+  return { ok: true, untracked: parseStatusPorcelain(statusOutcome.stdout, prefix) };
+}
+
+/**
+ * `git status --porcelain -z` (v1) writes `XY<SP>PATH\0` per record: two status letters, one space,
+ * then the path, with no quoting because `-z` suppresses it.
+ *
+ * Only `??` is read here. Every other `XY` is a change the diff already reports, and taking it from
+ * this stream too would put one path in the change set twice. A record outside `prefix` belongs to
+ * the rest of the repository and is not this root's change set, so it is dropped rather than
+ * re-bucketed: `status` reports repository-root-relative paths even from a subdirectory.
+ */
+function parseStatusPorcelain(stdout: string, prefix: string): readonly string[] {
+  const paths: string[] = [];
+  for (const record of stdout.split("\0")) {
+    if (!record.startsWith("?? ")) {
+      continue;
+    }
+    const reported = record.slice("?? ".length);
+    if (reported === "" || !reported.startsWith(prefix)) {
+      continue;
+    }
+    const path = reported.slice(prefix.length);
+    if (path === "") {
+      // The prefix itself, which names no path: `sub/` for the directory `sub`.
+      continue;
+    }
+    paths.push(path);
+  }
+  return paths;
 }
 
 interface GitEntry {
@@ -375,8 +492,9 @@ async function changeSetFor(
   const changed = new Set<string>();
   const removed = new Set<string>();
   const unmatched = new Map<string, UnmatchedChange>();
-  // What git said about a path that reached `changed`: a rename keeps its source, so one entry can
-  // carry both halves once the hash comparison has had its say.
+  // What git said about a path that reached `changed`: a rename keeps its source, and an untracked
+  // path keeps its own state, so one entry can carry both halves once the hash comparison has had
+  // its say.
   const gitState = new Map<string, ChangeEntry>();
 
   const classify = (path: string): boolean => indexed.has(path) || languageFor(path) !== null;
@@ -384,8 +502,12 @@ async function changeSetFor(
     unmatched.set(path, { path, reason });
   };
 
-  // Source 1: git. `base` empty means "the last commit", the usual change scope for a summary.
-  const outcome = await gitNameStatus(root, base === "" ? "HEAD" : base, timeoutMs, options.env);
+  // Source 1: git. `base` empty means "the last commit", the usual change scope for a summary. The
+  // two reads run together so a hung git costs one bound rather than two.
+  const [outcome, untrackedOutcome] = await Promise.all([
+    gitNameStatus(root, base === "" ? "HEAD" : base, timeoutMs, options.env),
+    gitStatusPorcelain(root, timeoutMs, options.env),
+  ]);
   let degradedReason: string | null = null;
   if (outcome.ok) {
     for (const entry of parseNameStatus(outcome.stdout)) {
@@ -425,6 +547,13 @@ async function changeSetFor(
     log.warn("diff.git_unavailable", { repo: root, base, reason: outcome.failure });
   }
 
+  // The untracked read has its own failure: it degrades the set the same way, and the diff's reason
+  // stays the one a payload sees when both failed for the same cause (no repository, no binary).
+  if (!untrackedOutcome.ok) {
+    degradedReason ??= untrackedOutcome.failure;
+    log.warn("diff.status_unavailable", { repo: root, reason: untrackedOutcome.failure });
+  }
+
   // Source 2: the file table against the working tree. Always run, so a change git ignores (an
   // indexed path listed in `.gitignore`) is still found, and so a non-git directory still works.
   for (const row of digests) {
@@ -454,11 +583,34 @@ async function changeSetFor(
     unmatched.delete(path);
   }
 
+  // Source 1b, applied after the hash comparison so `indexed` is complete: a path git does not
+  // track is drift even when the graph has never seen it, which is the case the diff alone got
+  // wrong. It goes through the same classify gate as every other path, so a path with no `file` row
+  // and no parseable language is named in `unmatched` instead of being attributed to nothing.
+  if (untrackedOutcome.ok) {
+    for (const path of untrackedOutcome.untracked) {
+      if (changed.has(path) || removed.has(path) || gitState.has(path)) {
+        // The diff or the hash comparison already owns this path, and its state is the more
+        // specific fact: `untracked` only describes a path no other source spoke about.
+        continue;
+      }
+      if (!classify(path)) {
+        unclassified(path, "no_file_row_and_unparseable_language");
+        continue;
+      }
+      // `changed` carries it as well as `entries`, so a drift count computed from `changed` grows
+      // with the change set it describes: an untracked file is the tree moving on.
+      changed.add(path);
+      gitState.set(path, { state: "untracked", path });
+    }
+  }
+
   const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
   // Entries are derived from the two fields above, never the other way round, so a path cannot be
   // in one and missing from the other. A path only the hash comparison found has no git letter:
-  // its bytes differ (`modified`) or its row outlived them (`deleted`).
+  // its bytes differ (`modified`) or its row outlived them (`deleted`), and a path only
+  // `git status` found is `untracked`. Sorting after the merge is what makes two runs agree.
   const entries: ChangeEntry[] = [];
   for (const path of changed) {
     entries.push(gitState.get(path) ?? { state: "modified", path });

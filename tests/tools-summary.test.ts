@@ -5,13 +5,16 @@ import { join } from "node:path";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import { UNRESOLVED_BUCKETS } from "#shared/domain/unresolved";
+import type { TestCensus } from "#shared/envelope";
 import { log } from "#shared/log";
+import { isUnderPrefix } from "#shared/paths";
 import type { ToolContext } from "#shared/store/read/context";
 import type {
   GraphReader,
   IndexedFileRow,
   NeighbourEdge,
   NodeRow,
+  SkippedPathRow,
   TombstoneRow,
   UnresolvedRef,
 } from "#shared/store/read/reader";
@@ -44,6 +47,26 @@ const FIXTURE_BYTES = "export function alpha(): number {\n  return 1;\n}\n";
 const RENAMED_PATH = "src/c.ts";
 /** An indexed path the fixture leaves no bytes for: the change set's `deleted` entry. */
 const DELETED_PATH = "src/gone.ts";
+
+/**
+ * What the graph skipped, and why the two counts differ: one path sits under a top-level directory
+ * the graph indexed, so a prefix-scoped read returns it, while the other sits under a directory no
+ * indexed file lives in — `rowsForPaths` never returns it, and only the graph's own count holds it.
+ * That is the pair `#shared/domain/coverage` keeps apart on purpose.
+ */
+const SKIPPED_ROWS: readonly SkippedPathRow[] = [
+  { id: 1, path: "src/vendor.min.js", reason: "size_cap", detail: null, language: "javascript" },
+  {
+    id: 2,
+    path: "docs/legacy.xslt",
+    reason: "grammar_unavailable",
+    detail: null,
+    language: "xslt",
+  },
+];
+
+/** The indexed test corpus the graph reports; `coverage.tests` carries it in every scope. */
+const TESTS_CENSUS: TestCensus = { nodes: 3, languages: [{ language: "typescript", nodes: 3 }] };
 const gitDirs: string[] = [];
 
 function git(root: string, ...args: readonly string[]): string {
@@ -312,25 +335,21 @@ function makeReader(options: ReaderOptions = {}): GraphReader {
       testedDepth: nodeId === 2 ? null : 1,
       reachableCount: nodeId === 1 ? 14 : null,
     }),
-    rowsForPaths: () => ({
+    rowsForPaths: (prefixes) => ({
       indexed: files,
-      notIndexed: [
-        {
-          id: 1,
-          path: "docs/legacy.xslt",
-          reason: "grammar_unavailable",
-          detail: null,
-          language: "xslt",
-        },
-      ],
+      // A prefix sees the skipped paths under it, never every skip in the graph: that second
+      // question is `notIndexedCount`'s, and the two are only equal when the scope is the graph.
+      notIndexed: SKIPPED_ROWS.filter((row) =>
+        prefixes.some((prefix) => isUnderPrefix(row.path, prefix)),
+      ),
     }),
     unresolvedForFiles: (fileIds) =>
       (options.unresolvedRows ?? []).filter((row) => fileIds.includes(row.fileId)),
     fileByPath: (path) => files.find((row) => row.path === path) ?? null,
     allFiles: () => [...files],
-    notIndexedAll: () => [],
-    notIndexedCount: () => 0,
-    testsCensus: () => ({ nodes: 0, languages: [] }),
+    notIndexedAll: () => [...SKIPPED_ROWS],
+    notIndexedCount: () => SKIPPED_ROWS.length,
+    testsCensus: () => TESTS_CENSUS,
     censusByLanguage: () => [{ language: "typescript", files: 1, parsed: 1, failed: 0 }],
     metaFor: () => ({
       projectName: "fake",
@@ -669,10 +688,13 @@ describe("summary: repo", () => {
       { qn: `${FIXTURE_PATH}::${NAMES[0]}`, in: 9, out: 1 },
     ]);
     expect(payload.flows).toEqual([{ name: `${FIXTURE_PATH}::${NAMES[0]}`, steps: 14, files: 0 }]);
-    expect(payload.not_indexed).toEqual([
-      { path: "docs/legacy.xslt", reason: "grammar_unavailable" },
-    ]);
-    expect(env.totals.not_indexed_total).toBe(1);
+    expect(payload.not_indexed).toEqual([{ path: "src/vendor.min.js", reason: "size_cap" }]);
+    // The payload lists what this scope skipped; the total is the graph's, so the two differ by the
+    // skip under a top-level directory no indexed file lives in.
+    expect(env.coverage.skipped).toBe(1);
+    expect(env.totals.not_indexed_total).toBe(SKIPPED_ROWS.length);
+    // The test census rides on `coverage` in every scope, this one included.
+    expect(env.coverage.tests).toEqual(TESTS_CENSUS);
     expect(payload.unresolved).toEqual(zeroCensus());
     expect(env.totals.unresolved_material).toBe(0);
   });
@@ -698,6 +720,41 @@ describe("summary: repo", () => {
   });
 });
 
+/**
+ * Two counts travel together and neither implies the other: `coverage.skipped` says how much of
+ * *this scope* the indexer did not read, `not_indexed_total` says how much of the *graph* it never
+ * read. A scope that inferred the second from the first would report a smaller repository than
+ * `status` reports for the same generation, which is what the two tests below pin.
+ */
+describe("summary: coverage counts", () => {
+  test("coverage.skipped stays scoped while not_indexed_total is the graph's", async () => {
+    const env = await handle(contextWith(makeReader()), { scope: "repo" });
+    expect(env.status).toBe("ok");
+
+    // Only `src` was indexed, so the skip under `docs/` is outside every prefix the scope queried.
+    expect(env.coverage.skipped).toBe(1);
+    expect(env.coverage.not_indexed.map((row) => row.path)).toEqual(["src/vendor.min.js"]);
+    // The graph counted it anyway, and that is the number `status` publishes too.
+    expect(env.totals.not_indexed_total).toBe(SKIPPED_ROWS.length);
+    expect(env.totals.not_indexed_total).toBeGreaterThan(env.coverage.skipped);
+  });
+
+  test("every scope publishes the graph's skip total and the test census", async () => {
+    const reader = makeReader();
+    const args = [{}, { scope: "repo" as const }, { scope: "area" as const, target: "src" }];
+    // One number per generation: the scope changes the list, never the repository's skip count.
+    const published: (number | null | undefined)[] = [];
+    for (const scopeArgs of args) {
+      const env = await handle(contextWith(reader), scopeArgs);
+      expect(env.status).toBe("ok");
+      published.push(env.totals.not_indexed_total);
+      // The test corpus is a coverage fact, so every scope carries it beside its own counts.
+      expect(env.coverage.tests).toEqual(TESTS_CENSUS);
+    }
+    expect(published).toEqual([SKIPPED_ROWS.length, SKIPPED_ROWS.length, SKIPPED_ROWS.length]);
+  });
+});
+
 describe("summary: area", () => {
   test("returns exactly the documented keys for one path", async () => {
     const env = await handle(contextWith(makeReader()), { scope: "area", target: "src" });
@@ -716,9 +773,16 @@ describe("summary: area", () => {
 });
 
 describe("summary: cursors", () => {
+  /**
+   * Small enough to cut the ranked list, large enough to keep a leading item of it: the envelope
+   * carries the coverage census and the test corpus on every answer, so a page boundary below this
+   * would drop `changed_symbols` whole and prove nothing about resuming a ranking.
+   */
+  const PAGE_BUDGET = 800;
+
   test("a truncated page is resumed without repeating an item", async () => {
     const ctx = contextWith(makeReader());
-    const budget = 600;
+    const budget = PAGE_BUDGET;
 
     const first = await handle(ctx, { budget });
     expect(first.truncated).toBe(true);
@@ -741,7 +805,7 @@ describe("summary: cursors", () => {
 
   test("draining the pages yields every symbol once", async () => {
     const ctx = contextWith(makeReader());
-    const budget = 600;
+    const budget = PAGE_BUDGET;
     const seen: number[] = [];
     let cursor: string | null = null;
     for (let page = 0; page < NODES.length + 2; page += 1) {

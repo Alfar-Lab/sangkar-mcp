@@ -18,7 +18,7 @@
  * one `extractFile` call plus the path it came from, so the pass is a pure function of its input.
  */
 
-import { normalizeRel, qn as qualify } from "#shared/paths";
+import { normalizeRel, qn as qualify, resolveFrom } from "#shared/paths";
 import type {
   ExtractedNode,
   ExtractResult,
@@ -148,6 +148,7 @@ export class SymbolIndex {
   readonly #bases = new Map<string, BaseReference[]>();
   /** Extensionless rel path → the units it could name, for module-string resolution. */
   readonly #stems = new Map<string, string[]>();
+  /** `specifier\0importer` → the units it could name, so two importers never share an entry. */
   readonly #candidates = new Map<string, readonly string[]>();
 
   private constructor(units: readonly FileUnit[]) {
@@ -232,18 +233,50 @@ export class SymbolIndex {
    * resolver cannot see (a package, a stdlib import), the second is a tree defect the caller can
    * report along with the competitors. Python's `a.b` and TypeScript's `./a/b` both become `a/b`;
    * `index` and `__init__` answering for their directory is the whole of directory-import support.
+   *
+   * `fromFile` is the importing unit, and for a relative specifier it is what decides the meaning:
+   * `./x.js` from `src/a/b.ts` is the stem `src/a/x`, so that exact stem is searched before the
+   * global suffix search below — without it every `./y` would tie between all the units whose stem
+   * happens to end in `y`. An absolute or escaping specifier resolves to nothing and falls through
+   * to the module-string reading, which is what keeps `../../../x` from binding on a coincidence.
    */
-  moduleCandidates(module: string): readonly string[] {
-    const cached = this.#candidates.get(module);
+  moduleCandidates(module: string, fromFile?: string): readonly string[] {
+    const cacheKey = `${module}\u0000${fromFile ?? ""}`;
+    const cached = this.#candidates.get(cacheKey);
     if (cached !== undefined) {
       return cached;
     }
-    const key = modulePath(module);
+    const relative = fromFile !== undefined && isRelativeSpecifier(module);
+    const local = this.#matchingStems(relative ? resolveFrom(fromFile, module) : null);
+    const found = local.length > 0 ? local : this.#matchingStems(modulePath(module));
+    this.#candidates.set(cacheKey, found);
+    return found;
+  }
+
+  /**
+   * The unit a module string names, or `null` when the string matches no unit or more than one —
+   * a module string that matches two files cannot be resolved and must not be guessed. Expressed
+   * over {@link moduleCandidates} so the two can never disagree about which units are in play.
+   */
+  moduleFile(module: string, fromFile?: string): string | null {
+    const candidates = this.moduleCandidates(module, fromFile);
+    return candidates.length === 1 ? (candidates[0] ?? null) : null;
+  }
+
+  /**
+   * The units an extensionless rel path could name, sorted, or `[]` for no stem at all. An exact
+   * single entry wins outright; otherwise the suffix match collects every unit the stem could be
+   * the tail of.
+   */
+  #matchingStems(key: string | null): readonly string[] {
+    if (key === null || key === "") {
+      return [];
+    }
     const found: string[] = [];
     const exact = this.#stems.get(key);
     if (exact !== undefined && exact.length === 1) {
       found.push(...exact);
-    } else if (key !== "") {
+    } else {
       const suffix = `/${key}`;
       const matches = new Set<string>();
       for (const [stem, paths] of this.#stems) {
@@ -260,18 +293,7 @@ export class SymbolIndex {
     // Sorted because the candidates end up in evidence text, and two runs over the same tree must
     // produce byte-identical rows.
     found.sort();
-    this.#candidates.set(module, found);
     return found;
-  }
-
-  /**
-   * The unit a module string names, or `null` when the string matches no unit or more than one —
-   * a module string that matches two files cannot be resolved and must not be guessed. Expressed
-   * over {@link moduleCandidates} so the two can never disagree about which units are in play.
-   */
-  moduleFile(module: string): string | null {
-    const candidates = this.moduleCandidates(module);
-    return candidates.length === 1 ? (candidates[0] ?? null) : null;
   }
 
   #materialize(qns: readonly string[]): readonly ExtractedNode[] {
@@ -379,7 +401,7 @@ function bindRaw(context: BindContext, raw: RawEdge): void {
       // A module string names a unit, not a declaration: the same-file, unique-name and
       // inheritance steps have nothing to look at, so an import binds to the target file node at
       // `extracted`, and the reason a failed one failed is read off the candidate set.
-      const candidates = context.index.moduleCandidates(raw.target);
+      const candidates = context.index.moduleCandidates(raw.target, context.file);
       const only = candidates[0];
       if (candidates.length === 1 && only !== undefined) {
         const target = context.index.fileNode(only);
@@ -496,7 +518,7 @@ function importHits(file: string, name: string, index: SymbolIndex): string[] {
   }
   const out: string[] = [];
   for (const binding of bindings) {
-    const moduleRel = index.moduleFile(binding.module);
+    const moduleRel = index.moduleFile(binding.module, file);
     if (moduleRel === null) {
       continue;
     }

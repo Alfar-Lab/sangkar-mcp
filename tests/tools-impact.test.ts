@@ -6,7 +6,7 @@ import { BYTES_PER_TOKEN } from "#shared/budget";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import { UNRESOLVED_BUCKETS } from "#shared/domain/unresolved";
-import type { Envelope } from "#shared/envelope";
+import type { Envelope, TestCensus } from "#shared/envelope";
 import { log } from "#shared/log";
 import { isUnderPrefix } from "#shared/paths";
 import type { ToolContext } from "#shared/store/read/context";
@@ -205,6 +205,8 @@ interface FakeGraph {
   readonly unresolved?: readonly UnresolvedRef[];
   /** `false` models a database with no publish: `meta.generation` null and no generation row. */
   readonly published?: boolean;
+  /** The graph's indexed test symbols; absent means "this graph indexes no test symbol". */
+  readonly testsCensus?: TestCensus;
   /** Counts the calls that mean "work started", so a cursor refusal can prove it did not. */
   readonly work?: { count: number };
 }
@@ -248,7 +250,7 @@ function makeReader(graph: FakeGraph): GraphReader {
     allFiles: () => [...files],
     notIndexedAll: () => [],
     notIndexedCount: () => 0,
-    testsCensus: () => ({ nodes: 0, languages: [] }),
+    testsCensus: () => graph.testsCensus ?? { nodes: 0, languages: [] },
     censusByLanguage: () => [],
     metaFor: () => ({
       projectName: "impact fixture",
@@ -515,6 +517,59 @@ describe("impact handler: an explicit change set", () => {
     expect(result.payload?.risk.band).toBe("low");
     expect(result.payload?.risk.score).toBe(0.05);
     expect(payload.risk.drivers[0]).toBe("2 dependents sit inside the expanded radius");
+  });
+
+  test("a graph with test symbols keeps the coverage sentence byte-identical", async () => {
+    const reader = makeReader({
+      ...baseGraph(),
+      testsCensus: { nodes: 4, languages: [{ language: "typescript", nodes: 4 }] },
+    });
+    const result = await handle(contextOf(reader, tempDir("cg-impact-census-")), {
+      paths: ["src/a.ts"],
+    });
+
+    expect(result.summary).toEndWith("1 of 2 covered by tests.");
+    expect(result.summary).not.toContain("no test symbols");
+  });
+
+  test("a graph with no test symbol explains the zero numerator instead of claiming coverage", async () => {
+    // Nothing in this graph is reachable from a test, so the numerator is zero either way; only
+    // the census decides whether that is a clean bill or a blind index.
+    const untested: FakeGraph = {
+      ...baseGraph(),
+      metrics: new Map([
+        [1, metricsOf({ nodeId: 1 })],
+        [2, metricsOf({ nodeId: 2, inDegree: 1 })],
+        [3, metricsOf({ nodeId: 3, inDegree: 1, isEntry: true })],
+      ]),
+    };
+    const withSymbols = await handle(
+      contextOf(
+        makeReader({
+          ...untested,
+          testsCensus: { nodes: 4, languages: [{ language: "typescript", nodes: 4 }] },
+        }),
+        tempDir("cg-impact-census-"),
+      ),
+      { paths: ["src/a.ts"] },
+    );
+    const withoutSymbols = await handle(
+      contextOf(
+        makeReader({ ...untested, testsCensus: { nodes: 0, languages: [] } }),
+        tempDir("cg-impact-census-"),
+      ),
+      { paths: ["src/a.ts"] },
+    );
+
+    expect(withSymbols.summary).toEndWith("0 of 2 covered by tests.");
+    // The census number is in the wording, so the reader can tell an empty corpus from a blind one.
+    expect(withoutSymbols.summary).toEndWith(
+      "0 of 2 covered by tests; this graph indexes no test symbols (test census: 0 nodes).",
+    );
+    // The same change set, the same facts: the two answers differ in the clause and nothing else.
+    expect(withoutSymbols.summary).toBe(
+      `${withSymbols.summary.slice(0, -1)}; this graph indexes no test symbols (test census: 0 nodes).`,
+    );
   });
 
   test("a changed path the graph cannot explain is reported, never dropped", async () => {

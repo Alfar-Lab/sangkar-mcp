@@ -642,7 +642,6 @@ function buildRepo(
       entry_points_total: entryPoints.length,
       coupling_hotspots_total: hotspots.length,
       flows_total: flows.length,
-      not_indexed_total: notIndexed.length,
       unresolved_material: census.material,
     },
     nextTools: REPO_NEXT_TOOLS,
@@ -829,6 +828,9 @@ export async function handle(
     stale: freshness.stale,
   });
 
+  // `skipped` is the scope's count, `not_indexed_total` the graph's: one number per generation.
+  const coverage: Coverage = { ...assembly.coverage, tests: ctx.reader.testsCensus() };
+
   // One census per answer, taken from the rows `assemble` returned for this scope. `area` reports
   // it through `totals` and `coverage` alone: its payload is one path's surface.
   const census = censusOf(assembly);
@@ -840,6 +842,10 @@ export async function handle(
         ? buildArea(ctx, target, rows, start, assembly.relation, census)
         : buildChange(ctx, changes, generationId, base, start, assembly.relation, census);
 
+  // Every scope publishes the graph's own skip count, not the length of a scoped list: a caller
+  // asking about one area must not read a smaller repository than the one `status` reports.
+  const totals: Totals = { ...built.totals, not_indexed_total: assembly.notIndexedTotal };
+
   const env = ok(built.payload, {
     summary: built.summary,
     read_status: readStatusOf(
@@ -848,8 +854,8 @@ export async function handle(
       freshness,
       ctx.now(),
     ),
-    coverage: assembly.coverage,
-    totals: built.totals,
+    coverage,
+    totals,
     next_tools: built.nextTools,
     // A bounded sample is a cut the tool made before the budget did, and it must say so.
     truncated: built.itemCapped,
@@ -891,8 +897,8 @@ export async function handle(
           // The refusal is about the budget, so it carries no payload and no path list: the counts
           // stay exact (`skipped` says how many were not indexed) while the 80 entries that would
           // make this envelope several kilobytes are what the caller was told to make room for.
-          coverage: { ...assembly.coverage, not_indexed: [] },
-          totals: built.totals,
+          coverage: { ...coverage, not_indexed: [] },
+          totals,
           next_tools: built.nextTools,
           truncated: false,
           truncation_reason: null,
