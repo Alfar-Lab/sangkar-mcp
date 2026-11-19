@@ -116,6 +116,26 @@ interface Fixture {
   readonly consecutiveFailures?: number;
   /** What the fake handle's statement cache holds; absent models a reader without one. */
   readonly statementCacheEntries?: number;
+  /**
+   * Identity as `meta` records it. An explicit `null` models a store published before the key
+   * existed (or a publish where git could not answer); absent takes the default below.
+   */
+  readonly projectName?: string | null;
+  readonly projectRoot?: string | null;
+  readonly projectBranch?: string | null;
+  readonly projectRemote?: string | null;
+  /** A reader written before `project_branch`/`project_remote` existed omits the two keys. */
+  readonly omitOptionalIdentity?: boolean;
+}
+
+/** The identity a store published by this build records; `null` in a fixture means it did not. */
+const DEFAULT_PROJECT_NAME = "sangkar";
+const DEFAULT_PROJECT_BRANCH = "main";
+const DEFAULT_PROJECT_REMOTE = "git@example.invalid:acme/sangkar.git";
+
+/** A fixture field with its default, so an explicit `null` survives as "the store recorded none". */
+function orDefault<T>(value: T | undefined, fallback: T): T {
+  return value === undefined ? fallback : value;
 }
 
 /**
@@ -235,8 +255,14 @@ function fakeReader(fixture: Fixture): GraphReader {
     allFiles: () => [...files],
     censusByLanguage: () => census,
     metaFor: () => ({
-      projectName: "sangkar",
-      projectRoot: REPO_DIR,
+      projectName: orDefault(fixture.projectName, DEFAULT_PROJECT_NAME),
+      projectRoot: orDefault(fixture.projectRoot, REPO_DIR),
+      ...(fixture.omitOptionalIdentity === true
+        ? {}
+        : {
+            projectBranch: orDefault(fixture.projectBranch, DEFAULT_PROJECT_BRANCH),
+            projectRemote: orDefault(fixture.projectRemote, DEFAULT_PROJECT_REMOTE),
+          }),
       generation,
       indexedAt: generation === null ? null : PUBLISHED_AT,
       indexerState: fixture.indexerState === undefined ? "idle" : fixture.indexerState,
@@ -317,6 +343,70 @@ const MESSY: Fixture = {
   ],
 };
 
+/**
+ * One row per bucket of the closed taxonomy (`#shared/domain/unresolved.ts`), so the census is
+ * asserted against every reason a call site can fail to bind rather than against one shape.
+ */
+const BUCKETED: Fixture = {
+  files: [fileRow(1, "src/a.ts", "typescript"), fileRow(2, "src/b.py", "python")],
+  unresolved: [
+    {
+      id: 93,
+      fileId: 1,
+      path: "src/a.ts",
+      line: 3,
+      rawTarget: "readFileSync",
+      evidenceKind: "import",
+      evidence: "import:node:fs",
+    },
+    {
+      id: 94,
+      fileId: 1,
+      path: "src/a.ts",
+      line: 5,
+      rawTarget: "lodash",
+      evidenceKind: "import",
+      evidence: "import:lodash",
+    },
+    {
+      id: 95,
+      fileId: 2,
+      path: "src/b.py",
+      line: 7,
+      rawTarget: "helpers",
+      evidenceKind: "import",
+      evidence: "import:./helpers.js",
+    },
+    {
+      id: 96,
+      fileId: 2,
+      path: "src/b.py",
+      line: 9,
+      rawTarget: "self.handler",
+      evidenceKind: "dynamic",
+      evidence: "call:self.handler",
+    },
+    {
+      id: 97,
+      fileId: 1,
+      path: "src/a.ts",
+      line: 11,
+      rawTarget: "src/a.ts | src/b.ts",
+      evidenceKind: "ambiguous",
+      evidence: null,
+    },
+    {
+      id: 98,
+      fileId: 2,
+      path: "src/b.py",
+      line: 13,
+      rawTarget: "mystery",
+      evidenceKind: null,
+      evidence: null,
+    },
+  ],
+};
+
 describe("status: complete coverage", () => {
   test("answers ok with all nine fields and the documented payload", () => {
     const env = handle(contextFor(CLEAN), { paths: ["src/a.ts"] });
@@ -353,6 +443,8 @@ describe("status: complete coverage", () => {
     expect(payload.project).toEqual({
       name: "sangkar",
       root: REPO_DIR,
+      branch: "main",
+      remote: "git@example.invalid:acme/sangkar.git",
       commit: BASE_COMMIT,
       // Derived from `ctx.config.dataDir`: the reader deliberately exposes no database path.
       db_path: DB_PATH,
@@ -402,6 +494,142 @@ describe("status: complete coverage", () => {
     expect(env.summary).toBe(
       "3 files indexed, generation g-7f3a91, 3 skipped, 1 failed to parse. 0 of 1 requested paths indexed.",
     );
+  });
+});
+
+describe("status: repository identity", () => {
+  test("a store that recorded its identity names the tree, the branch and the remote", () => {
+    const payload = expectOk(handle(contextFor(CLEAN), { paths: ["src/a.ts"] }));
+
+    expect(payload.project).toEqual({
+      name: DEFAULT_PROJECT_NAME,
+      root: REPO_DIR,
+      branch: DEFAULT_PROJECT_BRANCH,
+      remote: DEFAULT_PROJECT_REMOTE,
+      commit: BASE_COMMIT,
+      db_path: DB_PATH,
+    });
+  });
+
+  test("a store published before identity existed still answers, with nulls", () => {
+    const legacy: Fixture = {
+      ...CLEAN,
+      projectName: null,
+      projectRoot: null,
+      projectBranch: null,
+      projectRemote: null,
+    };
+    const env = handle(contextFor(legacy), { paths: ["src/a.ts"] });
+    const payload = expectOk(env);
+
+    // An unrecorded root is not a refusal and not a `root_mismatch`: the graph claims no tree, so
+    // there is nothing to contradict. The answer keeps every other field.
+    expect(env.status).toBe("ok");
+    expect(payload.project).toEqual({
+      name: null,
+      root: null,
+      branch: null,
+      remote: null,
+      commit: BASE_COMMIT,
+      db_path: DB_PATH,
+    });
+    expect(payload.graph.nodes).toBe(13_955);
+  });
+
+  test("a reader that predates the two optional keys answers null, never undefined", () => {
+    const payload = expectOk(handle(contextFor({ ...CLEAN, omitOptionalIdentity: true })));
+
+    // `GraphMeta` keeps `projectBranch`/`projectRemote` optional for hand-written readers; a payload
+    // must spell the absent fact as `null`, and `undefined` would vanish from the JSON entirely.
+    expect(payload.project.branch).toBeNull();
+    expect(payload.project.remote).toBeNull();
+    expect(Object.hasOwn(payload.project, "branch")).toBe(true);
+    expect(Object.hasOwn(payload.project, "remote")).toBe(true);
+  });
+
+  test("the composition root logs identity at info only when the store recorded it", async () => {
+    // The warn/info switch lives in `openStore`, which needs a real database and a real spawn to
+    // reach end to end; what is assertable here is that the recorded path never takes the warning
+    // branch, so a healthy start is not a warning on every server boot.
+    const source = await Bun.file(join(import.meta.dir, "..", "src/index.ts")).text();
+    const start = source.indexOf("if (meta.projectRoot === null) {");
+    const guard = source.indexOf("const guard = guardRoot", start);
+    expect(start).toBeGreaterThan(-1);
+    expect(guard).toBeGreaterThan(start);
+    const block = source.slice(start, guard);
+
+    expect(block).toContain('log.warn("store.identity_unrecorded"');
+    expect(block).toContain("} else {");
+    expect(block).toContain('log.info("store.identity_recorded"');
+    expect(block).toContain("projectRoot: meta.projectRoot");
+    expect(block).toContain("branch: meta.projectBranch ?? null");
+    // stdout carries the MCP protocol: the identity line is a stderr log call, not a write.
+    expect(block.includes("console.log")).toBe(false);
+  });
+});
+
+describe("status: unresolved census", () => {
+  test("the census names every bucket and sums to the count it explains", () => {
+    const env = handle(contextFor(BUCKETED), { paths: ["src/a.ts"] });
+    const payload = expectOk(env);
+
+    expect(payload.unresolved.buckets).toEqual({
+      builtin_stdlib: 1,
+      external_package: 1,
+      internal_module: 1,
+      dynamic_property_call: 1,
+      receiver_type_unknown: 1,
+      ambiguous: 1,
+    });
+    // `material` is the part of the count that could still be user-defined code: an ambiguous row
+    // (two candidates) and a receiver the indexer could not type. Everything else is stdlib, a
+    // package that is not in the graph, a broken relative import, or a call that has no target.
+    expect(payload.unresolved.material).toBe(2);
+    expect(payload.unresolved.total).toBe(6);
+    expect(payload.unresolved.total).toBe(env.coverage.unresolved_edges);
+    const summed = Object.values(payload.unresolved.buckets).reduce(
+      (total, count) => total + count,
+      0,
+    );
+    expect(summed).toBe(payload.unresolved.total);
+  });
+
+  test("a graph with no unresolved rows reports a full set of zeros", () => {
+    const env = handle(contextFor(CLEAN), { paths: ["src/a.ts"] });
+    const payload = expectOk(env);
+
+    // Every bucket is present at zero rather than the key being absent, so a reader of the payload
+    // never has to tell "no rows" apart from "this build does not report buckets".
+    expect(payload.unresolved).toEqual({
+      total: 0,
+      material: 0,
+      buckets: {
+        builtin_stdlib: 0,
+        external_package: 0,
+        internal_module: 0,
+        dynamic_property_call: 0,
+        receiver_type_unknown: 0,
+        ambiguous: 0,
+      },
+    });
+    expect(env.coverage.unresolved_edges).toBe(0);
+    // Zero unresolved rows is part of what lets this answer claim an exact total.
+    expect(env.totals.total_relation).toBe("eq");
+  });
+
+  test("the census counts the rows the envelope counts, whichever paths were requested", () => {
+    // `coverage.unresolved_edges` is repo-wide while `paths` scopes the entries by design; the census
+    // follows the coverage count it explains, so the two numbers can never describe two populations.
+    for (const paths of [[], ["src/a.ts"], ["docs/legacy.xslt"]]) {
+      const env = handle(contextFor(MESSY), { paths });
+      const payload = expectOk(env);
+      expect(payload.unresolved.total).toBe(env.coverage.unresolved_edges);
+      const summed = Object.values(payload.unresolved.buckets).reduce(
+        (total, count) => total + count,
+        0,
+      );
+      expect(summed).toBe(env.coverage.unresolved_edges);
+    }
   });
 });
 

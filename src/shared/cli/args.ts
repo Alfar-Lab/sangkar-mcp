@@ -136,12 +136,45 @@ function positionalFieldOf(input: InputLiteral): string | undefined {
   return required.length === 1 ? required[0]?.[0] : undefined;
 }
 
-function matchesItem(field: InputField, value: unknown): boolean {
+/** The declared item type of an array field; a manifest that declares none items strings. */
+function itemTypeOf(field: InputField): string {
+  return field.items?.type ?? "string";
+}
+
+/**
+ * One item in the declared item type, or `null` when it is not one.
+ *
+ * The integer read takes the text a shell hands over as well as a JSON number, because argv is
+ * always text and the `inputSchema` published from this same table describes array items as
+ * strings: refusing either spelling would refuse a call the manifest advertised.
+ */
+function itemOf(field: InputField, value: unknown): string | number | null {
+  if (itemTypeOf(field) === "integer") {
+    const number =
+      typeof value === "string" ? (value.trim() === "" ? Number.NaN : Number(value)) : value;
+    return typeof number === "number" && Number.isInteger(number) ? number : null;
+  }
   if (typeof value !== "string") {
-    return false;
+    return null;
   }
   const values = field.items?.values;
-  return values === undefined || values.includes(value);
+  return values === undefined || values.includes(value) ? value : null;
+}
+
+function matchesItem(field: InputField, value: unknown): boolean {
+  return itemOf(field, value) !== null;
+}
+
+/** Every item in the declared type; call only after {@link matchesType} accepted the array. */
+function coerceItems(field: InputField, items: readonly unknown[]): Array<string | number> {
+  const coerced: Array<string | number> = [];
+  for (const item of items) {
+    const value = itemOf(field, item);
+    if (value !== null) {
+      coerced.push(value);
+    }
+  }
+  return coerced;
 }
 
 function matchesType(field: InputField, value: unknown): boolean {
@@ -174,9 +207,10 @@ function expectationOf(name: string, field: InputField): string {
       return `"${name}" must be one of: ${(field.values ?? []).join(", ")}`;
     case "array": {
       const values = field.items?.values;
-      return values === undefined
-        ? `"${name}" must be an array of strings`
-        : `"${name}" must be an array of: ${values.join(", ")}`;
+      if (values !== undefined) {
+        return `"${name}" must be an array of: ${values.join(", ")}`;
+      }
+      return `"${name}" must be an array of ${itemTypeOf(field) === "integer" ? "integers" : "strings"}`;
     }
     case "boolean":
       return `"${name}" must be true or false`;
@@ -214,7 +248,9 @@ export function parseArgs(tool: string, input: InputLiteral, raw: unknown): Tool
         hint: expectationOf(name, field),
       });
     }
-    args[name] = value;
+    // A validated array is handed over in its declared item type: `matchesType` accepted the text
+    // form of an integer item, and the handler should read numbers rather than re-parse strings.
+    args[name] = Array.isArray(value) ? coerceItems(field, value) : value;
   }
   return args;
 }
@@ -226,8 +262,10 @@ export function parseArgs(tool: string, input: InputLiteral, raw: unknown): Tool
  * `parseArgs` produced, so a CLI user reads what an agent would read.
  *
  * Only the parts a shell cannot express are lost: an array field collects repeats (`--paths a
- * --paths b`) and never splits a comma, because a path may contain one. `min`/`max` are left to
- * the handler, exactly as a protocol call leaves them.
+ * --paths b`) and never splits a comma, because a path may contain one. An array of integers is
+ * the one spelling a shell would never write as a repeat — `--range 1:5` is the pair — so that
+ * item type splits on the colon and leaves everything else whole. `min`/`max` are left to the
+ * handler, exactly as a protocol call leaves them.
  */
 export function parseCliArgs(tool: string, input: InputLiteral, argv: readonly string[]): ToolArgs {
   const usage = usageOf(tool, input);
@@ -299,12 +337,13 @@ export function parseCliArgs(tool: string, input: InputLiteral, argv: readonly s
       continue;
     }
     if (field.type === "array") {
+      // The item type decides the token: a pair written as one value is the shell's form of a
+      // `[from, to]` array of integers, while a string array keeps each token whole.
+      const parts = itemTypeOf(field) === "integer" ? value.split(":") : [value];
       const collected = raw[name];
-      if (Array.isArray(collected)) {
-        collected.push(value);
-      } else {
-        raw[name] = [value];
-      }
+      const items: unknown[] = Array.isArray(collected) ? collected : [];
+      items.push(...parts);
+      raw[name] = items;
       continue;
     }
     raw[name] = value;

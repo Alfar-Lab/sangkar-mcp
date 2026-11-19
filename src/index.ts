@@ -335,6 +335,13 @@ function openStore(config: AppConfig): Store {
       // DATABASE.md §5 compares `meta.project_root`; an index that recorded none gives the guard
       // nothing to compare, so the graph is served and the gap is logged rather than assumed away.
       log.warn("store.identity_unrecorded", { dbPath, generation: meta.generation });
+    } else {
+      // The recorded half of the same fact, at `info`: a graph published by this build names the
+      // tree and the branch it came from, and a healthy start must not read as a warning.
+      log.info("store.identity_recorded", {
+        projectRoot: meta.projectRoot,
+        branch: meta.projectBranch ?? null,
+      });
     }
     const guard = guardRoot(meta.projectRoot, config.repoRoot, dbPath);
     if (guard.error !== null) {

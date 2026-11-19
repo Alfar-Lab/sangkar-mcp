@@ -1,5 +1,5 @@
 /**
- * `trace`'s manifest: the description the model sees, and the six arguments the handler parses
+ * `trace`'s manifest: the description the model sees, and the arguments the handler parses
  * (`TECH-SPEC.md` §6).
  *
  * The description is verbatim from `TOOLS-SPEC.md` §3 — it is the only text a model reads before
@@ -12,6 +12,7 @@
  * `tests/boundary.test.ts`), so it cannot read `NODE_KINDS` from the indexer; this table is the
  * read-side vocabulary `DATABASE.md` §3 fixes for `node.kind`.
  */
+import { UNRESOLVED_BUCKETS, type UnresolvedBucket } from "#shared/domain/unresolved";
 
 /** `node.kind` values a query may be narrowed to; `kinds` is all-or-nothing like `findByName`. */
 export const NODE_KINDS = [
@@ -53,7 +54,7 @@ export const manifest = {
 } as const;
 
 /**
- * The six-argument schema. `query` is the only required argument (`TOOLS-SPEC.md` §1: at most one
+ * The argument schema. `query` is the only required argument (`TOOLS-SPEC.md` §1: at most one
  * required arg per tool, because argument count is a bigger error source than argument type).
  * `cursor` continues *this* query and replaces `limit`/`offset`/`max_results`.
  */
@@ -61,8 +62,13 @@ export const input = {
   query: { type: "string", required: true },
   direction: { type: "enum", values: DIRECTIONS, default: "all" },
   kinds: { type: "array", items: { type: "enum", values: NODE_KINDS } },
+  path: { type: "string" },
   depth: { type: "integer", default: DEFAULT_DEPTH, min: MIN_DEPTH, max: MAX_DEPTH },
   budget: { type: "integer", default: DEFAULT_BUDGET_TOKENS },
+  // The taxonomy's own list, spread rather than restated: a bucket added to
+  // `#shared/domain/unresolved.ts` is filterable here in the same commit, and a stale copy would
+  // refuse a real bucket with `must be one of:`.
+  unresolved: { type: "enum", values: [...UNRESOLVED_BUCKETS] },
   cursor: { type: "string" },
 } as const;
 
@@ -72,7 +78,17 @@ export interface TraceArgs {
   readonly direction?: TraceDirection;
   /** Node-kind narrowing, applied at resolution only — `expand` filters edge kinds, not node kinds. */
   readonly kinds?: readonly NodeKindName[];
+  /**
+   * Repo-relative prefix, `search`'s semantics: it narrows resolution and the near misses, so a
+   * filtered tie can resolve and a filtered miss never answers from outside the prefix.
+   */
+  readonly path?: string;
   readonly depth?: number;
   readonly budget?: number;
+  /**
+   * Narrow the `unresolved` list to one bucket. The census describes the unfiltered scope either
+   * way, because a filter chooses what to read, not which call sites failed to bind.
+   */
+  readonly unresolved?: UnresolvedBucket;
   readonly cursor?: string;
 }

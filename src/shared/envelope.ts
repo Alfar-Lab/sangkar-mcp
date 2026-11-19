@@ -65,10 +65,18 @@ export interface Coverage {
 /**
  * Per-list counts plus the relation they are counted under. Every `<list>_total` key survives
  * truncation untouched, so `calls_total: 2` with one item shown still reads "showing 1 of 2".
+ *
+ * A total is `null` only when the list it counts does not apply to this scope — an empty change
+ * set has no test gaps to count, which is a different answer from "zero gaps" — and every other
+ * total stays a number. `emit` copies totals verbatim, so neither may be inferred downstream.
  */
 export interface Totals {
   total_relation: TotalRelation;
-  [listTotal: `${string}_total`]: number;
+  [listTotal: `${string}_total`]: number | null;
+  /** Optional because only a scope that assembles a coverage census has unresolved call sites to count. */
+  readonly unresolved_material?: number;
+  /** Optional because only an ambiguous answer served a slice of a tie. */
+  readonly candidates_shown?: number;
 }
 
 /**

@@ -31,10 +31,16 @@
  */
 import { createHash } from "node:crypto";
 import { budgetFloorOf, emit, MAX_BUDGET_TOKENS } from "#shared/budget";
-import { assemble } from "#shared/domain/coverage";
-import { changedSinceFrom, type UnmatchedReason } from "#shared/domain/diff";
+import { assemble, type CoverageAssembly } from "#shared/domain/coverage";
+import {
+  type ChangeEntry,
+  type ChangeState,
+  changedSinceFrom,
+  type UnmatchedReason,
+} from "#shared/domain/diff";
 import { clampDepth, expand } from "#shared/domain/neighbors";
 import { type RiskBand, score } from "#shared/domain/risk";
+import { bucketCensus, type UnresolvedBucket } from "#shared/domain/unresolved";
 import {
   bootstrapping,
   type Coverage,
@@ -42,6 +48,8 @@ import {
   fail,
   ok,
   type ReadStatus,
+  type TotalRelation,
+  type Totals,
 } from "#shared/envelope";
 import { AppError } from "#shared/errors";
 import { normalizeRel } from "#shared/paths";
@@ -83,9 +91,16 @@ const NO_COVERAGE: Coverage = {
  */
 export type ImpactUnmatchedReason = UnmatchedReason | "not_indexed" | "no_nodes_in_graph";
 
-/** One changed path the graph can explain. `symbols` is a count, per the documented payload. */
+/**
+ * One changed path the graph can explain. `symbols` is a count, per the documented payload;
+ * `state`/`from` come from the diff's typed entries so a deletion and a rename read as what they
+ * are instead of as an unlabelled path.
+ */
 export interface ChangedFileRow {
   readonly path: string;
+  readonly state: ChangeState;
+  /** The path a rename came from; absent for every other state. */
+  readonly from?: string;
   readonly symbols: number;
   readonly entry_point: boolean;
 }
@@ -111,6 +126,30 @@ export interface UnmatchedFileRow {
   readonly reason: ImpactUnmatchedReason;
 }
 
+/**
+ * The change set's unresolved call sites, explained instead of totalled (#5). `total` is copied
+ * from `coverage.unresolved_edges` — one count of one array — and `material` is the narrower
+ * population that could still be user-defined code: a lower bound on the blast radius because the
+ * indexer gave up, and a lower bound because the target was stdlib, are not the same fact.
+ *
+ * An explicit change set that matched nothing reports zeros: it measured nothing, and the key is
+ * present because an absent census would read as "nothing unresolved".
+ */
+export interface UnresolvedCensus {
+  readonly total: number;
+  readonly material: number;
+  readonly buckets: Readonly<Record<UnresolvedBucket, number>>;
+}
+
+/**
+ * The totals an impact envelope carries. `Totals` types every key as `<list>_total` and the census's
+ * material count is not a list total, so the key is declared as an extension here rather than
+ * widening the shared interface from a tool module; the value is still a `Totals` for every reader.
+ */
+export interface ImpactTotals extends Totals {
+  readonly unresolved_material: number;
+}
+
 /** The payload `TOOLS-SPEC.md` §6 documents, and no other key. */
 export interface ImpactPayload {
   readonly changed: readonly ChangedFileRow[];
@@ -121,6 +160,7 @@ export interface ImpactPayload {
     readonly band: RiskBand;
     readonly drivers: readonly string[];
   };
+  readonly unresolved: UnresolvedCensus;
 }
 
 /**
@@ -230,6 +270,46 @@ function stalenessOf(changed: number, removed: number): string | null {
   return `${parts.join(" and ")} since index`;
 }
 
+/**
+ * The census of the rows `assemble` already returned for the change set, never a second query:
+ * `total` is that array's own coverage count, so `payload.unresolved.total` and
+ * `coverage.unresolved_edges` cannot disagree.
+ */
+function censusOf(assembly: CoverageAssembly): UnresolvedCensus {
+  const { buckets, material } = bucketCensus(assembly.unresolved);
+  return { total: assembly.coverage.unresolved_edges, material, buckets };
+}
+
+/**
+ * The totals every envelope of this tool carries, the refusals included: an agent parses one totals
+ * shape per tool, so a key that disappears on an error path is a key it has to special-case.
+ */
+function totalsOf(impactedTotal: number, material: number, relation: TotalRelation): ImpactTotals {
+  return {
+    impacted_total: impactedTotal,
+    unresolved_material: material,
+    total_relation: relation,
+  };
+}
+
+/**
+ * A rename arrives as two entries, not one: `ChangeSet.entries` is derived from `changed ∪ removed`,
+ * and the two halves come from different sources — the git half owns the destination and its `from`,
+ * the hash comparison owns the source path once its bytes are gone. Rendering both would report one
+ * move as two changed files, so the `deleted` half of a pair is dropped here: the `renamed` entry
+ * already carries the fact, `from` included. Each tool needs its own copy of this two-line rule
+ * because tools may not import each other (`tool-isolation`).
+ */
+function collapseRenames(entries: readonly ChangeEntry[]): ChangeEntry[] {
+  const renamedFrom = new Set<string>();
+  for (const entry of entries) {
+    if (entry.state === "renamed" && entry.from !== undefined) {
+      renamedFrom.add(entry.from);
+    }
+  }
+  return entries.filter((entry) => !(entry.state === "deleted" && renamedFrom.has(entry.path)));
+}
+
 /** `showing N of M` when a page was cut, and the window when it was resumed. */
 function pageSummary(
   summary: string,
@@ -327,7 +407,7 @@ export async function handle(
             "the cursor was refused before the change set was read",
           ),
           coverage: NO_COVERAGE,
-          totals: { impacted_total: 0, total_relation: "gte" },
+          totals: totalsOf(0, 0, "gte"),
         },
       );
     }
@@ -344,7 +424,7 @@ export async function handle(
         summary: `budget ${budget} exceeds the ${ceiling} token ceiling`,
         read_status: readStatusOf(generation, indexedAt, checkedAt, "the call was refused"),
         coverage: NO_COVERAGE,
-        totals: { impacted_total: 0, total_relation: "gte" },
+        totals: totalsOf(0, 0, "gte"),
       },
     );
   }
@@ -353,7 +433,18 @@ export async function handle(
   // reader's own `allFiles()` digests, so this stays a handler with no connection (diff.ts).
   const changeSet =
     paths.length === 0 ? await changedSinceFrom(ctx.config.repoRoot, base, ctx.reader, {}) : null;
-  const changedPaths = changeSet === null ? paths : [...changeSet.changed];
+  // An explicit `paths` list carries no git status, so its rows are labelled `modified`: that is
+  // what "these paths changed" asserts, and inventing `added` from a missing row would be a guess.
+  const entries: readonly ChangeEntry[] =
+    changeSet === null
+      ? paths.map((path) => ({ state: "modified" as const, path }))
+      : collapseRenames(changeSet.entries);
+  // A deleted path is in `changed` but seeds nothing and scopes nothing: its bytes are gone, so
+  // there is no symbol to rank and no call site left to repair, and counting the graph's surviving
+  // rows for it as reachable would inflate the blast radius of a deletion.
+  const changedPaths = entries
+    .filter((entry) => entry.state !== "deleted")
+    .map((entry) => entry.path);
   const removed = changeSet === null ? 0 : changeSet.removed.length;
   const staleness =
     changeSet === null
@@ -373,7 +464,14 @@ export async function handle(
   let changedEntryPoints = 0;
   let changedUntested = 0;
 
-  for (const path of changedPaths) {
+  for (const entry of entries) {
+    const path = entry.path;
+    if (entry.state === "deleted") {
+      // Nothing to rank and nothing to reach, but a review that cannot see the deletion cannot see
+      // the change: the row stays, with the zero symbol count the documented payload promises.
+      changed.push({ path, state: entry.state, symbols: 0, entry_point: false });
+      continue;
+    }
     const file = ctx.reader.fileByPath(path);
     if (file === null) {
       // Not in the graph at all: the caller still needs to know its change was not analysed.
@@ -405,7 +503,13 @@ export async function handle(
       }
     }
     changedSymbols += nodes.length;
-    changed.push({ path, symbols: nodes.length, entry_point: entryPoint });
+    changed.push({
+      path,
+      state: entry.state,
+      ...(entry.from === undefined ? {} : { from: entry.from }),
+      symbols: nodes.length,
+      entry_point: entryPoint,
+    });
   }
 
   // One inbound walk from every changed node. `expand` already reports a node once per direction at
@@ -494,11 +598,14 @@ export async function handle(
     a.path < b.path ? -1 : a.path > b.path ? 1 : 0,
   );
   const page = impacted.slice(start);
+  // The change set's own censused coverage: the same rows `coverage.unresolved_edges` counts.
+  const unresolved = censusOf(assembly);
   const payload: ImpactPayload = {
     changed,
     impacted: page,
     unmatched_files: unmatchedRows,
     risk: { score: risk.score, band: risk.band, drivers: [...risk.drivers] },
+    unresolved,
   };
 
   const baseLabel = base === "" ? "HEAD" : base;
@@ -520,7 +627,7 @@ export async function handle(
       summary,
       read_status: readStatusOf(generation, indexedAt, checkedAt, staleness),
       coverage: assembly.coverage,
-      totals: { impacted_total: impacted.length, total_relation: assembly.relation },
+      totals: totalsOf(impacted.length, unresolved.material, assembly.relation),
       next_tools: NEXT_TOOLS,
     }),
     budget,
@@ -547,7 +654,7 @@ export async function handle(
         summary,
         read_status: readStatusOf(generation, indexedAt, checkedAt, staleness),
         coverage: assembly.coverage,
-        totals: { impacted_total: impacted.length, total_relation: assembly.relation },
+        totals: totalsOf(impacted.length, unresolved.material, assembly.relation),
         next_tools: NEXT_TOOLS,
         truncated: false,
         truncation_reason: null,

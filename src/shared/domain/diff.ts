@@ -4,9 +4,9 @@
  * it (plan.constraint_invariant.md: one change-set, never one per caller).
  *
  * Two sources are unioned, because neither is right alone:
- * - `git diff --name-status` knows what changed against a commit, including deletions, and it
- *   still sees paths the indexer never parsed (a modified `README.md`). It never sees untracked
- *   files.
+ * - `git diff --name-status` knows what changed against a commit, including deletions and renames,
+ *   and it still sees paths the indexer never parsed (a modified `README.md`). It never sees
+ *   untracked files.
  * - hashing every `file` row's working-tree bytes against `file.sha256` — the column the indexer
  *   already stores — is the only source in a directory git cannot read, and the only one that
  *   notices a changed indexed file that git ignores.
@@ -43,12 +43,35 @@ export interface UnmatchedChange {
   readonly reason: UnmatchedReason;
 }
 
+/** What happened to one path in the change set, in the vocabulary a payload can render. */
+export type ChangeState = "modified" | "added" | "deleted" | "renamed";
+
+/**
+ * One path of the change set with its state. A rename is a single entry — the destination path
+ * plus where it came from — because git's two halves of a rename are one fact, and a payload that
+ * rendered them as "one added, one deleted" would lose that. A copy is `added`: its source still
+ * exists, so there is nothing to attribute away from.
+ */
+export interface ChangeEntry {
+  readonly state: ChangeState;
+  /** The destination path: the new name of a rename, the new file of a copy. Repo-relative. */
+  readonly path: string;
+  /** The path a rename came from; absent for every other state. Repo-relative. */
+  readonly from?: string;
+}
+
 /** The change set both change-aware tools read; the arrays are sorted and repo-relative. */
 export interface ChangeSet {
   /** Differ from `base`, or no longer match `file.sha256`; sorted, forward slashes. */
   readonly changed: readonly string[];
   /** Had a `file` row and their bytes are gone from the working tree; sorted. */
   readonly removed: readonly string[];
+  /**
+   * Every path in `changed` and `removed` with its state, sorted by path; the one view that can
+   * say "renamed from". A path in `unmatched` has no entry — it is not attributed to a file yet,
+   * and its reason lives in `unmatched`. A path outside `repoRoot` appears in neither.
+   */
+  readonly entries: readonly ChangeEntry[];
   readonly unmatched: readonly UnmatchedChange[];
   /** `true` when git was unusable and this set came from the hash comparison alone. */
   readonly degraded: boolean;
@@ -138,7 +161,11 @@ function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-/** `git diff --name-status` against `base`, bounded by `timeoutMs` and never interactive. */
+/**
+ * `git diff --name-status` against `base`, bounded by `timeoutMs` and never interactive. Rename
+ * detection is left on (git's default): a rename has to arrive as one `R` record, because only then
+ * can the change set say "this moved" instead of "one path appeared, another vanished".
+ */
 async function gitNameStatus(
   repoRoot: string,
   base: string,
@@ -160,7 +187,6 @@ async function gitNameStatus(
     "diff",
     "--name-status",
     "-z",
-    "--no-renames",
     "--no-ext-diff",
     // Paths relative to `repoRoot`, not the repository's toplevel, so a subdirectory root works.
     "--relative",
@@ -215,18 +241,22 @@ async function gitNameStatus(
 }
 
 interface GitEntry {
-  /** The `--name-status` letter: `M`, `A`, `D`, `T`, … */
+  /** The `--name-status` letter: `M`, `A`, `D`, `R`, `C`, `T`, … */
   readonly status: string;
-  /** As git reported it, before containment and normalisation. */
+  /** The destination path: as git reported it, before containment and normalisation. */
   readonly path: string;
+  /** The source path of an `R`/`C` pair; absent on every single-path record. */
+  readonly from?: string;
 }
 
 /**
- * `-z` writes `STATUS\0path\0` per entry, and `R`/`C` add a second path (the destination). We pass
- * `--no-renames`, so a rename pair would mean git ignored the flag: `null` reports unparseable
- * output rather than letting a silently dropped path look like "no change".
+ * `-z` writes `STATUS\0path\0` per entry, and `R`/`C` write `STATUS\0source\0destination\0`.
+ *
+ * A malformed record — a truncated pair, an empty path — is skipped instead of failing the parse:
+ * one odd line must not empty the change set, and `null` coming back from git is the only thing
+ * that may degrade the result to the hash comparison.
  */
-function parseNameStatus(stdout: string): readonly GitEntry[] | null {
+function parseNameStatus(stdout: string): readonly GitEntry[] {
   const tokens = stdout.split("\0");
   const entries: GitEntry[] = [];
   let index = 0;
@@ -237,15 +267,38 @@ function parseNameStatus(stdout: string): readonly GitEntry[] | null {
       // The trailing NUL leaves one empty token; anything else is a malformed record.
       continue;
     }
-    const rename = status.startsWith("R") || status.startsWith("C");
-    const path = tokens[index + (rename ? 1 : 0)];
-    index += rename ? 2 : 1;
-    if (path === undefined) {
-      return null;
+    const letter = status.slice(0, 1);
+    const paired = letter === "R" || letter === "C";
+    const from = tokens[index];
+    const path = tokens[index + (paired ? 1 : 0)];
+    index += paired ? 2 : 1;
+    if (path === undefined || path === "" || (paired && (from === undefined || from === ""))) {
+      continue;
     }
-    entries.push({ status: status.slice(0, 1), path });
+    entries.push(
+      paired && from !== undefined ? { status: letter, path, from } : { status: letter, path },
+    );
   }
   return entries;
+}
+
+/** git's status letter as the state a payload renders. */
+function stateFor(status: string): ChangeState {
+  switch (status) {
+    case "A":
+      return "added";
+    case "D":
+      return "deleted";
+    case "R":
+      return "renamed";
+    // A copy leaves its source in place, so only the destination is new: `added`, without a
+    // `from` a reader would mistake for a rename.
+    case "C":
+      return "added";
+    // `M`, `T` (type change), `U` (unmerged), `X` (unknown): different bytes at the same path.
+    default:
+      return "modified";
+  }
 }
 
 /**
@@ -322,6 +375,9 @@ async function changeSetFor(
   const changed = new Set<string>();
   const removed = new Set<string>();
   const unmatched = new Map<string, UnmatchedChange>();
+  // What git said about a path that reached `changed`: a rename keeps its source, so one entry can
+  // carry both halves once the hash comparison has had its say.
+  const gitState = new Map<string, ChangeEntry>();
 
   const classify = (path: string): boolean => indexed.has(path) || languageFor(path) !== null;
   const unclassified = (path: string, reason: UnmatchedReason): void => {
@@ -332,30 +388,37 @@ async function changeSetFor(
   const outcome = await gitNameStatus(root, base === "" ? "HEAD" : base, timeoutMs, options.env);
   let degradedReason: string | null = null;
   if (outcome.ok) {
-    const entries = parseNameStatus(outcome.stdout);
-    if (entries === null) {
-      degradedReason = "git diff --name-status -z produced output this build cannot parse";
-    } else {
-      for (const entry of entries) {
-        const path = repoRelative(root, entry.path);
-        if (path === null) {
-          continue;
-        }
-        if (entry.status === "D") {
-          if (classify(path)) {
-            removed.add(path);
-          } else {
-            unclassified(path, "no_file_row_and_unparseable_language");
-          }
-          continue;
-        }
-        // `M`, `A`, `T`, `U`, … all mean the working tree holds different bytes than `base`.
+    for (const entry of parseNameStatus(outcome.stdout)) {
+      const path = repoRelative(root, entry.path);
+      const from = entry.from === undefined ? undefined : repoRelative(root, entry.from);
+      // One half of a rename pair outside `repoRoot` makes the pair unattributable, so the record
+      // goes: a path outside the root is dropped and counted nowhere, not silently re-bucketed.
+      if (path === null || from === null) {
+        continue;
+      }
+      const state = stateFor(entry.status);
+      if (state === "deleted") {
         if (classify(path)) {
-          changed.add(path);
+          removed.add(path);
         } else {
           unclassified(path, "no_file_row_and_unparseable_language");
         }
+        continue;
       }
+      // `M`, `A`, `T`, `U`, … all mean the working tree holds different bytes than `base`, and a
+      // rename contributes its destination only: the source path is gone, so counting it too
+      // would double-count one change.
+      if (!classify(path)) {
+        unclassified(path, "no_file_row_and_unparseable_language");
+        continue;
+      }
+      changed.add(path);
+      // `from` belongs to a rename. A copy's source still exists, so its destination is a plain
+      // `added` entry and carrying the source would read as a rename downstream.
+      gitState.set(
+        path,
+        state === "renamed" && from !== undefined ? { state, path, from } : { state, path },
+      );
     }
   } else {
     degradedReason = outcome.failure;
@@ -392,9 +455,22 @@ async function changeSetFor(
   }
 
   const byPath = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
+
+  // Entries are derived from the two fields above, never the other way round, so a path cannot be
+  // in one and missing from the other. A path only the hash comparison found has no git letter:
+  // its bytes differ (`modified`) or its row outlived them (`deleted`).
+  const entries: ChangeEntry[] = [];
+  for (const path of changed) {
+    entries.push(gitState.get(path) ?? { state: "modified", path });
+  }
+  for (const path of removed) {
+    entries.push({ state: "deleted", path });
+  }
+
   return {
     changed: [...changed].sort(byPath),
     removed: [...removed].sort(byPath),
+    entries: entries.sort((a, b) => byPath(a.path, b.path)),
     unmatched: [...unmatched.values()].sort((a, b) => byPath(a.path, b.path)),
     degraded: degradedReason !== null,
     degradedReason,

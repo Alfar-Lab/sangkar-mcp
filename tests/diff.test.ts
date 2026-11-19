@@ -43,6 +43,11 @@ function remove(root: string, path: string): void {
   rmSync(join(root, path), { force: true });
 }
 
+/** The commit a change set is measured against. */
+function head(root: string): string {
+  return git(root, "rev-parse", "HEAD").trim();
+}
+
 function sha256(bytes: string): string {
   return new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
 }
@@ -158,6 +163,12 @@ describe("changedSince against a git fixture", () => {
     expect(result.unmatched).toEqual([
       { path: "README.md", reason: "no_file_row_and_unparseable_language" },
     ]);
+    // One entry per attributed path with its state; `README.md` is not attributed, so its only
+    // trace is `unmatched` above.
+    expect(result.entries).toEqual([
+      { state: "modified", path: "src/a.ts" },
+      { state: "deleted", path: "src/b.ts" },
+    ]);
     expect(result.degraded).toBe(false);
     expect(result.degradedReason).toBeNull();
 
@@ -200,6 +211,83 @@ describe("changedSince against a git fixture", () => {
 
     expect(result.removed).toEqual([]);
     expect(result.changed).toEqual(["src/a.ts"]);
+  });
+
+  test("a rename is one renamed entry with the source, and one changed path", async () => {
+    const root = makeGitRepo();
+    const base = head(root);
+    // The old path is indexed, which is the real case: its row outlives the bytes a rename moved.
+    const reader = openGraph(root, [{ path: "src/a.ts", language: "typescript", bytes: TS_A }]);
+    git(root, "mv", "src/a.ts", "src/c.ts");
+    commit(root, "rename a to c");
+
+    const result = await changedSince(root, base, reader);
+
+    // A rename no longer degrades the set, and it is not reported twice: `changed` holds only the
+    // destination, so a summary cannot count one move as two files.
+    expect(result.degraded).toBe(false);
+    expect(result.degradedReason).toBeNull();
+    expect(result.changed).toEqual(["src/c.ts"]);
+    expect(result.entries.filter((entry) => entry.state === "renamed")).toEqual([
+      { state: "renamed", path: "src/c.ts", from: "src/a.ts" },
+    ]);
+    // The stale row for the old path is the hash comparison's own finding, unchanged by this task:
+    // the bytes it describes are gone, so `removed` still names it and its entry is `deleted`.
+    expect(result.removed).toEqual(["src/a.ts"]);
+    expect(result.entries).toEqual([
+      { state: "deleted", path: "src/a.ts" },
+      { state: "renamed", path: "src/c.ts", from: "src/a.ts" },
+    ]);
+  });
+
+  test("a copied file is added, not a rename of its source", async () => {
+    const root = makeGitRepo();
+    const base = head(root);
+    const reader = openGraph(root, [
+      { path: "src/a.ts", language: "typescript", bytes: TS_A },
+      { path: "src/copy.ts", language: "typescript", bytes: TS_A },
+    ]);
+    write(root, "src/copy.ts", TS_A);
+    git(root, "add", "src/copy.ts");
+
+    const result = await changedSince(root, base, reader);
+
+    expect(result.degraded).toBe(false);
+    expect(result.changed).toEqual(["src/copy.ts"]);
+    expect(result.removed).toEqual([]);
+    // This build asks git for renames only, so a copy arrives as `A`; either way the source still
+    // exists and the destination is simply a new path, with no `from` to render.
+    expect(result.entries).toEqual([{ state: "added", path: "src/copy.ts" }]);
+  });
+
+  test("a copy record is added, and a malformed record is skipped instead of nulling the parse", async () => {
+    const root = tempDir("sangkar-diff-parse-");
+    const shim = join(root, "shim");
+    mkdirSync(shim, { recursive: true });
+    // Only a crafted stream can carry a `C` pair (git needs `-C` plus a modified source to emit
+    // one) or a truncated record without also making a real git fail: `C100\0from\0to\0M\0path\0M`
+    // is one copy, one modification, and one status with no path after it.
+    writeFileSync(
+      join(shim, "git"),
+      "#!/bin/sh\nprintf 'C100\\0src/from.ts\\0src/copy.ts\\0M\\0src/broken.ts\\0M'\n",
+      { mode: 0o755 },
+    );
+    write(root, "src/keep.ts", TS_A);
+    write(root, "src/copy.ts", TS_A);
+    write(root, "src/broken.ts", TS_A_CHANGED);
+    const reader = openGraph(root, [{ path: "src/keep.ts", language: "typescript", bytes: TS_A }]);
+
+    const result = await changedSince(root, "HEAD", reader, { env: { PATH: shim } });
+
+    // A `null` parse would have degraded the whole set to the hash comparison; the two readable
+    // records survive, and the truncated one is dropped on its own.
+    expect(result.degraded).toBe(false);
+    expect(result.degradedReason).toBeNull();
+    expect(result.changed).toEqual(["src/broken.ts", "src/copy.ts"]);
+    expect(result.entries).toEqual([
+      { state: "modified", path: "src/broken.ts" },
+      { state: "added", path: "src/copy.ts" },
+    ]);
   });
 
   test("a git invocation that exceeds the bound degrades instead of hanging", async () => {
@@ -279,6 +367,12 @@ describe("changedSince outside git", () => {
     expect(result.changed).toEqual(["a.ts"]);
     expect(result.removed).toEqual(["b.ts"]);
     expect(result.unmatched).toEqual([]);
+    // Entries are still populated without git: the hash comparison knows a digest difference from
+    // a missing path, which is all `modified` and `deleted` need.
+    expect(result.entries).toEqual([
+      { state: "modified", path: "a.ts" },
+      { state: "deleted", path: "b.ts" },
+    ]);
   });
 
   test("a file row that points outside the repo root is dropped, never reported", async () => {
@@ -294,6 +388,7 @@ describe("changedSince outside git", () => {
 
     expect(result.changed).toEqual([]);
     expect(result.removed).toEqual([]);
+    expect(result.entries).toEqual([]);
     expect(result.unmatched).toEqual([]);
   });
 

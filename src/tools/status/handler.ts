@@ -25,12 +25,18 @@
  * language that failed), so `sum(languages[].files) === file rows + not_indexed rows`. The counts
  * therefore come from `allFiles()` for the indexed side and from that identity for the skipped
  * side, and `sum(languages[].failed) === failed parses + skipped paths`, which the tests assert.
+ *
+ * `payload.unresolved` is the bucket breakdown of the flat `coverage.unresolved_edges` count, taken
+ * from the one row set that produced it: a census over different rows would let two numbers in the
+ * same answer describe two populations, so `total`, `sum(buckets)` and `unresolved_edges` are the
+ * same measurement read once.
  */
 import { createHash } from "node:crypto";
 import { statSync } from "node:fs";
 import { join } from "node:path";
 import { budgetFloorOf, emit } from "#shared/budget";
 import { checkFreshness, type Freshness, health, type ToolHealth } from "#shared/domain/freshness";
+import { bucketCensus, type UnresolvedBucket } from "#shared/domain/unresolved";
 import {
   bootstrapping,
   type Coverage,
@@ -86,11 +92,27 @@ export interface StatusPath {
   readonly reason?: string;
 }
 
+/**
+ * The `unresolved` census: the flat count with the reason each row never bound (#5 in
+ * `#shared/domain/unresolved.ts`). `material` is the part that could still be user-defined code.
+ */
+export interface StatusUnresolved {
+  readonly total: number;
+  readonly material: number;
+  readonly buckets: Readonly<Record<UnresolvedBucket, number>>;
+}
+
 /** The payload keys TOOLS-SPEC.md §2 documents, in that order. */
 export interface StatusPayload {
   readonly project: {
     readonly name: string | null;
     readonly root: string | null;
+    /**
+     * `null` when the store never recorded it: a graph published before this build wrote the two
+     * keys below, or a publish where git could not answer. `status` still answers.
+     */
+    readonly branch: string | null;
+    readonly remote: string | null;
     readonly commit: string | null;
     readonly db_path: string;
   };
@@ -100,6 +122,7 @@ export interface StatusPayload {
     readonly size_bytes: number;
     readonly db_path: string;
   };
+  readonly unresolved: StatusUnresolved;
   readonly languages: readonly StatusLanguage[];
   readonly paths: readonly StatusPath[];
   readonly health: ToolHealth;
@@ -137,7 +160,11 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
   const files = ctx.reader.allFiles();
   const rows = ctx.reader.rowsForPaths(requested);
   const census = ctx.reader.censusByLanguage();
-  const unresolved = ctx.reader.unresolvedForFiles(files.map((file) => file.id));
+  // One row set, read once: `coverage.unresolved_edges` and `payload.unresolved.total` are the same
+  // measurement, so the census can never contradict the count it explains.
+  const unresolvedRows = ctx.reader.unresolvedForFiles(files.map((file) => file.id));
+  const unresolvedCensus = bucketCensus(unresolvedRows);
+  const unresolvedTotal = unresolvedRows.length;
 
   const failed = files.filter((file) => file.parseStatus === "failed").length;
   const censusFiles = census.reduce((total, row) => total + row.files, 0);
@@ -150,7 +177,7 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
     indexed: files.length,
     skipped,
     failed,
-    unresolved_edges: unresolved.length,
+    unresolved_edges: unresolvedTotal,
     // Scope-limited by construction: `not_indexed` lists the skipped paths under the requested
     // paths, which is why the repo-wide `skipped` count can be larger than this list.
     not_indexed: rows.notIndexed.map((row) => ({ path: row.path, reason: row.reason })),
@@ -176,6 +203,10 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
     project: {
       name: meta.projectName,
       root: meta.projectRoot,
+      // A hand-written reader written before these keys existed answers without them; `?? null`
+      // keeps `undefined` out of the payload, where it would serialise as a missing key.
+      branch: meta.projectBranch ?? null,
+      remote: meta.projectRemote ?? null,
       commit: generationRow.baseCommit,
       db_path: dbPath,
     },
@@ -184,6 +215,11 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
       edges: generationRow.edges,
       size_bytes: dbSizeBytes(ctx, dbPath),
       db_path: dbPath,
+    },
+    unresolved: {
+      total: unresolvedTotal,
+      material: unresolvedCensus.material,
+      buckets: unresolvedCensus.buckets,
     },
     languages: languageEntries(census),
     paths: report.entries,

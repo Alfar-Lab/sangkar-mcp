@@ -3,8 +3,10 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BYTES_PER_TOKEN } from "#shared/budget";
+import { CliUsageError, parseArgs, parseCliArgs } from "#shared/cli/args";
 import { type AppConfig, loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
+import { CANDIDATE_CAP } from "#shared/domain/resolve";
 import type { Envelope } from "#shared/envelope";
 import { log } from "#shared/log";
 import { isUnderPrefix } from "#shared/paths";
@@ -19,9 +21,11 @@ import {
   type CoveragePayload,
   type ExpandArgs,
   type ExpandPayload,
+  type ExpandTotals,
   handle,
   type MembersPayload,
   type MissingPayload,
+  type OutlinePayload,
   type SourcePayload,
   TOOL_NAME,
 } from "../src/tools/expand/handler";
@@ -180,6 +184,7 @@ function makeFixture(): {
       parentId: NODE_WIDGET,
       startLine: 5,
       endLine: 8,
+      signature: "render(): void",
     }),
     nodeOf({
       id: NODE_DISPOSE,
@@ -189,6 +194,7 @@ function makeFixture(): {
       parentId: NODE_WIDGET,
       startLine: 10,
       endLine: 12,
+      signature: "dispose(): void",
     }),
     nodeOf({
       id: NODE_HELPER,
@@ -340,6 +346,87 @@ function helperNode(nodes: readonly NodeRow[]): NodeRow {
   return helper;
 }
 
+/** The two shapes `path` exists for: a tie wider than the cap, and a name colliding across dirs. */
+const MANY_NAME = "many";
+const MANY_COUNT = 7;
+const PICKED_NAME = "picked";
+const WIDGETS_PATH = `${FOLDER_PREFIX}/y.ts`;
+
+function manyNode(index: number): NodeRow {
+  const path = `src/many/m${index}.ts`;
+  return nodeOf({
+    id: 100 + index,
+    name: MANY_NAME,
+    qn: `${path}::${MANY_NAME}`,
+    kind: "function",
+    path,
+    fileId: FILE_FOLDER,
+    parentId: null,
+    startLine: 1,
+    endLine: 2,
+  });
+}
+
+/** One name declared in `src/a.ts` and again under the widgets folder, as a real repo would. */
+function pickedNodes(): NodeRow[] {
+  return [
+    nodeOf({
+      id: 200,
+      name: PICKED_NAME,
+      qn: `${A_PATH}::${PICKED_NAME}`,
+      kind: "function",
+      path: A_PATH,
+      parentId: null,
+      startLine: 37,
+      endLine: 38,
+    }),
+    nodeOf({
+      id: 201,
+      name: PICKED_NAME,
+      qn: `${WIDGETS_PATH}::${PICKED_NAME}`,
+      kind: "function",
+      path: WIDGETS_PATH,
+      fileId: FILE_FOLDER,
+      parentId: null,
+      startLine: 1,
+      endLine: 2,
+    }),
+  ];
+}
+
+/**
+ * The fixture's reader plus those extra nodes, reachable by name and by qn only — the two
+ * lookups resolution uses, so the filter is exercised through the real `#shared/domain/resolve`
+ * rather than through a stub that could disagree with it.
+ */
+function readerWithExtra(): GraphReader {
+  const fixture = makeFixture();
+  const extra = [
+    ...Array.from({ length: MANY_COUNT }, (_unused, index) => manyNode(index)),
+    ...pickedNodes(),
+  ];
+  return {
+    ...fixture.reader,
+    findByQn: (qn) => extra.find((node) => node.qn === qn) ?? fixture.reader.findByQn(qn),
+    findByName: (name, kinds) => {
+      const extraHits = extra.filter((node) => node.name === name);
+      return [...fixture.reader.findByName(name, kinds), ...extraHits].sort(byQn);
+    },
+  };
+}
+
+function usageErrorOf(run: () => unknown): CliUsageError {
+  try {
+    run();
+  } catch (e) {
+    if (e instanceof CliUsageError) {
+      return e;
+    }
+    throw e;
+  }
+  throw new Error("expected a CliUsageError");
+}
+
 function makeContext(reader: GraphReader, repoRootPath: string): ToolContext {
   const config: AppConfig = loadConfig({
     argv: ["--repo-root", repoRootPath],
@@ -351,8 +438,18 @@ function makeContext(reader: GraphReader, repoRootPath: string): ToolContext {
 
 function membersOf(env: Envelope<ExpandPayload | null>): MembersPayload {
   const payload = env.payload;
-  if (payload === null || !("members" in payload)) {
+  // Keyed on `what`, not on the presence of a list: an outline carries `members` too, and the two
+  // lists are different shapes on purpose.
+  if (payload === null || !("what" in payload) || payload.what !== "members") {
     throw new Error(`expected a members payload, got ${env.status}`);
+  }
+  return payload;
+}
+
+function outlineOf(env: Envelope<ExpandPayload | null>): OutlinePayload {
+  const payload = env.payload;
+  if (payload === null || !("what" in payload) || payload.what !== "outline") {
+    throw new Error(`expected an outline payload, got ${env.status}`);
   }
   return payload;
 }
@@ -398,10 +495,15 @@ describe("expand: manifest", () => {
     expect(manifest.description).toContain("says which it chose");
   });
 
-  test("declares exactly three arguments, one of them required, with the spec's budget default", () => {
-    expect(Object.keys(input)).toEqual(["target", "what", "budget"]);
+  test("declares exactly five arguments, one of them required, with the spec's budget default", () => {
+    expect(Object.keys(input)).toEqual(["target", "what", "path", "range", "budget"]);
     expect(input.target.required).toBe(true);
-    expect([...input.what.values]).toEqual(["members", "edges", "source", "coverage"]);
+    expect([...input.what.values]).toEqual(["members", "edges", "source", "coverage", "outline"]);
+    // The same prefix filter `trace` and `search` declare: same name, same type, no enum.
+    expect(input.path.type).toBe("string");
+    // A pair of lines, so the item type is the integer the handler clamps rather than text.
+    expect(input.range.type).toBe("array");
+    expect(input.range.items.type).toBe("integer");
     expect(input.budget.default).toBe(2500);
     expect(DEFAULT_BUDGET_TOKENS).toBe(2500);
     expect(TOOL_NAME).toBe("expand");
@@ -708,6 +810,13 @@ describe("expand: refusals", () => {
       [`${A_PATH}::Widget.dup`, `${A_PATH}::dup`].sort(),
     );
     expect(env.totals.candidates_total).toBe(2);
+    // A tie that fits under the cap shows every candidate, so the two counts agree and the
+    // payload says so in the same words the envelope's total does.
+    expect(payload.candidates_total).toBe(2);
+    expect((env.totals as ExpandTotals).candidates_shown).toBe(payload.candidates.length);
+    for (const candidate of payload.candidates) {
+      expect(candidate.next_call).toEqual({ tool: TOOL_NAME, target: candidate.qn });
+    }
   });
 
   test("an unpublished graph is bootstrapping, not not_found", async () => {
@@ -808,11 +917,272 @@ describe("expand: budget", () => {
   });
 });
 
+describe("expand: path filter and candidate continuity", () => {
+  let ctx: ToolContext;
+
+  beforeAll(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-path-"));
+    dirs.push(repoRoot);
+    aSha = sha256Of(A_SOURCE);
+    driftedIndexedSha = sha256Of("function drifted() {\n  return 1;\n}\n");
+    ctx = makeContext(readerWithExtra(), repoRoot);
+  });
+
+  afterAll(() => {
+    for (const dir of dirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a tie wider than the cap reports the tie's size and shows only the cap", async () => {
+    const env = await handle(ctx, { target: MANY_NAME });
+
+    expect(env.status).toBe("ambiguous");
+    const payload = ambiguousOf(env);
+    expect(payload.candidates_total).toBe(MANY_COUNT);
+    expect(payload.candidates_shown).toBe(CANDIDATE_CAP);
+    expect(payload.candidates).toHaveLength(CANDIDATE_CAP);
+    expect(payload.candidates_total).toBeGreaterThan(payload.candidates_shown);
+    // One tie, one pair of numbers: payload, totals and prose cannot disagree.
+    const totals = env.totals as ExpandTotals;
+    expect(totals.candidates_total).toBe(payload.candidates_total);
+    expect(totals.candidates_shown).toBe(payload.candidates_shown);
+    expect(totals.total_relation).toBe("gte");
+    for (const candidate of payload.candidates) {
+      expect(candidate.why).toContain(`of ${payload.candidates_total} candidates`);
+    }
+    expect(env.summary).toContain(`matches ${MANY_COUNT} nodes, showing ${CANDIDATE_CAP}`);
+  });
+
+  test("every shown candidate's next_call.target expands on its own", async () => {
+    const tie = ambiguousOf(await handle(ctx, { target: MANY_NAME }));
+
+    for (const candidate of tie.candidates) {
+      expect(candidate.next_call.tool).toBe(TOOL_NAME);
+      expect(candidate.next_call.target).toBe(candidate.qn);
+      const env = await handle(ctx, { target: candidate.next_call.target });
+      expect(env.status).toBe("ok");
+      const published = env.payload;
+      if (published === null || !("what" in published)) {
+        throw new Error(`expected an answer body, got ${env.status}`);
+      }
+      expect(published.target.qn).toBe(candidate.qn);
+      expect(published.target.id).toBe(candidate.id);
+    }
+  });
+
+  test("path narrows a cross-directory tie to one node and answers ok", async () => {
+    const wide = await handle(ctx, { target: PICKED_NAME });
+
+    expect(wide.status).toBe("ambiguous");
+    const tie = ambiguousOf(wide);
+    expect(tie.candidates_total).toBe(2);
+    expect(tie.candidates_shown).toBe(2);
+
+    const narrow = await handle(ctx, { target: PICKED_NAME, path: FOLDER_PREFIX });
+    expect(narrow.status).toBe("ok");
+    const payload = narrow.payload;
+    if (payload === null || !("what" in payload)) {
+      throw new Error(`expected an answer body, got ${narrow.status}`);
+    }
+    expect(payload.target.qn).toBe(`${WIDGETS_PATH}::${PICKED_NAME}`);
+    // The filter narrows the candidate set; it never changes how `what` is inferred.
+    expect(payload.what).toBe("edges");
+    expect(payload.why).toBe("inferred: function -> edges");
+  });
+
+  test("path outside every candidate is not_found rather than an unfiltered guess", async () => {
+    const env = await handle(ctx, { target: PICKED_NAME, path: "src/nothing-here" });
+
+    expect(env.status).toBe("not_found");
+    expect(missingOf(env).why).toBe("nothing in the index matches the target");
+  });
+});
+
+describe("expand: the range argument through the argument layer", () => {
+  test("a from:to token becomes the pair the manifest declares", () => {
+    // The shell spelling of `[from, to]`: one token, two integers, one array. Reading it as a
+    // single string would refuse the only form a CLI caller would ever write.
+    expect(
+      parseCliArgs("expand", input, ["AGENTS.md", "--what", "source", "--range", "1:5"]).range,
+    ).toEqual([1, 5]);
+    // Repeats are the same array, so both spellings reach the handler identically.
+    expect(parseCliArgs("expand", input, ["t", "--range", "1", "--range", "5"]).range).toEqual([
+      1, 5,
+    ]);
+  });
+
+  test("a protocol call may send the items as numbers or as the published strings", () => {
+    // `inputSchema` is generated from this same table and describes array items as strings, so
+    // both spellings are read in the declared item type rather than only the JSON number.
+    expect(parseArgs("expand", input, { target: "t", range: [1, 5] }).range).toEqual([1, 5]);
+    expect(parseArgs("expand", input, { target: "t", range: ["1", "5"] }).range).toEqual([1, 5]);
+  });
+
+  test("an item that is not an integer is refused with the schema's own message", () => {
+    const refusal = usageErrorOf(() => parseCliArgs("expand", input, ["t", "--range", "1:five"]));
+    expect(refusal.message).toBe('expand received an invalid "range" argument');
+    expect(refusal.usage).toContain("--range <array>");
+  });
+});
+
+describe("expand: source range and outline", () => {
+  let ctx: ToolContext;
+
+  beforeAll(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-range-"));
+    dirs.push(repoRoot);
+    mkdirSync(join(repoRoot, "src"), { recursive: true });
+    aSha = sha256Of(A_SOURCE);
+    // The bytes on disk match the indexed sha here, so a window is served rather than drift.
+    driftedIndexedSha = sha256Of("function drifted() {\n  return 1;\n}\n");
+    writeFileSync(join(repoRoot, A_PATH), A_SOURCE, "utf8");
+    writeFileSync(join(repoRoot, DRIFTED_PATH), DRIFTED_NOW, "utf8");
+    ctx = makeContext(makeFixture().reader, repoRoot);
+  });
+
+  afterAll(() => {
+    for (const dir of dirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("a range inside the node returns exactly those lines", async () => {
+    const env = await handle(ctx, {
+      target: `${A_PATH}::Widget.render`,
+      what: "source",
+      range: [6, 7],
+    });
+
+    expect(env.status).toBe("ok");
+    const payload = sourceOf(env);
+    // One effective window: the requested pair, because it sits inside the node's 5-8.
+    expect(payload.window).toEqual([6, 7]);
+    expect(payload.content?.map((line) => line.line)).toEqual([6, 7]);
+    expect(at(payload.content ?? [], 0).text).toBe("const v6 = 6;");
+    // Nothing was clamped, so `why` is the plain disclosure it was before the range existed.
+    expect(payload.why).toBe("requested: source");
+    expect(env.totals.lines_total).toBe(2);
+    expect(env.summary).toBe(`lines 6-7 of ${A_PATH}.`);
+  });
+
+  test("a range crossing the node's boundary is clamped and why says so", async () => {
+    const env = await handle(ctx, {
+      target: `${A_PATH}::Widget.render`,
+      what: "source",
+      range: [2, 30],
+    });
+
+    expect(env.status).toBe("ok");
+    const payload = sourceOf(env);
+    expect(payload.window).toEqual([5, 8]);
+    expect(payload.content?.map((line) => line.line)).toEqual([5, 6, 7, 8]);
+    expect(payload.why).toBe("requested: source; range 2-30 clamped to the node's extent 5-8");
+    expect(env.totals.lines_total).toBe(4);
+  });
+
+  test("a range entirely outside the node clamps to its nearest line instead of failing", async () => {
+    const env = await handle(ctx, {
+      target: `${A_PATH}::Widget.render`,
+      what: "source",
+      range: [100, 200],
+    });
+
+    expect(env.status).toBe("ok");
+    const payload = sourceOf(env);
+    expect(payload.window).toEqual([8, 8]);
+    expect(payload.content?.map((line) => line.text)).toEqual(["const v8 = 8;"]);
+    expect(payload.why).toBe("requested: source; range 100-200 clamped to the node's extent 5-8");
+  });
+
+  test("an inverted range yields an empty window without throwing", async () => {
+    const env = await handle(ctx, {
+      target: `${A_PATH}::Widget.render`,
+      what: "source",
+      range: [8, 5],
+    });
+
+    expect(env.status).toBe("ok");
+    const payload = sourceOf(env);
+    expect(payload.source_drift).toBe(false);
+    // An empty list, not null: null is reserved for "the bytes could not be trusted".
+    expect(payload.content).toEqual([]);
+    expect(payload.window).toEqual([8, 5]);
+    expect(payload.why).toBe("requested: source; range 8-5 is inverted, so no lines were selected");
+    expect(env.totals.lines_total).toBe(0);
+    expect(env.summary).toBe(`no lines of ${A_PATH} in 8-5.`);
+  });
+
+  test("outline lists a class's members in source order with signature and lines", async () => {
+    const env = await handle(ctx, { target: `${A_PATH}::Widget`, what: "outline" });
+
+    expect(env.status).toBe("ok");
+    const payload = outlineOf(env);
+    expect(payload.what).toBe("outline");
+    expect(payload.why).toBe("requested: outline");
+    expect(payload.path).toBe(A_PATH);
+    expect(payload.target).toEqual({
+      id: NODE_WIDGET,
+      qn: `${A_PATH}::Widget`,
+      kind: "class",
+      lines: [3, 20],
+    });
+    expect(payload.members).toEqual([
+      {
+        qn: `${A_PATH}::Widget.render`,
+        kind: "method",
+        lines: [5, 8],
+        signature: "render(): void",
+      },
+      {
+        qn: `${A_PATH}::Widget.dispose`,
+        kind: "method",
+        lines: [10, 12],
+        signature: "dispose(): void",
+      },
+      // `dup` carries no signature in the fixture, so the field is null rather than invented.
+      { qn: `${A_PATH}::Widget.dup`, kind: "method", lines: [14, 16], signature: null },
+    ]);
+    expect(env.totals.members_total).toBe(3);
+    expect(env.summary).toBe(`outline of ${A_PATH}::Widget: 3.`);
+  });
+
+  test("outline of a file lists every node it holds and never itself", async () => {
+    const env = await handle(ctx, { target: A_PATH, what: "outline" });
+
+    expect(env.status).toBe("ok");
+    const payload = outlineOf(env);
+    // Source order over `nodesByFile`, the class's methods included: a flat table of contents.
+    expect(payload.members.map((member) => member.qn)).toEqual([
+      `${A_PATH}::Widget`,
+      `${A_PATH}::Widget.render`,
+      `${A_PATH}::Widget.dispose`,
+      `${A_PATH}::Widget.dup`,
+      `${A_PATH}::helper`,
+      `${A_PATH}::dup`,
+    ]);
+    expect(payload.members.map((member) => member.lines[0])).toEqual([3, 5, 10, 14, 25, 33]);
+    // The file's own row is the target, not one of its members.
+    expect(payload.members.some((member) => member.qn === `${A_PATH}::a.ts`)).toBe(false);
+    expect(env.totals.members_total).toBe(6);
+  });
+});
+
 describe("expand: typed arguments", () => {
-  test("ExpandArgs accepts the three declared fields and nothing more", () => {
-    const args: ExpandArgs = { target: "src/a.ts::Widget", what: "members", budget: 100 };
-    expect(Object.keys(args)).toEqual(["target", "what", "budget"]);
+  test("ExpandArgs accepts the five declared fields and nothing more", () => {
+    const args: ExpandArgs = {
+      target: "src/a.ts::Widget",
+      what: "members",
+      path: "src",
+      range: [5, 8],
+      budget: 100,
+    };
+    expect(Object.keys(args)).toEqual(["target", "what", "path", "range", "budget"]);
     const bare: ExpandArgs = { target: "src/a.ts" };
     expect(bare.what).toBeUndefined();
+    // Unused means absent, not "": the prefix is applied only when the caller asked for one.
+    expect(bare.path).toBeUndefined();
+    // A pair that was never asked for is absent too, so `source` reads the whole node extent.
+    expect(bare.range).toBeUndefined();
   });
 });

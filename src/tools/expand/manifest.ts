@@ -6,10 +6,18 @@
  * handler keeps with `payload.what` and `payload.why`. A paraphrase here would be a different
  * contract from the one the spec argues for.
  *
- * Three arguments are the whole surface, and that smallness is the point: `expand` is the one
+ * Five arguments are the whole surface, and that smallness is the point: `expand` is the one
  * address for detail, which is what lets the other six tools ship summaries instead of
- * `detail_level` and per-item flags (DESIGN.md §7). `budget` defaults higher than `summary`'s
- * because detail is by definition the expensive part.
+ * `detail_level` and per-item flags (DESIGN.md §7). `path` is the same prefix filter `trace` and
+ * `search` take, because "the `Widget` under `tests/`" is a handle collision an agent can already
+ * meet and has no other way to express. `budget` defaults higher than `summary`'s because detail
+ * is by definition the expensive part.
+ *
+ * `range` exists because a source view is priced in lines: a caller that already knows which
+ * lines of the node matter should not pay for the rest, and the tool should not have to grow a
+ * second window argument beside it. It is a pair — `[from, to]`, 1-based and inclusive — and it
+ * narrows `what: "source"` only. The handler clamps it into the node's own extent and says so in
+ * `why`; an offset outside the node is a request that cannot be honoured, not a bad call.
  */
 
 export const manifest = {
@@ -34,6 +42,8 @@ export const DEFAULT_BUDGET_TOKENS = 2500;
  */
 export const input = {
   target: { type: "string", required: true },
-  what: { type: "enum", values: ["members", "edges", "source", "coverage"] },
+  what: { type: "enum", values: ["members", "edges", "source", "coverage", "outline"] },
+  path: { type: "string" },
+  range: { type: "array", items: { type: "integer" } },
   budget: { type: "integer", default: DEFAULT_BUDGET_TOKENS },
 } as const;

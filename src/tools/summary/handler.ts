@@ -21,9 +21,15 @@
  * is exact while the paged list is the list being cut (it leads and is the largest).
  */
 import { budgetFloorOf, emit } from "#shared/budget";
-import { assemble, type CoverageSource } from "#shared/domain/coverage";
-import { type ChangeSet, changedSinceFrom } from "#shared/domain/diff";
+import { assemble, type CoverageAssembly, type CoverageSource } from "#shared/domain/coverage";
+import {
+  type ChangeEntry,
+  type ChangeSet,
+  type ChangeState,
+  changedSinceFrom,
+} from "#shared/domain/diff";
 import { type ChangedFacts, type ImpactedFacts, score } from "#shared/domain/risk";
+import { bucketCensus, type UnresolvedBucket } from "#shared/domain/unresolved";
 import {
   bootstrapping,
   type Coverage,
@@ -57,9 +63,9 @@ export interface SummaryArgs {
 }
 
 /**
- * `change` is the diff's letter-free view: `ChangeSet` keeps what changed and what is gone, not
- * git's `A`/`M` status, and a symbol this tool can name belongs to a file the index has a row for.
- * So a shown symbol is "modified"; inventing "added" from line numbers would be a guess.
+ * A symbol's `change` is the letter-free view: `ChangeSet` says whether a *path* was modified, added,
+ * deleted or renamed, and a symbol this tool can name belongs to a file the index has a row for — so
+ * the symbol is "modified". Inventing "added" from line numbers would be a guess.
  */
 export const SYMBOL_CHANGE_MODIFIED = "modified";
 
@@ -95,14 +101,45 @@ export interface RiskPayload {
   readonly drivers: string[];
 }
 
+/**
+ * The scope's unresolved call sites, explained instead of totalled (#5): a flat count tells an
+ * agent that an absence answer is a caveat, and nothing about which part of it to go and fix.
+ *
+ * `total` is copied from `coverage.unresolved_edges` — the same rows, counted once — and
+ * `material` is the narrower population that could still be user-defined code, which is the only
+ * part an absence claim has to answer for. `buckets` is `UNRESOLVED_BUCKETS` in its declared
+ * order, so every answer carries the whole taxonomy, zeros included.
+ */
+export interface UnresolvedCensus {
+  readonly total: number;
+  readonly material: number;
+  readonly buckets: Readonly<Record<UnresolvedBucket, number>>;
+}
+
+/**
+ * One path of the change set, labelled with what happened to it (`TOOLS-SPEC.md` §4). `state` and
+ * `from` come from the diff's typed entries instead of git's letter, because a rename is one fact
+ * with two paths and a deletion is still part of the change a reviewer has to read.
+ */
+export interface ChangedFileRow {
+  readonly path: string;
+  readonly state: ChangeState;
+  /** The path a rename came from; absent for every other state. */
+  readonly from?: string;
+  /** Declarations the graph holds for this path; 0 for a deleted path, whose symbols are gone. */
+  readonly symbols: number;
+  readonly entry_point: boolean;
+}
+
 export interface ChangePayload {
   readonly base: string;
-  readonly changed_files: string[];
+  readonly changed_files: readonly ChangedFileRow[];
   readonly changed_symbols: ChangedSymbol[];
   readonly risk: RiskPayload;
   readonly test_gaps: TestGap[];
   readonly removed_symbols: RemovedSymbol[];
   readonly suggested_next: SuggestedNext[];
+  readonly unresolved: UnresolvedCensus;
 }
 
 export interface RepoPayload {
@@ -116,6 +153,7 @@ export interface RepoPayload {
   readonly coupling_hotspots: { readonly qn: string; readonly in: number; readonly out: number }[];
   readonly flows: { readonly name: string; readonly steps: number; readonly files: number }[];
   readonly not_indexed: { readonly path: string; readonly reason: string }[];
+  readonly unresolved: UnresolvedCensus;
 }
 
 export interface AreaPayload {
@@ -296,6 +334,35 @@ function symbolRisk(node: NodeRow, metrics: NodeMetrics | null, untested: boolea
   return score(changed, impacted).score;
 }
 
+/**
+ * The census of the rows `assemble` already returned, never a second look at the unresolved table:
+ * `total` is the coverage count of that same array, so the two fields are one number and cannot
+ * drift. A scope that measured nothing reports zeros, because a missing key would read as "no
+ * caveat" — the opposite of what an empty answer means.
+ */
+function censusOf(assembly: CoverageAssembly): UnresolvedCensus {
+  const { buckets, material } = bucketCensus(assembly.unresolved);
+  return { total: assembly.coverage.unresolved_edges, material, buckets };
+}
+
+/**
+ * A rename arrives as two entries, not one: `ChangeSet.entries` is derived from `changed ∪ removed`,
+ * and the two halves come from different sources — the git half owns the destination and its `from`,
+ * the hash comparison owns the source path once its bytes are gone. Rendering both would report one
+ * move as two changed files, so the `deleted` half of a pair is dropped here: the `renamed` entry
+ * already carries the fact, `from` included. Each tool needs its own copy of this two-line rule
+ * because tools may not import each other (`tool-isolation`).
+ */
+function collapseRenames(entries: readonly ChangeEntry[]): ChangeEntry[] {
+  const renamedFrom = new Set<string>();
+  for (const entry of entries) {
+    if (entry.state === "renamed" && entry.from !== undefined) {
+      renamedFrom.add(entry.from);
+    }
+  }
+  return entries.filter((entry) => !(entry.state === "deleted" && renamedFrom.has(entry.path)));
+}
+
 /** `reachable_count` is the whole component; the file set is only measured at the first call hop. */
 function firstHopFiles(ctx: ToolContext, nodeId: number): number {
   const files = new Set<string>();
@@ -312,14 +379,20 @@ function buildChange(
   base: string,
   start: number,
   relation: TotalRelation,
+  census: UnresolvedCensus,
 ): Built {
-  const changedPaths = [...changes.changed];
+  const entries = collapseRenames(changes.entries);
 
   // A changed path with no `file` row is a new (or unparseable) file: it belongs to
-  // `changed_files`, which is where an agent looks for it, but it has no symbols to rank.
+  // `changed_files`, which is where an agent looks for it, but it has no symbols to rank. A deleted
+  // path is skipped entirely: its bytes are gone, so the nodes the graph still holds for it are
+  // history rather than a change to review, and `symbols: 0` is the honest count.
   const nodes: NodeRow[] = [];
-  for (const path of changedPaths) {
-    const file = ctx.reader.fileByPath(path);
+  for (const entry of entries) {
+    if (entry.state === "deleted") {
+      continue;
+    }
+    const file = ctx.reader.fileByPath(entry.path);
     if (file === null) {
       continue;
     }
@@ -330,6 +403,26 @@ function buildChange(
   for (const node of nodes) {
     metrics.set(node.id, ctx.reader.metricsFor(node.id));
   }
+
+  // Per-file counts from the rows already collected: one walk over `nodes`, no extra read, and a
+  // path the graph cannot explain (a new file, a deletion) reports 0 rather than disappearing.
+  const perFile = new Map<string, { symbols: number; entryPoint: boolean }>();
+  for (const node of nodes) {
+    const counts = perFile.get(node.path) ?? { symbols: 0, entryPoint: false };
+    counts.symbols += 1;
+    if (metrics.get(node.id)?.isEntry === true) {
+      counts.entryPoint = true;
+    }
+    perFile.set(node.path, counts);
+  }
+
+  const changedFiles: ChangedFileRow[] = entries.map((entry) => ({
+    path: entry.path,
+    state: entry.state,
+    ...(entry.from === undefined ? {} : { from: entry.from }),
+    symbols: perFile.get(entry.path)?.symbols ?? 0,
+    entry_point: perFile.get(entry.path)?.entryPoint ?? false,
+  }));
 
   const gaps = ctx.reader.testGaps(nodes.map((node) => node.id));
   const gapIds = new Set(gaps.map((gap) => gap.id));
@@ -373,7 +466,8 @@ function buildChange(
 
   const changedFacts: ChangedFacts = {
     symbols: nodes.length,
-    files: changedPaths.length,
+    // The collapsed entry count: one rename is one changed file, not a rename plus a deletion.
+    files: entries.length,
     entryPoints: nodes.filter((node) => metrics.get(node.id)?.isEntry === true).length,
     untested: gaps.length,
     removed: removed.filter((row) => row.had_callers).length,
@@ -421,8 +515,11 @@ function buildChange(
 
   // `changed_symbols` is the paged list: it is the ranking, and it is the largest array, so a
   // budget cut takes its tail and the next position addresses exactly what was not delivered.
+  // An empty change set is not a tested one: the coverage sentence is gated on there being
+  // something to assess, and the total says "not applicable" rather than "zero gaps".
+  const assessable = nodes.length > 0;
   const summaryParts = [
-    `${changedPaths.length} files changed, ${nodes.length} symbols touched, risk ${risk.score} (${risk.band}).`,
+    `${entries.length} files changed, ${nodes.length} symbols touched, risk ${risk.score} (${risk.band}).`,
   ];
   summaryParts.push(
     topQn === null
@@ -430,19 +527,22 @@ function buildChange(
       : `Top impact: ${topQn} (${dependents} dependents).`,
   );
   summaryParts.push(
-    testGaps.length === 0
-      ? "every changed symbol has a test within the tested-depth limit."
-      : `${testGaps.length} untested changes.`,
+    !assessable
+      ? "no changed symbols to assess."
+      : testGaps.length === 0
+        ? "every changed symbol has a test within the tested-depth limit."
+        : `${testGaps.length} untested changes.`,
   );
 
   const payload: ChangePayload = {
     base,
-    changed_files: changedPaths,
+    changed_files: changedFiles,
     changed_symbols: sliceFrom(symbols, start),
     risk: { score: risk.score, band: risk.band, drivers: [...risk.drivers] },
     test_gaps: testGaps,
     removed_symbols: removed,
     suggested_next: suggestedNext,
+    unresolved: census,
   };
 
   return {
@@ -450,11 +550,13 @@ function buildChange(
     summary: summaryParts.join(" "),
     totals: {
       total_relation: relation,
-      changed_files_total: changedPaths.length,
+      // Entries, so a rename is counted once: the list and its total mean the same thing.
+      changed_files_total: entries.length,
       changed_symbols_total: nodes.length,
-      test_gaps_total: testGaps.length,
+      test_gaps_total: assessable ? testGaps.length : null,
       removed_symbols_total: removed.length,
       impacted_total: dependents,
+      unresolved_material: census.material,
     },
     nextTools: CHANGE_NEXT_TOOLS,
     pagedLength: symbols.length,
@@ -468,6 +570,7 @@ function buildRepo(
   rows: PathCoverage,
   start: number,
   relation: TotalRelation,
+  census: UnresolvedCensus,
 ): Built {
   const languages = ctx.reader
     .censusByLanguage()
@@ -525,6 +628,7 @@ function buildRepo(
     coupling_hotspots: hotspots,
     flows,
     not_indexed: sliceFrom(notIndexed, start),
+    unresolved: census,
   };
 
   return {
@@ -539,6 +643,7 @@ function buildRepo(
       coupling_hotspots_total: hotspots.length,
       flows_total: flows.length,
       not_indexed_total: notIndexed.length,
+      unresolved_material: census.material,
     },
     nextTools: REPO_NEXT_TOOLS,
     pagedLength: notIndexed.length,
@@ -552,6 +657,7 @@ function buildArea(
   rows: PathCoverage,
   start: number,
   relation: TotalRelation,
+  census: UnresolvedCensus,
 ): Built {
   // The surface is the declarations a reader of this area sees first; a member is reached through
   // its parent, which is what `expand(what="members")` is for. Source order inside a file, files
@@ -617,7 +723,12 @@ function buildArea(
     summary:
       `${label}: ${surface.length} symbols in ${rows.indexed.length} files. ` +
       `${dependentsTotal} dependents. risk ${risk.score} (${risk.band}).`,
-    totals: { total_relation: relation, surface_total: surface.length },
+    totals: {
+      total_relation: relation,
+      surface_total: surface.length,
+      // The area's own census, not the repository's: the count is scoped like its coverage.
+      unresolved_material: census.material,
+    },
     nextTools: AREA_NEXT_TOOLS,
     pagedLength: surface.length,
     itemCapped: false,
@@ -717,12 +828,16 @@ export async function handle(
     stale: freshness.stale,
   });
 
+  // One census per answer, taken from the rows `assemble` returned for this scope. `area` reports
+  // it through `totals` and `coverage` alone: its payload is one path's surface.
+  const census = censusOf(assembly);
+
   const built =
     scope === "repo"
-      ? buildRepo(ctx, generation, rows, start, assembly.relation)
+      ? buildRepo(ctx, generation, rows, start, assembly.relation, census)
       : scope === "area"
-        ? buildArea(ctx, target, rows, start, assembly.relation)
-        : buildChange(ctx, changes, generationId, base, start, assembly.relation);
+        ? buildArea(ctx, target, rows, start, assembly.relation, census)
+        : buildChange(ctx, changes, generationId, base, start, assembly.relation, census);
 
   const env = ok(built.payload, {
     summary: built.summary,
