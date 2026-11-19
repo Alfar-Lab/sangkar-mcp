@@ -14,7 +14,7 @@ cannot run it.
 bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
 ```
 
-`0.1.0-beta.1` publishes under the `beta` tag. Pin it explicitly — `latest` on the registry is a
+`0.1.0-beta.2` publishes under the `beta` tag. Pin it explicitly — `latest` on the registry is a
 moving target: when npm first claimed this name it created a `0.0.0-stage` holding version that took
 `latest`, and the real version took it over on publish, so an untagged install happens to get the
 prerelease today. That is a property of the registry's staged-publish flow, not of this package, and
@@ -262,7 +262,7 @@ Two traps, both hit on 2026-11-18 and both proven with `npm publish --dry-run`:
 
 - **`--tag beta` is not optional.** `publishConfig.tag` is *ignored* by npm 11 (it only suppresses
 the "you must specify a tag" guard for prereleases): without the flag on the command line the
-publish goes to `latest` anyway, which is the one tag a `0.1.0-beta.1` must never take.
+publish goes to `latest` anyway, which is the one tag a `0.1.0-beta.2` must never take.
 - **The `bin` warning is cosmetic.** npm prints
 `bin[sangkar] script name bin/sangkar.ts was invalid and removed` when it rewrites the field to
 strip a leading `./`; the entry survives as `bin/sangkar.ts`. `npm pkg fix` shows the same result,

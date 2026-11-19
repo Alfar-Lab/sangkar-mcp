@@ -167,7 +167,7 @@ const CALL_RECORD_LINE = JSON.stringify({
   stale_reason: null,
   generation_age_ms: null,
   result_counts: {},
-  server_version: "0.1.0-beta.1",
+  server_version: "0.1.0-beta.2",
   bun_version: "1.4.4",
   os: "linux",
   arch: "x64",
