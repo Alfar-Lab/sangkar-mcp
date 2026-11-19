@@ -38,7 +38,7 @@
       ],
       "details": {
         "goal": "One pure classifier turns an unresolved row into a bucket, plus a census that sums the buckets and counts the rows that could still be a user-defined caller.",
-        "contract": "Exact shape to honour (new files only; import UnresolvedRef as a type from #shared/store/read/coverage):\n\nexport const UNRESOLVED_BUCKETS = [\"builtin_stdlib\",\"external_package\",\"internal_module\",\"dynamic_property_call\",\"receiver_type_unknown\",\"ambiguous\"] as const;\nexport type UnresolvedBucket = (typeof UNRESOLVED_BUCKETS)[number];\n\nexport const BUILTIN_RECEIVERS: ReadonlySet<string>;\nexport const BUILTIN_MEMBERS: ReadonlySet<string>;\n\nexport function bucketOf(row: UnresolvedRef): UnresolvedBucket;\nexport function bucketCensus(rows: readonly UnresolvedRef[]): { readonly buckets: Readonly<Record<UnresolvedBucket, number>>; readonly material: number };\n\nClassification rules, in order:\n1. evidence starts with \"import:\": the target after the prefix. Starts with \"./\" or \"../\" or \"#\" -> internal_module. Starts with \"node:\" or \"bun:\" or names a node/bun builtin -> builtin_stdlib. Anything else -> external_package.\n2. evidenceKind === \"ambiguous\" -> ambiguous (whatever the evidence says).\n3. evidence starts with \"call:\": split raw_target at the LAST dot into receiver and member (no dot -> receiver \"\", member = raw_target). Receiver in BUILTIN_RECEIVERS -> builtin_stdlib. Else member in BUILTIN_MEMBERS -> builtin_stdlib. Else evidenceKind === \"dynamic\" -> dynamic_property_call. Else -> receiver_type_unknown.\n4. Everything else (\"inherits\", a bare \"call\"/\"import\" with no colon) -> receiver_type_unknown.\n\nmaterial = buckets.ambiguous + buckets.receiver_type_unknown. dynamic_property_call is non-material by construction: the extractor records a call as dynamic exactly when no declared target exists.\n\nBUILTIN_RECEIVERS seed: Array, Object, Map, Set, Promise, Date, JSON, Math, String, Number, Boolean, RegExp, Error, console, fs, path, os, process, Buffer, URLSearchParams. BUILTIN_MEMBERS seed: push, pop, shift, unshift, splice, slice, join, map, filter, reduce, forEach, find, includes, indexOf, split, trim, toLowerCase, toUpperCase, toISOString, keys, values, entries, has, get, set, add, delete, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, isDirectory, isFile, resolve, dirname, join, basename. Both are data with a comment stating they are a recall trade-off, not a truth.\n\nNever import from src/tools or src/indexer (shared-isolation).",
+        "contract": "Exact shape to honour (new files only; import UnresolvedRef as a type from #shared/store/read/coverage):\n\nexport const UNRESOLVED_BUCKETS = [\"builtin_stdlib\",\"external_package\",\"internal_module\",\"dynamic_property_call\",\"receiver_type_unknown\",\"ambiguous\"] as const;\nexport type UnresolvedBucket = (typeof UNRESOLVED_BUCKETS)[number];\n\nexport const BUILTIN_RECEIVERS: ReadonlySet<string>;\nexport const BUILTIN_MEMBERS: ReadonlySet<string>;\n\nexport function bucketOf(row: UnresolvedRef): UnresolvedBucket;\nexport function bucketCensus(rows: readonly UnresolvedRef[]): { readonly buckets: Readonly<Record<UnresolvedBucket, number>>; readonly material: number };\n\nBucket rules, in order:\n1. evidence starts with \"import:\": take the SPECIFIER — the text after the prefix up to the first space, because issue #12 appends competing candidates after a space (\"import:./x.js candidates: a.ts | b.ts\"). Starts with \"./\" or \"../\" or \"#\" -> internal_module. Starts with \"node:\" or \"bun:\" or names a node/bun builtin -> builtin_stdlib. Anything else -> external_package. This rule runs FIRST, deliberately: a bucket names what the specifier is, so a #12 evidence suffix or a changed evidence_kind can never move an import into a different bucket.\n2. evidenceKind === \"ambiguous\" -> ambiguous (whatever the evidence says).\n3. evidence starts with \"call:\": split raw_target at the LAST dot into receiver and member (no dot -> receiver \"\", member = raw_target). Receiver in BUILTIN_RECEIVERS -> builtin_stdlib. Else member in BUILTIN_MEMBERS -> builtin_stdlib. Else evidenceKind === \"dynamic\" -> dynamic_property_call. Else -> receiver_type_unknown.\n4. Everything else (\"inherits\", a bare \"call\"/\"import\" with no colon) -> receiver_type_unknown.\n\nmaterial is computed from its own predicate, NOT from the bucket name:\n  material = count of rows where evidenceKind === \"ambiguous\" OR bucketOf(row) === \"receiver_type_unknown\"\nRationale: material answers \"could a user-defined symbol be the real target?\". TASK-017 makes a relative-import tie record evidence_kind \"ambiguous\", so those rows become material automatically through this predicate; a \"missing_module\" row is a broken import, not a hidden caller, and stays non-material.\n\nBUILTIN_RECEIVERS seed: Array, Object, Map, Set, Promise, Date, JSON, Math, String, Number, Boolean, RegExp, Error, console, fs, path, os, process, Buffer, URLSearchParams. BUILTIN_MEMBERS seed: push, pop, shift, unshift, splice, slice, join, map, filter, reduce, forEach, find, includes, indexOf, split, trim, toLowerCase, toUpperCase, toISOString, keys, values, entries, has, get, set, add, delete, existsSync, readdirSync, readFileSync, writeFileSync, mkdirSync, statSync, isDirectory, isFile, resolve, dirname, join, basename. Both are data with a comment stating they are a recall trade-off, not a truth.\n\nThe tests must assert the interaction with TASK-017: an import row whose evidence carries a \" candidates: \" suffix still buckets as internal_module, and an import row with evidenceKind \"ambiguous\" buckets as internal_module yet counts as material.\n\nNever import from src/tools or src/indexer (shared-isolation).",
         "steps": [
           "Create src/shared/domain/unresolved.ts with the bucket union, both allowlists and the two functions.",
           "Create tests/unresolved.test.ts covering one row per bucket and the ordering rules (ambiguous wins over evidence; allowlisted member wins over dynamic).",
@@ -126,10 +126,41 @@
         "TASK-001",
         "TASK-002",
         "TASK-005",
-        "TASK-006"
+        "TASK-006",
+        "TASK-017"
       ],
       "size": "S",
       "title": "Phase 0 gate",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Write-side import taxonomy (issue #12). Today src/indexer/resolve.ts:358 records every failed import as \"dynamic\", and moduleFile returns null for both \"no candidate\" and \"many candidates\".\n\nNew API on SymbolIndex:\n  moduleCandidates(module: string): readonly string[]\n  - sorted repo-relative paths\n  - [] when nothing matched, exactly one path when resolved, two or more when a stem tie exists\n  - moduleFile must be re-expressed over it (length === 1 ? that path : null) so the two can never disagree\n\nBindEvidenceKind becomes [\"receiver_type_unknown\", \"ambiguous\", \"dynamic\", \"missing_module\"].\n\nIn the \"imports\" case of bind():\n- one candidate -> emit the edge exactly as today\n- more than one -> unresolvedOf(context, raw, \"ambiguous\") with evidence `${raw.evidence} candidates: ${candidates.join(\" | \")}`\n- zero candidates, specifier starts with \"./\" or \"../\" -> \"missing_module\", evidence `${raw.evidence} (no file matched)`\n- zero candidates otherwise -> \"dynamic\" with evidence unchanged (bare package, node:, bun:)\n- specifier starting with \"#\" stays \"dynamic\": a tsconfig path alias is not resolvable by this resolver and must not be reported as a defect in the tree\n\nNo schema change: unresolved.evidence_kind is unconstrained text and persist writes whatever kind it is handed. Do not change the same-file, unique-name or inherited-call tiers, and do not touch src/indexer/persist.ts.\nThe evidence suffix follows a space on purpose: #shared/domain/unresolved.ts reads the specifier only up to the first space.",
+        "goal": "A failed import records why it failed: ambiguous with the competing paths, missing for a relative specifier that matched nothing, dynamic only when the specifier cannot be static.",
+        "steps": [
+          "Add moduleCandidates to SymbolIndex and express moduleFile over it.",
+          "Add missing_module to BindEvidenceKind.",
+          "Classify the imports failure path by candidate count and specifier shape, appending candidates to evidence for the ambiguous case.",
+          "Extend tests/resolve.test.ts: a duplicate stem yields ambiguous with both paths in evidence; ./missing yields missing_module; a bare package specifier still yields dynamic; a # alias still yields dynamic.",
+          "Extend tests/persist.test.ts: the new kinds land in unresolved unchanged.",
+          "Run the task verification and record the kind census before and after a re-index."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/resolve.test.ts tests/persist.test.ts  (all pass)\nDONE when: no import row is recorded dynamic merely because it failed, and a tie carries its competing paths.\nKind census: run `~/.bun/bin/bun -e 'import {Database} from \"bun:sqlite\"; const d=new Database(\".sangkar/graph.db\",{readonly:true}); console.log(d.query(\"SELECT evidence_kind k, count(*) c FROM unresolved GROUP BY 1\").all())'` after a re-index; ambiguous grows, dynamic shrinks, missing_module appears."
+      },
+      "files": [
+        "src/indexer/resolve.ts",
+        "tests/resolve.test.ts",
+        "tests/persist.test.ts"
+      ],
+      "goal": "Import failures are recorded by cause instead of all as dynamic.",
+      "id": "TASK-017",
+      "pre_request": [
+        "TASK-005"
+      ],
+      "size": "M",
+      "title": "Indexer: split import failures by cause",
       "status": "todo",
       "progress": []
     }
