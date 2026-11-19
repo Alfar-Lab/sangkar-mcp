@@ -40,7 +40,7 @@ import {
   type InputField,
   type InputLiteral,
   parseArgs,
-  parseCliArgs,
+  parseCliArgsAndNames,
   splitGlobals,
   type ToolArgs,
   usageOf,
@@ -70,6 +70,8 @@ import { type LockHandle, release } from "#shared/store/lock";
 import { readSchemaVersion, schemaVersion } from "#shared/store/migrate";
 import type { ToolContext } from "#shared/store/read/context";
 import { type GraphReader, makeReader } from "#shared/store/read/reader";
+import type { SessionMode } from "#shared/telemetry/record";
+import { createTelemetry, nullTelemetry, type Telemetry } from "#shared/telemetry/telemetry";
 import { startWatch, type WatchHandle } from "./indexer/watch";
 import { runWorker, type WorkerMode } from "./indexer/worker";
 import { handle as expandHandle } from "./tools/expand/handler";
@@ -433,14 +435,28 @@ async function callTool(
   store: Store,
   tools: ReadonlyMap<string, RegisteredTool>,
   params: { readonly name: string; readonly arguments?: Record<string, unknown> | undefined },
+  telemetry: Telemetry,
 ): Promise<CallToolResult> {
-  const tool = tools.get(params.name);
-  if (tool === undefined) {
-    const error = new AppError("not_found", `no tool named "${params.name}" in this surface`, {
-      hint: `this server registers: ${[...tools.keys()].join(", ")}`,
-    });
-    return answer(
-      fail(
+  const started = Date.now();
+  let envelope: Envelope<unknown> | null = null;
+  let parsed: ToolArgs = {};
+  let supplied: readonly string[] = [];
+  let errorCode: string | null = null;
+  try {
+    const tool = tools.get(params.name);
+    if (tool !== undefined) {
+      // The intersection with the manifest is what keeps `arg_names_set` (the one field allowed to
+      // be dynamic) from carrying a client-supplied key name: `parseArgs` drops an undeclared key,
+      // and a key the schema does not declare is not an argument.
+      supplied = Object.keys(params.arguments ?? {}).filter((name) =>
+        Object.hasOwn(tool.input, name),
+      );
+    }
+    if (tool === undefined) {
+      const error = new AppError("not_found", `no tool named "${params.name}" in this surface`, {
+        hint: `this server registers: ${[...tools.keys()].join(", ")}`,
+      });
+      envelope = fail(
         error,
         boundarySpec(
           store,
@@ -448,41 +464,43 @@ async function callTool(
           `${params.name} is not registered`,
           "the tool does not exist in this surface",
         ),
-      ),
-    );
-  }
-  if (store.kind === "refused") {
-    return answer(
-      fail(
+      );
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
+    if (store.kind === "refused") {
+      envelope = fail(
         store.error,
         boundarySpec(store, tool.name, store.error.message, "the graph was refused at startup"),
-      ),
-    );
-  }
-  if (store.kind === "absent") {
-    return answer(
-      bootstrapping({
+      );
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
+    if (store.kind === "absent") {
+      envelope = bootstrapping({
         ...boundarySpec(store, tool.name, store.reason, "nothing has been indexed yet"),
         retry_after_ms: STATUS_RETRY_AFTER_MS,
         hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
-      }),
-    );
-  }
+      });
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
 
-  const context: ToolContext = { ...store.context, log: scopedLog(tool.name) };
-  try {
-    const envelope = await tool.handle(context, parseArgs(tool.name, tool.input, params.arguments));
-    return answer(route(envelope, tool.name, store.staleReason));
-  } catch (error) {
-    // A handler returns its errors; reaching this point means a bug or a boundary refusal, and
-    // `fail` keeps an `AppError`'s code (`budget_too_large`, `index_locked`) while collapsing
-    // anything else to `internal`.
-    context.log.error("tool.failed", {
-      code: isAppError(error) ? error.code : "internal",
-      reason: messageOf(error),
-    });
-    return answer(
-      fail(
+    const context: ToolContext = { ...store.context, log: scopedLog(tool.name) };
+    try {
+      parsed = parseArgs(tool.name, tool.input, params.arguments);
+      envelope = route(await tool.handle(context, parsed), tool.name, store.staleReason);
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    } catch (error) {
+      // A handler returns its errors; reaching this point means a bug or a boundary refusal, and
+      // `fail` keeps an `AppError`'s code (`budget_too_large`, `index_locked`) while collapsing
+      // anything else to `internal`.
+      context.log.error("tool.failed", {
+        code: isAppError(error) ? error.code : "internal",
+        reason: messageOf(error),
+      });
+      envelope = fail(
         error,
         boundarySpec(
           store,
@@ -490,8 +508,23 @@ async function callTool(
           `${tool.name} could not answer`,
           "the call failed before the graph answered",
         ),
-      ),
-    );
+      );
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
+  } finally {
+    // `params.name` is whatever the client sent, and on the unknown-tool branch there is no tool to
+    // take a name from, so the record's `tool` is always one of the seven or the literal "unknown".
+    const recordedTool = tools.has(params.name) ? params.name : "unknown";
+    telemetry.recordCall({
+      tool: recordedTool,
+      args: parsed,
+      suppliedNames: supplied,
+      envelope,
+      status: envelope?.status ?? "absent",
+      errorCode,
+      durationMs: Date.now() - started,
+    });
   }
 }
 
@@ -499,6 +532,11 @@ async function callTool(
 interface Lifecycle {
   watcher: WatchHandle | null;
   conn: Conn | null;
+  /**
+   * The process's one recorder, closed last: a record is only useful once the answer it describes
+   * was written, and closing flushes the buffer once on whichever exit path won.
+   */
+  telemetry: Telemetry | null;
   /**
    * Always `null` today, and kept anyway: the server process never takes the write lock, because
    * `DATABASE.md` §5 makes the worker the single writer and `runWorker` releases its own lock in a
@@ -533,6 +571,11 @@ async function shutdown(lifecycle: Lifecycle, reason: string): Promise<void> {
   if (lifecycle.conn !== null) {
     lifecycle.conn.close();
     lifecycle.conn = null;
+  }
+  if (lifecycle.telemetry !== null) {
+    const telemetry = lifecycle.telemetry;
+    lifecycle.telemetry = null;
+    telemetry.close();
   }
 }
 
@@ -597,7 +640,7 @@ function watcherDisabled(env: Record<string, string | undefined>): boolean {
   return raw !== undefined && raw !== "";
 }
 
-async function runMcp(config: AppConfig): Promise<number> {
+async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> {
   const store = openStore(config);
   if (store.kind === "refused") {
     // Refused once, logged once, and every call answers with that refusal: the session stays usable
@@ -618,7 +661,7 @@ async function runMcp(config: AppConfig): Promise<number> {
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     pending.begin();
     try {
-      return await callTool(store, byName, request.params);
+      return await callTool(store, byName, request.params, telemetry);
     } finally {
       pending.end();
     }
@@ -627,6 +670,7 @@ async function runMcp(config: AppConfig): Promise<number> {
   const lifecycle: Lifecycle = {
     watcher: null,
     conn: store.kind === "ready" ? store.conn : null,
+    telemetry,
     lock: null,
     closed: false,
   };
@@ -663,12 +707,15 @@ async function runMcp(config: AppConfig): Promise<number> {
  * An unrecognised mode is ignored rather than refused, so the worker's own default still applies
  * and a future flag cannot break an older server.
  */
-function workerOptions(argv: readonly string[], config: AppConfig) {
+function workerOptions(argv: readonly string[], config: AppConfig, telemetry: Telemetry) {
   const raw = flagValue(argv, "mode");
   const mode: WorkerMode | undefined = raw === "full" || raw === "fast" ? raw : undefined;
   return {
     repoRoot: config.repoRoot,
     dataDir: config.dataDir,
+    // The instance `main` built: the worker records its `index_run` through it and never builds one
+    // of its own, so a process emits exactly one session record whichever mode it is.
+    telemetry,
     ...(mode === undefined ? {} : { mode }),
     ...(argv.includes("--force") ? { force: true } : {}),
   };
@@ -682,10 +729,19 @@ function workerOptions(argv: readonly string[], config: AppConfig) {
  *
  * `--help` is answered before the arguments are validated, because a usage block is exactly what a
  * caller asking for help wants even when a required argument is still missing. `splitGlobals` and
- * `parseCliArgs` share one refusal path because both refuse the argv rather than the call, and both
- * carry the usage block printed here.
+ * `parseCliArgsAndNames` share one refusal path because both refuse the argv rather than the call, and
+ * both carry the usage block printed here.
+ *
+ * The whole body sits inside one `try`/`finally` so every outcome — including a usage refusal that
+ * never reached a handler — leaves exactly one `call` record. `--help` is the exception: it asks for
+ * the usage block, not for a call.
  */
-async function runTool(name: string, argv: readonly string[], config: AppConfig): Promise<number> {
+async function runTool(
+  name: string,
+  argv: readonly string[],
+  config: AppConfig,
+  telemetry: Telemetry,
+): Promise<number> {
   const tool = TOOLS.find((candidate) => candidate.name === name);
   if (tool === undefined) {
     // Unreachable through `main`, which resolves the name first; kept so this function's contract
@@ -694,81 +750,113 @@ async function runTool(name: string, argv: readonly string[], config: AppConfig)
     return EXIT_USAGE;
   }
 
+  const started = Date.now();
   let json = false;
-  let args: ToolArgs;
-  try {
-    const globals = splitGlobals(argv);
-    json = globals.json;
-    if (globals.help) {
-      process.stdout.write(`${usageOf(name, tool.input)}\n`);
-      return 0;
-    }
-    args = parseCliArgs(name, tool.input, globals.rest);
-  } catch (error) {
-    if (error instanceof CliUsageError) {
-      process.stderr.write(`${error.message}\n${error.usage}\n`);
-      return EXIT_USAGE;
-    }
-    throw error;
-  }
+  let parsed: ToolArgs = {};
+  let supplied: readonly string[] = [];
+  let envelope: Envelope<unknown> | null = null;
+  let errorCode: string | null = null;
+  let helpRequested = false;
+  // Every exit goes through `finish`, so the recorded `status` and the process exit code cannot
+  // contradict each other. A throw out of the body leaves the default, which is the code `main`
+  // reports for that case too.
+  let exitCode: number = EXIT_FAILURE;
+  const finish = (code: number): number => {
+    exitCode = code;
+    return code;
+  };
 
-  const store = openStore(config);
-  if (store.kind === "refused") {
-    process.stderr.write(`${store.error.message}\n`);
-    if (store.error.hint !== undefined) {
-      process.stderr.write(`${store.error.hint}\n`);
-    }
-    return EXIT_FAILURE;
-  }
-  if (store.kind === "absent") {
-    // `status` is the one tool that answers an empty tree instead of failing: "no index yet" is its
-    // whole job, and the line an operator reads before the first index run.
-    if (name === "status") {
-      process.stdout.write(`${store.reason}\n`);
-      return 0;
-    }
-    process.stdout.write(
-      renderEnvelope(
-        bootstrapping({
-          ...boundarySpec(store, name, store.reason, "nothing has been indexed yet"),
-          retry_after_ms: STATUS_RETRY_AFTER_MS,
-          hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
-        }),
-      ),
-    );
-    return EXIT_FAILURE;
-  }
-
-  // A handler returns its errors, so a throw here is a bug or a boundary refusal — caught, logged
-  // and rendered exactly as `callTool` renders it.
-  const context: ToolContext = { ...store.context, log: scopedLog(name) };
-  let envelope: Envelope<unknown>;
   try {
-    envelope = route(await tool.handle(context, args), name, store.staleReason);
-  } catch (error) {
-    context.log.error("tool.failed", {
-      code: isAppError(error) ? error.code : "internal",
-      reason: messageOf(error),
-    });
-    process.stdout.write(
-      renderEnvelope(
-        fail(
-          error,
-          boundarySpec(
-            store,
-            name,
-            `${name} could not answer`,
-            "the call failed before the graph answered",
-          ),
+    try {
+      const globals = splitGlobals(argv);
+      json = globals.json;
+      if (globals.help) {
+        // A usage block is not a call: a request for help is recorded by nothing.
+        helpRequested = true;
+        process.stdout.write(`${usageOf(name, tool.input)}\n`);
+        return 0;
+      }
+      // The supplied names come from the argv reader, never from the parsed record: `parseArgs`
+      // fills every declared default, and a defaulted name is not a fact about this caller.
+      ({ args: parsed, supplied } = parseCliArgsAndNames(name, tool.input, globals.rest));
+    } catch (error) {
+      if (error instanceof CliUsageError) {
+        process.stderr.write(`${error.message}\n${error.usage}\n`);
+        return finish(EXIT_USAGE);
+      }
+      throw error;
+    }
+
+    const store = openStore(config);
+    if (store.kind === "refused") {
+      // No envelope is built here, so the refusal's own code is the only error code there is.
+      errorCode = store.error.code;
+      process.stderr.write(`${store.error.message}\n`);
+      if (store.error.hint !== undefined) {
+        process.stderr.write(`${store.error.hint}\n`);
+      }
+      return finish(EXIT_FAILURE);
+    }
+    if (store.kind === "absent") {
+      // `status` is the one tool that answers an empty tree instead of failing: "no index yet" is its
+      // whole job, and the line an operator reads before the first index run.
+      if (name === "status") {
+        process.stdout.write(`${store.reason}\n`);
+        return finish(0);
+      }
+      envelope = bootstrapping({
+        ...boundarySpec(store, name, store.reason, "nothing has been indexed yet"),
+        retry_after_ms: STATUS_RETRY_AFTER_MS,
+        hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
+      });
+      process.stdout.write(renderEnvelope(envelope));
+      return finish(EXIT_FAILURE);
+    }
+
+    // A handler returns its errors, so a throw here is a bug or a boundary refusal — caught, logged
+    // and rendered exactly as `callTool` renders it.
+    const context: ToolContext = { ...store.context, log: scopedLog(name) };
+    try {
+      envelope = route(await tool.handle(context, parsed), name, store.staleReason);
+    } catch (error) {
+      context.log.error("tool.failed", {
+        code: isAppError(error) ? error.code : "internal",
+        reason: messageOf(error),
+      });
+      envelope = fail(
+        error,
+        boundarySpec(
+          store,
+          name,
+          `${name} could not answer`,
+          "the call failed before the graph answered",
         ),
-      ),
+      );
+      process.stdout.write(renderEnvelope(envelope));
+      return finish(EXIT_FAILURE);
+    }
+    process.stdout.write(
+      name === "status" && !json ? statusLines(envelope) : renderEnvelope(envelope),
     );
-    return EXIT_FAILURE;
+    return finish(exitCodeOf(envelope));
+  } finally {
+    if (!helpRequested) {
+      telemetry.recordCall({
+        tool: name,
+        args: parsed,
+        suppliedNames: supplied,
+        envelope,
+        // `absent` is the no-graph `status` line: a successful process that produced no envelope.
+        // `envelope?.status ?? "error"` would have recorded the commonest CLI invocation as a
+        // failure, which is why the fallback reads the exit code `finish` kept.
+        status: envelope?.status ?? (exitCode === 0 ? "absent" : "error"),
+        errorCode: envelope?.error?.code ?? errorCode,
+        durationMs: Date.now() - started,
+      });
+    }
+    // A tool invocation is a one-shot process: nothing else would ever flush this buffer.
+    telemetry.close();
   }
-  process.stdout.write(
-    name === "status" && !json ? statusLines(envelope) : renderEnvelope(envelope),
-  );
-  return exitCodeOf(envelope);
 }
 
 /**
@@ -785,19 +873,42 @@ export async function main(mode: string, argv: string[]): Promise<number> {
   try {
     // `flagValue` scans the whole argv, so a global flag may sit on either side of the tool token.
     const config = loadConfig({ argv });
-    switch (mode) {
-      case "mcp":
-        return await runMcp(config);
-      case "index":
-      case "worker":
-        return await runWorker(workerOptions(argv, config));
+    // The one recorder of the process, built here because the root is the only place that knows the
+    // mode and owns the exit path. Its construction is what emits the session record.
+    const sessionMode: SessionMode =
+      mode === "mcp" ? "mcp" : mode === "worker" || mode === "index" ? "worker" : "cli";
+    const telemetry = config.telemetry.enabled
+      ? createTelemetry({
+          dir: config.telemetry.dir,
+          repoRoot: config.repoRoot,
+          dataDir: config.dataDir,
+          sessionMode,
+          serverVersion: SERVER_VERSION,
+          graphSchemaVersion: schemaVersion(),
+        })
+      : nullTelemetry();
+    try {
+      switch (mode) {
+        case "mcp":
+          // The server closes the recorder on the way out of `shutdown`, not here.
+          return await runMcp(config, telemetry);
+        case "index":
+        case "worker":
+          return await runWorker(workerOptions(argv, config, telemetry));
+      }
+      const tool = TOOLS.find((candidate) => candidate.name === mode);
+      if (tool === undefined) {
+        process.stderr.write(`sangkar: unknown tool "${mode}"\n`);
+        return EXIT_USAGE;
+      }
+      return await runTool(tool.name, argv.slice(1), config, telemetry);
+    } finally {
+      // A one-shot process flushes its own buffer; `mcp` owns its close through `shutdown`. Both
+      // closes are idempotent, so a refusal that returned early still writes its session record.
+      if (sessionMode !== "mcp") {
+        telemetry.close();
+      }
     }
-    const tool = TOOLS.find((candidate) => candidate.name === mode);
-    if (tool === undefined) {
-      process.stderr.write(`sangkar: unknown tool "${mode}"\n`);
-      return EXIT_USAGE;
-    }
-    return await runTool(tool.name, argv.slice(1), config);
   } catch (error) {
     log.error("startup failed", {
       mode,

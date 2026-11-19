@@ -220,16 +220,16 @@ export function parseArgs(tool: string, input: InputLiteral, raw: unknown): Tool
 }
 
 /**
- * argv for one tool, without the tool token and without the global flags, read against the same
- * manifest and handed to {@link parseArgs}. Every shell-level refusal is a `CliUsageError` so the
- * caller prints usage instead of a protocol error; the two schema refusals keep the message
- * `parseArgs` produced, so a CLI user reads what an agent would read.
- *
- * Only the parts a shell cannot express are lost: an array field collects repeats (`--paths a
- * --paths b`) and never splits a comma, because a path may contain one. `min`/`max` are left to
- * the handler, exactly as a protocol call leaves them.
+ * argv read into the record {@link parseArgs} validates: the declared names the caller wrote and
+ * nothing else, since an unknown option is refused rather than kept. It is therefore also the answer
+ * to "which arguments were supplied" — a default is added afterwards, by `parseArgs`, and a defaulted
+ * name is not a fact about the request.
  */
-export function parseCliArgs(tool: string, input: InputLiteral, argv: readonly string[]): ToolArgs {
+function readArgv(
+  tool: string,
+  input: InputLiteral,
+  argv: readonly string[],
+): Record<string, unknown> {
   const usage = usageOf(tool, input);
   const positional = positionalFieldOf(input);
   const raw: Record<string, unknown> = {};
@@ -310,11 +310,48 @@ export function parseCliArgs(tool: string, input: InputLiteral, argv: readonly s
     raw[name] = value;
   }
 
+  return raw;
+}
+
+/**
+ * One CLI call as the argument layer sees it: the record a handler receives, and the names the
+ * caller actually wrote. The two differ on purpose — `args` carries every declared default, so
+ * recording its keys would make the supplied set a constant of the schema.
+ */
+export interface ParsedCliArgs {
+  readonly args: ToolArgs;
+  readonly supplied: readonly string[];
+}
+
+/**
+ * argv for one tool, without the tool token and without the global flags, read against the same
+ * manifest and handed to {@link parseArgs}. Every shell-level refusal is a `CliUsageError` so the
+ * caller prints usage instead of a protocol error; the two schema refusals keep the message
+ * `parseArgs` produced, so a CLI user reads what an agent would read.
+ *
+ * Only the parts a shell cannot express are lost: an array field collects repeats (`--paths a
+ * --paths b`) and never splits a comma, because a path may contain one. `min`/`max` are left to
+ * the handler, exactly as a protocol call leaves them.
+ */
+export function parseCliArgs(tool: string, input: InputLiteral, argv: readonly string[]): ToolArgs {
+  return parseCliArgsAndNames(tool, input, argv).args;
+}
+
+/**
+ * {@link parseCliArgs} plus the supplied names: `readArgv` only ever holds declared names, so its
+ * keys are exactly the arguments whose source value was not `undefined`, before any default.
+ */
+export function parseCliArgsAndNames(
+  tool: string,
+  input: InputLiteral,
+  argv: readonly string[],
+): ParsedCliArgs {
+  const raw = readArgv(tool, input, argv);
   try {
-    return parseArgs(tool, input, raw);
+    return { args: parseArgs(tool, input, raw), supplied: Object.keys(raw).sort() };
   } catch (e) {
     if (e instanceof AppError) {
-      throw new CliUsageError(e.message, usage);
+      throw new CliUsageError(e.message, usageOf(tool, input));
     }
     throw e;
   }
