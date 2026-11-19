@@ -198,6 +198,47 @@ describe("loadConfig", () => {
   });
 });
 
+describe("loadConfig telemetry", () => {
+  test("an unset switch means enabled", () => {
+    const bare = tempDir("sangkar-telemetry-unset-");
+    const config = loadConfig({ argv: [], env: {}, cwd: bare });
+    expect(config.telemetry.enabled).toBe(true);
+  });
+
+  test("an empty switch means enabled", () => {
+    const bare = tempDir("sangkar-telemetry-empty-");
+    const config = loadConfig({ argv: [], env: { SANGKAR_TELEMETRY: "" }, cwd: bare });
+    expect(config.telemetry.enabled).toBe(true);
+  });
+
+  test("the exact spelling off disables, with no aliases", () => {
+    const bare = tempDir("sangkar-telemetry-off-");
+    expect(
+      loadConfig({ argv: [], env: { SANGKAR_TELEMETRY: "off" }, cwd: bare }).telemetry.enabled,
+    ).toBe(false);
+
+    // One spelling only: a value that reads as a negation elsewhere is still consent.
+    for (const value of ["OFF", "Off", "0", "false"]) {
+      const config = loadConfig({ argv: [], env: { SANGKAR_TELEMETRY: value }, cwd: bare });
+      expect(config.telemetry.enabled).toBe(true);
+    }
+  });
+
+  test("the dir is always computed inside the data dir, including under --data-dir", () => {
+    const bare = tempDir("sangkar-telemetry-dir-");
+    const autodetected = loadConfig({ argv: [], env: {}, cwd: bare });
+    expect(autodetected.telemetry.dir).toBe(join(autodetected.dataDir, "telemetry"));
+
+    const relocated = loadConfig({
+      argv: ["--repo-root", bare, "--data-dir", "var/graph"],
+      env: { SANGKAR_TELEMETRY: "off" },
+      cwd: tmpdir(),
+    });
+    expect(relocated.telemetry.dir).toBe(join(relocated.dataDir, "telemetry"));
+    expect(relocated.telemetry.dir).toBe(join(bare, "var", "graph", "telemetry"));
+  });
+});
+
 describe("loadConfig cursor key", () => {
   test("generates a key long enough for the cursor module when the variable is absent", () => {
     const bare = tempDir("sangkar-config-key-absent-");

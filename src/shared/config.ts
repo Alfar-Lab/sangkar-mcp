@@ -12,6 +12,13 @@ export interface Budgets {
   maxTokens: number;
 }
 
+export interface TelemetryConfig {
+  /** Whether this installation may record usage events at all. */
+  readonly enabled: boolean;
+  /** Where events would be written; always computed so a caller can name the path without one. */
+  readonly dir: string;
+}
+
 /**
  * The resolved process configuration. Resolved once at start; every module that needs a
  * setting receives it from here, because this file is the only reader of the environment.
@@ -24,6 +31,8 @@ export interface AppConfig {
   /** Cursor HMAC key, passed to the cursor module so it never reads the environment. */
   cursorKey: string;
   budgets: Budgets;
+  /** The consent switch as a value, so the recorder never reads the environment itself. */
+  readonly telemetry: TelemetryConfig;
 }
 
 export interface LoadConfigOptions {
@@ -86,7 +95,10 @@ export function detectRepoRoot(cwd: string): string {
 /**
  * Resolves the config from the command line and the working directory: `--repo-root` (default
  * autodetected from cwd), `--data-dir` relative to the repo root (default `<repoRoot>/.sangkar`),
- * and `SANGKAR_CURSOR_KEY` — the one setting that still comes from the environment.
+ * then the two settings that come from the environment: `SANGKAR_CURSOR_KEY` and the telemetry
+ * consent switch `SANGKAR_TELEMETRY` — unset or empty means enabled, and the one spelling `off`
+ * disables it. `SANGKAR_NO_WATCH` is deliberately not read here; it is not a tool setting, it is
+ * this process deciding whether it owns a poller (see `watcherDisabled` in `src/index.ts`).
  */
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const argv = options.argv ?? [];
@@ -115,5 +127,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
         ? randomBytes(32).toString("hex")
         : env.SANGKAR_CURSOR_KEY,
     budgets: { defaultTokens: DEFAULT_BUDGET_TOKENS, maxTokens: MAX_BUDGET_TOKENS },
+    // One spelling only: `off` disables, everything else (absent, empty, "0", "false", "OFF")
+    // enables. Aliases would make an operator's typo silently opt a machine in.
+    telemetry: {
+      enabled: env.SANGKAR_TELEMETRY !== "off",
+      dir: join(dataDir, "telemetry"),
+    },
   };
 }
