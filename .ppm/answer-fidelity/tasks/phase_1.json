@@ -195,10 +195,101 @@
         "TASK-009",
         "TASK-010",
         "TASK-011",
-        "TASK-012"
+        "TASK-012",
+        "TASK-018",
+        "TASK-019",
+        "TASK-020"
       ],
       "size": "S",
       "title": "Phase 1 gate",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Issue #10. Today src/shared/domain/risk.ts:118 pushes \"every changed symbol has a test within the tested-depth limit\" whenever untested === 0 — also true when nothing changed — and Totals types every <list>_total as number (src/shared/envelope.ts:71), so the shape cannot say \"not applicable\".\n\nChanges:\n1. risk.ts: emit a test-coverage driver only when there is something to assess. With an empty change set (symbols === 0) emit no test or coverage driver at all; keep the existing \"N changed symbols have no reachable test\" branch for untested > 0; keep the success sentence for untested === 0 with a non-empty change set.\n2. summary prose (src/tools/summary/handler.ts:432): the same rule — an empty change set must not claim coverage of zero symbols. State the fact in the prose (\"no changes to assess\") but emit no driver.\n3. totals: test_gaps_total is null when the change set is empty and a number otherwise (src/tools/summary/handler.ts:455).\n4. src/shared/envelope.ts: Totals widens to `[listTotal: `${string}_total`]: number | null` with a comment stating that null means \"not applicable to this scope\" and that every other total stays a number. Check the two readers that consume totals (expand's `?? fallback`, trace's assignments) still compile without logic changes; add a null guard only where one is needed.\n\nDo not change risk scoring, the band thresholds, or test_gaps accounting for a non-empty change set. Do not key this off any test census: the trigger is the change set.",
+        "goal": "An empty change set no longer claims test coverage, and test_gaps_total says not-applicable instead of zero.",
+        "steps": [
+          "Guard the test-coverage driver in risk.ts on a non-empty change set.",
+          "Guard the summary prose sentence the same way.",
+          "Emit test_gaps_total: null for an empty change set and a number otherwise.",
+          "Widen Totals in envelope.ts and add the explanatory comment.",
+          "Extend tests/tools-summary.test.ts with a fixture whose change set is empty: no driver mentions tests or coverage, totals.test_gaps_total is null, and the prose asserts no coverage; a second fixture with one changed file asserts a number again and unchanged driver wording.",
+          "Run the task verification. The working tree is dirty during execution, so the empty-change-set case is asserted through the fixture, never through `summary` on this checkout."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-summary.test.ts tests/envelope.test.ts tests/budget.test.ts  (all pass)\nDONE when: the empty-change-set fixture produces no test or coverage driver and test_gaps_total: null, the one-change fixture still produces a number, and no live clean-tree probe is attempted on a dirty checkout."
+      },
+      "files": [
+        "src/shared/domain/risk.ts",
+        "src/shared/envelope.ts",
+        "src/tools/summary/handler.ts",
+        "tests/tools-summary.test.ts"
+      ],
+      "goal": "The risk drivers and totals stop asserting coverage when there is nothing to assess.",
+      "id": "TASK-018",
+      "pre_request": [
+        "TASK-012"
+      ],
+      "size": "M",
+      "title": "Empty change set: no coverage claim, null test gaps",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Issue #11, parse half. Today src/shared/domain/diff.ts:162 passes --no-renames and parseNameStatus returns null for an R/C pair, which degrades the whole change set to the hash comparison.\n\nChanges, all in src/shared/domain/diff.ts:\n1. Drop --no-renames from the git invocation.\n2. parseNameStatus parses R and C records (status, old path, new path) and SKIPS a malformed individual record instead of returning null for the whole output. Returning null stays reserved for a git failure, so one odd line can no longer empty the change set.\n3. ChangeSet gains, additively:\n     readonly entries: readonly ChangeEntry[];\n   with\n     export type ChangeState = \"modified\" | \"added\" | \"deleted\" | \"renamed\";\n     export interface ChangeEntry { readonly state: ChangeState; readonly path: string; readonly from?: string; }\n   A rename is ONE entry: {state: \"renamed\", path: <new path>, from: <old path>}. A copy is \"added\". Status letters map M/T -> modified, A -> added, D -> deleted, R -> renamed.\n4. Keep `changed`, `removed`, `unmatched`, `degraded`, `degradedReason` exactly as they are, so no consumer breaks. `changed` contains the destination path of a rename and does not double-count it. Entries are sorted by path and every path goes through the existing containment check; a path outside repoRoot is dropped from entries and counted nowhere.\n\nThis task changes no payload: summary and impact keep rendering from `changed`/`removed` until the following task switches them to `entries`.",
+        "goal": "The change-set parser survives renames, copies and deletes and exposes a per-entry state.",
+        "steps": [
+          "Drop --no-renames and parse R/C records into one entry carrying both paths.",
+          "Make a malformed single record be skipped rather than nulling the whole parse.",
+          "Add ChangeEntry/ChangeState and ChangeSet.entries, populated and sorted, leaving the existing fields unchanged.",
+          "Extend tests/diff.test.ts: a rename produces one renamed entry with from and a single changed path; a copy is added; a delete is deleted; a rename no longer degrades the set; each fixture also asserts degraded === false.",
+          "Run the task verification."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/diff.test.ts  (all pass)\nDONE when: a rename fixture yields one renamed entry with `from`, changed holds only the new path, and degraded stays false."
+      },
+      "files": [
+        "src/shared/domain/diff.ts",
+        "tests/diff.test.ts"
+      ],
+      "goal": "The change set parses renames instead of degrading, and carries a per-entry state.",
+      "id": "TASK-019",
+      "pre_request": [],
+      "size": "M",
+      "title": "Change set: parse renames, expose per-entry state",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "agent": "implement",
+      "details": {
+        "contract": "Issue #11, payload half. Both tools must render the change set from ChangeSet.entries instead of the flat `changed`/`removed` arrays.\n\nShape in both payloads:\n  changed_files: [{ path, state, from?, symbols, entry_point }]\n  - state is one of modified | added | deleted | renamed; `from` present only for renamed\n  - a deleted path appears with state \"deleted\" and symbols 0 (its symbols are gone from the graph), while removed_symbols_total still counts them\n  - a renamed path counts once in changed_files_total\n- changed_files_total counts entries, so a rename is one file and not two\n\nSummary: src/tools/summary/handler.ts builds its changed list from [...changes.changed]; switch it to entries and keep the per-file symbol counts it already computes, using 0 for a deleted path.\nImpact: src/tools/impact/handler.ts builds ChangedFileRow {path, symbols, entry_point}; add state and optional from, and stop using changeSet.removed only as a count — deleted paths become entries.\n\nKeep every existing key and its meaning; `state` and `from` are additions. Do not change risk scoring, the depended-on lists, or removed_symbols counting.",
+        "goal": "Both change-set answers label each file modified, added, deleted or renamed, with the previous path on a rename.",
+        "steps": [
+          "Switch summary's changed-file construction to ChangeSet.entries and carry state/from, using 0 symbols for a deleted path.",
+          "Switch impact's ChangedFileRow to entries with state and optional from.",
+          "Make both totals count entries so a rename is one file.",
+          "Extend tests/tools-summary.test.ts and tests/tools-impact.test.ts: a rename yields one entry with state renamed and from; a delete appears with state deleted while removed_symbols_total still counts its symbols; a plain modification still reports state modified.",
+          "Run the task verification and capture one live summary --json payload shape."
+        ],
+        "verify": "~/.bun/bin/bun run typecheck  (exit 0)\n~/.bun/bin/bun run test tests/tools-summary.test.ts tests/tools-impact.test.ts tests/diff.test.ts  (all pass)\nDONE when: a deleted tracked file appears in changed_files with state deleted, removed_symbols still counts its symbols, and a rename does not double-count."
+      },
+      "files": [
+        "src/tools/summary/handler.ts",
+        "src/tools/impact/handler.ts",
+        "tests/tools-summary.test.ts",
+        "tests/tools-impact.test.ts"
+      ],
+      "goal": "summary and impact report each changed file with its state and the previous path on a rename.",
+      "id": "TASK-020",
+      "pre_request": [
+        "TASK-018",
+        "TASK-019"
+      ],
+      "size": "M",
+      "title": "Change set: state and deleted paths in both payloads",
       "status": "todo",
       "progress": []
     }
