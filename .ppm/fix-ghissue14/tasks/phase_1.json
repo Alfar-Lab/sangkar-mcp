@@ -1,0 +1,53 @@
+{
+  "phase": "phase_1",
+  "title": "Repository definition of done on the final tree",
+  "tasks": [
+    {
+      "agent": "verify",
+      "details": {
+        "contract": "Read-only: modify no file, commit nothing, never open `.sangkar/graph.db` for writing (the live probe copies it into `/tmp` and passes `--data-dir`). Report exact command output and exit codes; a failure that also reproduces at `dc5a548` is reported as pre-existing with that evidence.\nThe definition of done is `.agents/prompts/run-build.md:38-42`: `bun run typecheck && bun run lint && bun run test && bun run db:drift`. `bun run test` is the whole suite (58 files), not the five files phase 0 gated on. Baseline at `dc5a548`, measured for this plan: `bun run test` → 903 pass, 0 fail, 58 s; `bun run db:drift` → exit 0, \"No schema changes, nothing to migrate\".\n`db:drift` runs `drizzle-kit generate --name drift-check` and then `git diff --exit-code src/shared/store/migrations`: if it ever writes a file, that file is a defect — delete it and report it, do not commit it.\nEverything the plan changes is already in phase 0's single commit, so this phase has no commit of its own; its output is the evidence that the committed tree is whole.",
+        "goal": "Prove the plan against the repository's own Definition of Done on the final tree, then against a live copy of this repository's graph, and confirm nothing outside the plan's three files moved.",
+        "steps": [
+          "Run `bun run typecheck && bun run lint && bun run test && bun run db:drift` and quote each exit code; report the `bun run test` pass/fail counts and, after `db:drift`, that `git status --porcelain src/shared/store/migrations` is empty.",
+          "Live probe on a copy: `rm -rf /tmp/gh14-final && mkdir -p /tmp/gh14-final && cp .sangkar/graph.db /tmp/gh14-final/graph.db`, then `bun run bin/sangkar.ts status --json --data-dir /tmp/gh14-final`, `summary --json`, `expand src/ --what coverage --json`; quote each `totals.not_indexed_total`, `expand`'s `coverage.skipped`, `coverage.not_indexed.length`, `truncated`/`truncation_reason` and `summary` string.",
+          "Tie the two acceptance criteria of the issue to evidence: criterion 1 to the three identical totals (step 2) and to the cross-tool test that asserts them; criterion 2 to `expand`'s `coverage.skipped` being the prefix's count, equal to its `coverage.not_indexed.length` on that untruncated answer, and to the number its `summary` prints.",
+          "Run `grep -rn 'not_indexed_total' src/ docs/ .agents/` and classify every hit as the repo-wide meaning or an example-envelope value; report any surviving scoped meaning.",
+          "Review the tree: `git status --porcelain` and `git diff --stat` must show only `src/tools/expand/handler.ts`, `tests/tools-expand.test.ts` and `docs/my-product/TOOLS-SPEC.md` as this plan's changes, with no migration file and no stray scratch file under `src/` or `tests/`.",
+          "State explicitly which observations are still unproven, if any — a residual gap named is acceptable, a gap implied to be covered is not."
+        ],
+        "verify": "Every command in step 1 exits 0, `bun run test` is green across all 58 files, `db:drift` writes nothing, the three live totals are identical with `expand`'s `coverage.skipped` smaller, and the diff is the plan's three files. Done when: the report numbers both acceptance criteria with the evidence for each, names the generation measured, quotes the four gate outcomes and the `git status` review, and lists the unproven observations if there are any."
+      },
+      "files": [],
+      "id": "TASK-005",
+      "pre_request": [],
+      "size": "S",
+      "title": "Phase 1 gate: the repository definition of done on the final tree",
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-006",
+      "pre_request": [
+        "TASK-005"
+      ],
+      "title": "Update GitHub issue #14 with the shipped fix",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "details": {
+        "goal": "Record the shipped fix on https://github.com/Alfar-Lab/sangkar-mcp/issues/14 so the issue is answered in place instead of being closed off-list: one comment carrying the commit, the changed files, both acceptance criteria with their evidence, the spec lines that changed and the test counts; then close the issue only if both criteria are demonstrated.",
+        "contract": "This task owns no repository file and must not modify one: its only writes are a GitHub comment and, when warranted, the issue state. Do not edit the issue body, title, labels, milestones or any earlier comment.\nThe comment must carry, in this order: `git rev-parse --short HEAD` and `git show --stat --oneline HEAD`; the two acceptance criteria quoted from the issue body, each followed by the observed evidence (for criterion 1: `status`, `summary` and `expand` on one generation showing an identical `totals.not_indexed_total` — 134 on this repository's graph, before the fix `expand` published 5; for criterion 2: `expand`'s scope count is still readable as `coverage.skipped` (5 beside 134) and its summary sentence prints 5, with the test name that pins it); the `TOOLS-SPEC` lines that changed (§1.1's key row and §7's carve-out at `:794-797`) and the new `grep -c 'not_indexed_total' docs/my-product/TOOLS-SPEC.md` count; and the commands run with their pass/fail counts.\nPost the body from a file (`gh issue comment 14 --repo Alfar-Lab/sangkar-mcp --body-file <path>`), never as a shell-quoted inline `--body`: the text contains backticks, quotes and JSON, and an inline body mangles them.\nClose the issue only when both criteria are quoted as satisfied in that same comment: `gh issue close 14 --repo Alfar-Lab/sangkar-mcp --comment \"Fixed in <sha>: ...\"`. If any criterion is unmet, leave the issue open and name the unmet one in the comment instead.\nForbidden: `git push --force`, tags, `npm publish`, edits to any repository file, and any change to the issue's body or labels.",
+        "steps": [
+          "Confirm `TASK-005`'s gate is green and `git status --porcelain` is clean apart from the plan directories; record `git rev-parse --short HEAD`.",
+          "Write the comment body to `/tmp/gh14-comment.md` with the contract's content, quoting both acceptance criteria from `gh issue view 14 --repo Alfar-Lab/sangkar-mcp --json body`.",
+          "Post it with `gh issue comment 14 --repo Alfar-Lab/sangkar-mcp --body-file /tmp/gh14-comment.md` and record the returned issue URL.",
+          "Close only if both criteria are demonstrated: `gh issue close 14 --repo Alfar-Lab/sangkar-mcp --comment \"Fixed in <sha>: totals.not_indexed_total is the graph's count in status, summary and expand; expand's scope count stays in coverage.skipped.\"` Otherwise report the unmet criterion and leave it open.",
+          "Delete the temp file and record the comment URL, the issue state and any unmet criterion in `progress`."
+        ],
+        "verify": "Done when `gh issue view 14 --repo Alfar-Lab/sangkar-mcp --json state,comments` shows the new comment, the state is `CLOSED` (or the comment names the criterion that is still unmet and the state is `OPEN`), `git status --porcelain` matches the state recorded before this task, the temp file is deleted, and the comment URL is recorded in `progress`."
+      },
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

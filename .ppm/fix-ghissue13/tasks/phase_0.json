@@ -1,0 +1,108 @@
+{
+  "phase": "phase_0",
+  "title": "Context seam and composition-root plumbing",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Give ToolContext the open-time database size",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/store/read/context.ts"
+      ],
+      "details": {
+        "goal": "`ToolContext` carries the byte size of the `graph.db` the reader opened, recorded at open time, so a handler can publish a size that belongs to the generation it is answering from instead of a live `stat` of the path.",
+        "contract": "The interface in src/shared/store/read/context.ts (currently `:49-55`) becomes exactly:\n```ts\nexport interface ToolContext {\n  readonly reader: GraphReader;\n  readonly cursor: CursorFacade;\n  readonly log: Logger;\n  readonly now: () => Date;\n  readonly config: AppConfig;\n  /**\n   * The byte size of the `graph.db` this reader opened, recorded by the composition root when the\n   * file was fingerprinted (before `openReader`) and never re-measured: a publish renames a new\n   * file over the path, so a `stat` taken in a handler can describe a generation this handle\n   * cannot serve. `null` when no file was served; absent on a hand-written fake written before\n   * the field existed, which is why it is optional.\n   */\n  readonly dbSizeBytes?: number | null;\n}\n```\nOptional, so the eight hand-written `ToolContext` literals under `tests/` (e.g. tests/read-files.test.ts:714-720, tests/tools-status.test.ts:299-308) keep type-checking; `number | null` so \"no file served\" (`null`, the unreadable-reader context at src/index.ts:977) is distinguishable from \"not recorded\" (`undefined`). Keep the import list unchanged (`AppConfig`, `CursorExpectation/CursorPayload/CursorResult`, `Logger`, `GraphReader`) and import nothing from `src/tools/**` or `src/index.ts`. Do not make the field required, do not add another member, do not edit any other file.",
+        "steps": [
+          "Add the `dbSizeBytes` member with the doc comment above, after `config`, in the `ToolContext` interface (`:49-55`).",
+          "Rewrite the interface doc block's sentence \"The five fields are the entire seam:\" (`:39`) to say six fields.",
+          "Add the matching bullet at the end of that doc block, after the `config` bullet: \"`dbSizeBytes` is the size recorded for the file this reader opened — read once from the file fingerprint and never re-measured, because a publish renames a new file over `graph.db` and a `stat` would describe a file this handle is not serving\".",
+          "Update the module header sentence at `:4-6` (the clause at `:5` lists \"the reader, the cursor pair, the logger, the clock and the resolved config\") so it also names the recorded size of the file the reader opened.",
+          "Run the checks below."
+        ],
+        "verify": "`bun run typecheck` exits 0 (proves the field is optional: no `tests/` literal was edited); `bun run lint` exits 0; `bun test tests/read-files.test.ts` is green. Done when: `grep -n \"dbSizeBytes\" src/shared/store/read/context.ts` shows the optional member and `grep -c \"five fields\" src/shared/store/read/context.ts` prints 0, and `git diff --stat` names only src/shared/store/read/context.ts."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-002",
+      "title": "Pass the open-time fingerprint size into buildContext",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/index.ts"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "`buildContext` fills `ToolContext.dbSizeBytes` from the fingerprint the store already records for the file it opened, at all three call sites, so the MCP path (`openFor`) and the CLI path (`{ ...store.context }`) both carry it.",
+        "contract": "Signature (src/index.ts:407):\n```ts\nfunction buildContext(\n  config: AppConfig,\n  reader: GraphReader,\n  dbSizeBytes: number | null,\n): ToolContext {\n  return { reader, cursor: createCursors({ key: config.cursorKey, repoId: canonicalRoot(config.repoRoot) }), log, now: () => new Date(), config, dbSizeBytes };\n}\n```\nCall sites, each passing the fingerprint that belongs to the handle being served:\n- `:472` in `openStore`: `context: buildContext(config, reader, fingerprint.size)` — the same local `fingerprint` const the `ready` Store returns; it is non-null there because `fingerprint === null || fingerprint.size === 0` already returned `absent` above.\n- `:521` in `refreshStore` (the `replacement`): `context: buildContext(config, reader, now.size)` — `now` is the fingerprint taken before `openReader`, the same value stamped on the replacement.\n- `:978` in `openFor`:\n```ts\n    const reader = store.kind === \"ready\" ? store.context.reader : unreadableReader();\n    // The size belongs to the handle this call serves: the print `refreshStore` recorded (or kept)\n    // for the file it opened, never a stat of the path.\n    const dbSizeBytes = store.kind === \"ready\" ? (store.fingerprint?.size ?? null) : null;\n    return { store, context: buildContext(repoConfig, reader, dbSizeBytes) };\n```\nDo NOT: add a member to `Store` or `FileFingerprint`; stat the file after opening it; change the pre-open fingerprint order or its comment (`:436-441`); change `sameFile` or the refusal path; add a syscall to the hot path; edit `src/tools/status/handler.ts` or any test. `src/index.ts:1198` (`{ ...store.context, log: scopedLog(name) }`) inherits the field with no edit — leave it alone.",
+        "steps": [
+          "Add the third parameter `dbSizeBytes: number | null` to `buildContext` and set it on the returned object.",
+          "Add a two-line doc comment above `buildContext` saying the value is the pre-open fingerprint's `size`, so it describes the file the handle opened, and that it is the one place a payload may read a size from.",
+          "Pass `fingerprint.size` at the `openStore` call site (`:472`).",
+          "Pass `now.size` at the `refreshStore` replacement call site (`:521`).",
+          "In `openFor`, derive `dbSizeBytes` from the returned store's `fingerprint` (null when the store is not `ready`) and pass it to `buildContext` (`:978`).",
+          "Run the checks below."
+        ],
+        "verify": "`bun run typecheck` exits 0; `bun run lint` exits 0; `bun test tests/store-refresh.test.ts tests/tools-status.test.ts` green (7 + 25 = 32 pass, unchanged — this task adds no behaviour). Done when: `grep -n \"buildContext(\" src/index.ts` shows the definition plus three call sites and every call passes a third argument, and `git diff --stat` names only src/index.ts."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-003",
+      "title": "Document the sixth ToolContext field",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "docs/my-product/TECH-SPEC.md",
+        ".agents/prompts/rules.md"
+      ],
+      "pre_request": [
+        "TASK-001"
+      ],
+      "details": {
+        "goal": "The two places that enumerate `ToolContext`'s members name `dbSizeBytes` and where its value comes from, so the documented seam matches the code.",
+        "contract": "docs/my-product/TECH-SPEC.md §6, the `ToolContext` table (`:358-366`; three columns — field | type | why it is injected rather than imported): add exactly one row after the `config` row, keeping that three-column shape:\n```\n| `dbSizeBytes` | `number \\| null`, optional | the size recorded for the file this reader opened (the store fingerprint's `size`, taken before the handle was opened), never re-measured, so a handler cannot publish a size that belongs to a file this handle is not serving |\n```\n.agents/prompts/rules.md:24-25 (the `- **Tools never touch a connection.**` bullet opens at `:24`, its field list sits on `:25`): the parenthetical `(`reader`, `cursor`, `log`, `now`, `config`)` becomes `(`reader`, `cursor`, `log`, `now`, `config`, and the size recorded for the file the reader opened, `dbSizeBytes`)`. Add no sentence beyond that parenthetical; keep the surrounding two sentences and the rest of the bullet byte-identical.\nDo NOT edit `docs/my-product/TOOLS-SPEC.md`; its only `size_bytes` occurrence at `:257` is an example value and no prose there defines how the number is obtained. Do not edit `docs/my-product/DATABASE.md`, `.agents/prompts/test-map.md` or `.agents/prompts/project-layout.md` (that file names `context.ts (ToolContext)` but does not enumerate members), and do not touch source or tests.\nThis task documents the **seam** (the field and what it means) only. The row must not claim what `status` currently publishes: phase 0 changes no handler, so no sentence here may state that `status.graph.size_bytes` already reports the opened size. Nothing in phase 0 asserts that derivation and no document specifies it.",
+        "steps": [
+          "Add the `dbSizeBytes` row, with the type cell `number | null`, optional, to the `ToolContext` table in docs/my-product/TECH-SPEC.md (`:358-366`) after the `config` row.",
+          "Replace the five-name parenthetical on .agents/prompts/rules.md:25 with the six-name form above; leave the bullet's prose and `:24` opening untouched.",
+          "Check both files with the greps below.",
+          "Run the checks below."
+        ],
+        "verify": "`git diff --stat` names only docs/my-product/TECH-SPEC.md and .agents/prompts/rules.md. Done when: `grep -n 'dbSizeBytes' docs/my-product/TECH-SPEC.md .agents/prompts/rules.md` returns exactly one hit in each file, `grep -c 'now`, `config`)' .agents/prompts/rules.md` prints 0 (the old five-name list is gone; the pattern is single-quoted so the backticks stay literal), the added table row has three cells, and `bun test tests/instructions.test.ts` is green (that test pins `INSTRUCTIONS_TEXT`, which neither edited file feeds)."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-004",
+      "title": "Phase 0 gate: seam and plumbing verify",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003"
+      ],
+      "details": {
+        "goal": "Prove the seam exists, the plumbing fills it, and nothing else moved, before phase 1 builds behaviour on it.",
+        "contract": "Read-only gate: this task owns no files and must not edit any. `{ ...store.context }` call sites and `tests/` fakes are untouched by design, so any test edit here is a defect to report, not to make.",
+        "steps": [
+          "Run `bun run typecheck` from the repository root and record the exit code.",
+          "Run `bun run lint` and record the exit code.",
+          "Run `bun test tests/read-files.test.ts tests/store-refresh.test.ts tests/tools-status.test.ts` and record pass/fail counts.",
+          "Run `git status --porcelain -z | tr '\\0' '\\n'` (or plain `git status --porcelain`) and confirm the only modifications are the plan's own files. Porcelain collapses untracked directories to one entry, so the expected output is exactly four unstaged-modification lines of the form ` M <path>` (porcelain's first column is the index, so a working-tree edit starts with a space): ` M src/shared/store/read/context.ts`, ` M src/index.ts`, ` M docs/my-product/TECH-SPEC.md`, ` M .agents/prompts/rules.md`, plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/`. `.ppm/fix-ghissue14/` belongs to another planner, predates this plan's work and is out of scope; any other path, or a change inside `.ppm/fix-ghissue14/`, is reported and never repaired.",
+          "Run `stat -c '%s %Y' .sangkar/graph.db` and confirm it still prints `4677632 1795158731`; report any other reading as a blocking defect instead of touching the file."
+        ],
+        "verify": "Done when `bun run typecheck` exits 0, `bun run lint` exits 0, `bun test tests/read-files.test.ts tests/store-refresh.test.ts tests/tools-status.test.ts` reports `54 pass / 0 fail` (22 + 7 + 25, the measured baseline — no test file is edited in this phase), `git status --porcelain` lists exactly the four modified plan files of this phase plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/` and nothing else (`.ppm/fix-ghissue14/` is pre-existing and out of scope; a mismatch is reported, never repaired), and `stat -c '%s %Y' .sangkar/graph.db` still prints `4677632 1795158731`. Record every command's output tail in `progress`."
+      },
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

@@ -1,0 +1,108 @@
+{
+  "phase": "phase_1",
+  "title": "Handler publishes the served size, with the tests that prove it",
+  "tasks": [
+    {
+      "id": "TASK-005",
+      "title": "Publish the recorded size in status, keep the stat as fallback",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/tools/status/handler.ts",
+        "tests/tools-status.test.ts"
+      ],
+      "details": {
+        "goal": "`status.payload.graph.size_bytes` reports the size recorded when the reader opened its file, with the existing stat kept only as the fallback for a context that carries no record.",
+        "contract": "Payload line `src/tools/status/handler.ts:232` becomes `size_bytes: sizeBytesOf(ctx, dbPath),` with this helper beside the existing `dbSizeBytes` (`:486-494`):\n```ts\n/**\n * The graph file's size in bytes, preferring what was recorded when the reader opened it\n * (`ToolContext.dbSizeBytes`): a publish renames a new file over `graph.db`, so a `stat` taken here\n * can describe a generation this handle is not serving. The stat below is the fallback for a\n * hand-written context that carries no record, where it is still the only answer available.\n */\nfunction sizeBytesOf(ctx: ToolContext, dbPath: string): number {\n  const recorded = ctx.dbSizeBytes;\n  return typeof recorded === \"number\" ? recorded : dbSizeBytes(ctx, dbPath);\n}\n```\n`dbSizeBytes` keeps its body and its `0` plus `ctx.log.warn(\"status.db_size_unavailable\", ...)` behaviour; extend its doc comment's first sentence to say it is the fallback for a context with no recorded size. `payload.graph` keeps exactly `nodes`, `edges`, `size_bytes`, `db_path`.\nHeader comment `:19-21` today ends \"and the size is a `stat` of that file\" — replace that clause with: \"and the size is the one recorded when the reader opened that file (`ctx.dbSizeBytes`); a `stat` of the derived path is only the fallback for a context that carries no record, because a publish can rename a new file over the path.\"\nIn tests/tools-status.test.ts add ONE case inside `describe(\"status: complete coverage\")` (where the `size_bytes: DB_BYTES` assertion at `:489` lives) and leave `:489` asserting the fallback with a comment saying so:\n```ts\n  test(\"size_bytes is the size recorded at open, not a stat of the path\", () => {\n    // Issue #13's reproduction, in miniature: the served generation was 172032 bytes while the\n    // file on disk was 720896. The recorded value wins; DB_PATH itself is DB_BYTES (2048).\n    const payload = expectOk(handle({ ...contextFor(CLEAN), dbSizeBytes: 172_032 }));\n    expect(payload.graph.size_bytes).toBe(172_032);\n    expect(payload.graph.db_path).toBe(DB_PATH);\n  });\n```\nDo not change any other payload field, do not touch `db_path`'s derivation, do not edit src/index.ts, src/shared/store/read/context.ts or tests/store-refresh.test.ts.",
+        "steps": [
+          "Add `sizeBytesOf(ctx, dbPath)` next to `dbSizeBytes` and use it at the `size_bytes` key of `payload.graph`.",
+          "Extend `dbSizeBytes`'s doc comment to say it is now the fallback path and why it stays (a fake context with no recorded size).",
+          "Rewrite the `:19-21` header bullet so it no longer says the size is a `stat` of that file.",
+          "Add the \"recorded size wins\" case to tests/tools-status.test.ts inside `describe(\"status: complete coverage\")`.",
+          "Add the one-line comment above `size_bytes: DB_BYTES` at `:489` naming it as the fallback proof.",
+          "Run the checks below."
+        ],
+        "verify": "`bun test tests/tools-status.test.ts` reports `26 pass / 0 fail` (measured baseline 25 plus the new case); `bun run typecheck` exits 0; `bun run lint` exits 0. Done when `grep -n 'ctx.dbSizeBytes' src/tools/status/handler.ts` shows the preferred branch and `grep -n 'sizeBytesOf' src/tools/status/handler.ts` shows the helper plus its one call, and `git diff src/tools/status/handler.ts` touches only the `size_bytes` line, the two doc comments and the new helper."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-006",
+      "title": "Integration test: two generations between two status calls",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "tests/store-refresh.test.ts"
+      ],
+      "pre_request": [
+        "TASK-005"
+      ],
+      "details": {
+        "goal": "Prove with real published files that `status.graph.size_bytes` is the size the reader opened, for an accepted swap, for a publish that lands after the open, and for a refused newer-schema swap where the old reader keeps serving.",
+        "contract": "Extend the file's existing `publish` helper (`tests/store-refresh.test.ts:106-136`) with an options argument whose defaults reproduce today's behaviour exactly, so the seven existing cases are untouched:\n```ts\ninterface PublishOptions {\n  /** Bytes of one padding `meta` value, so the published file is provably a different size. */\n  readonly paddingBytes?: number;\n  /** `1` models a graph written by a build that ships one more migration than this one. */\n  readonly schemaVersionOffset?: number;\n}\n\nasync function publish(\n  f: Fixture,\n  generation: string,\n  seq: number,\n  options: PublishOptions = {},\n): Promise<void> {\n```\nand inside the existing `scope.transaction(() => { ... })`, after the three `upsertMeta.run` calls:\n```ts\n        if (options.paddingBytes !== undefined) {\n          upsertMeta.run(\"test.padding\", \"x\".repeat(options.paddingBytes));\n        }\n        if (options.schemaVersionOffset !== undefined) {\n          upsertMeta.run(\"schema_version\", String(schemaVersion() + options.schemaVersionOffset));\n        }\n```\n`upsertMeta` is already `INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)`, which is what makes an existing key (like the `schema_version` that `migrate()` wrote) overridable. Both writes stay inside the transaction that already exists.\nImports: merge `statSync` into the existing `import { existsSync } from \"node:fs\";` on `:3` (biome's `assist.actions.source.organizeImports` is on, so one sorted `node:fs` import is the house form — do not add a second one), add `handle` from `../src/tools/status/handler`, and `type ToolContext` from `#shared/store/read/context`.\nTwo cases in a new `describe(\"status graph.size_bytes: the file the reader opened\")`, with a local helper `function graphSize(ctx: ToolContext): number | undefined { const env = handle(ctx); return env.payload === null ? undefined : env.payload.graph.size_bytes; }` and `const PAD = 64 * 1024;`:\n1. **Accepted swap.** `publish(f, \"g-e00001\", 1)`; `const first = readyOf(openStore(config))`; `first.context.dbSizeBytes` equals `statSync(f.dbPath).size`, and `graphSize(first.context)` equals it too. Then `publish(f, \"g-e00002\", 2, { paddingBytes: PAD })`; `const second = readyOf(refreshStore(first, config))`; the new on-disk size differs from the first, and both `second.context.dbSizeBytes` and `graphSize(second.context)` equal the new size. Then `publish(f, \"g-e00003\", 3, { paddingBytes: 2 * PAD })` **without** refreshing, and assert `graphSize(second.context)` still equals the second size while `statSync(f.dbPath).size` is the third: a live stat would print the third. Close `second.conn` at the end.\n2. **Refused swap (the persistent divergence of issue #13).** `publish(f, \"g-f00001\", 1)`; `const before = readyOf(openStore(config))`; `const served = statSync(f.dbPath).size`. Then `publish(f, \"g-f00002\", 2, { paddingBytes: 8 * PAD, schemaVersionOffset: 1 })`; `const unserved = statSync(f.dbPath).size`; assert `unserved` is greater than `served`. Then `const refused = readyOf(refreshStore(before, config))`; assert `refused.conn === before.conn`, `refused.staleReason === \"a newer generation could not be opened\"`, `refused.context.reader.metaFor().generation === \"g-f00001\"`, and `graphSize(refused.context) === served`, where a live stat would print `unserved`. Close `refused.conn`.\nKeep a strict `expect(size2).not.toBe(size1)` guard in case 1 and the `toBeGreaterThan` guard in case 2, so a fixture that failed to grow fails instead of passing vacuously. Hermetic only: this file's existing `fixture()`/`configFor()` (`mkdtemp` at `:83`, `SANGKAR_HOME` at `:98`), no network, no writes inside this repository. Do not edit the seven existing cases, do not edit `src/**` or tests/tools-status.test.ts.",
+        "steps": [
+          "Add the `PublishOptions` interface and the fourth parameter to the existing `publish` helper (`:106-136`), with the two conditional `upsertMeta` writes inside the existing transaction.",
+          "Add the `PAD` constant and the `graphSize(ctx)` helper, merge `statSync` into the `node:fs` import on `:3`, and add the `handle` and `type ToolContext` imports.",
+          "Add case 1: the accepted swap, then a third publish after the refresh, asserting the context keeps the size it opened.",
+          "Add case 2: the newer-schema padded copy, the refusal, and the served size still reported beside a larger file on disk.",
+          "Extend the file docstring (`:14-30`): its case list is `:19-22`, so add the served-size coverage to that list rather than to the constants below the docstring.",
+          "Run the checks below."
+        ],
+        "verify": "`bun test tests/store-refresh.test.ts` reports `9 pass / 0 fail` (measured baseline 7 plus 2); `bun run typecheck` exits 0; `bun run lint` exits 0. Done when both new cases appear as passing, each asserts a `not.toBe` (or `toBeGreaterThan`) between the recorded size and the on-disk size, and `git diff --stat` names only tests/store-refresh.test.ts."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-007",
+      "title": "Phase 1 gate: full suite, drift, live-file and contract verify",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "pre_request": [
+        "TASK-005",
+        "TASK-006"
+      ],
+      "details": {
+        "goal": "Prove the whole plan: the payload publishes the served file's size, nothing else in the contract moved, and the repository is clean.",
+        "contract": "Read-only gate: owns no files, edits nothing. `.sangkar/graph.db` (4677632 bytes, mtime 1795158731) must be byte- and mtime-identical afterwards; a test that writes it is a defect to report. Any migration file `db:drift` creates is deleted and reported as a defect, never kept and never committed.",
+        "steps": [
+          "Run `bun run typecheck` and `bun run lint`, recording exit codes.",
+          "Run `bun test` (full suite, about 60 s) and record pass/fail counts plus the total.",
+          "Run `bun run db:drift`, then `git status --porcelain src/shared/store/migrations` and confirm it is empty.",
+          "Run `git status --porcelain`; confirm it lists exactly seven unstaged-modification lines of the form ` M <path>` — `src/shared/store/read/context.ts`, `src/index.ts`, `src/tools/status/handler.ts`, `tests/tools-status.test.ts`, `tests/store-refresh.test.ts`, `docs/my-product/TECH-SPEC.md`, `.agents/prompts/rules.md` — plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/`. Porcelain collapses untracked directories, so no `?? .ppm/fix-ghissue13/tasks/…` line will appear; `.ppm/fix-ghissue14/` is another planner's pre-existing directory, out of scope, and any modification inside it is reported rather than repaired.",
+          "Run `git diff src/tools/status/handler.ts` and confirm the payload diff is only the `size_bytes` line plus the new helper and the two doc comments: `nodes`, `edges`, `db_path` and every envelope field are untouched.",
+          "Run `stat -c '%s %Y' .sangkar/graph.db` and confirm it prints `4677632 1795158731`."
+        ],
+        "verify": "Done when `bun run typecheck` exits 0, `bun run lint` exits 0, `bun test` reports 0 fail with at least 906 pass (measured baseline 903 plus the 3 new cases: 1 unit, 2 integration), `bun run db:drift` exits 0 with no file under src/shared/store/migrations, `git status --porcelain` matches step 4 exactly — the plan's own modified files plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/`, nothing else — and `stat -c '%s %Y' .sangkar/graph.db` prints `4677632 1795158731`. A mismatch is reported, never repaired. Paste each command's output tail into `progress`."
+      },
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-008",
+      "title": "Update GitHub issue #13 with the shipped fix",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "details": {
+        "goal": "Record the shipped fix on https://github.com/Alfar-Lab/sangkar-mcp/issues/13 so the issue is answered in place instead of being closed off-list: one comment carrying the commit, the changed files, the two acceptance criteria with their evidence, and the tests that pin them; then close the issue only if both criteria are demonstrated.",
+        "contract": "This task owns no repository file and must not modify one: its only writes are a GitHub comment and, when warranted, the issue state. Do not edit the issue body, title, labels, milestones or any earlier comment.\nThe comment must carry, in this order: `git rev-parse --short HEAD` and `git show --stat --oneline HEAD`; the two acceptance criteria quoted from the issue body, each followed by the observed evidence (for criterion 1: `status`, `summary` and `expand` on one generation with the numbers actually read; for criterion 2: the test name and its assertion, plus `tests/store-refresh.test.ts`'s refused-swap case); the before/after `status.payload.graph` excerpt (before the fix the payload paired a served generation's `nodes` with the size of a file the reader never opened — reproduced as `nodes: 11` beside `size_bytes: 720896` for a 172032-byte opened file); and the commands run with their pass/fail counts.\nPost the body from a file (`gh issue comment 13 --repo Alfar-Lab/sangkar-mcp --body-file <path>`), never as a shell-quoted inline `--body`: the text contains backticks, quotes and JSON, and an inline body mangles them.\nClose the issue only when both criteria are quoted as satisfied in that same comment: `gh issue close 13 --repo Alfar-Lab/sangkar-mcp --comment \"Fixed in <sha>: ...\"`. If any criterion is unmet, leave the issue open and name the unmet one in the comment instead.\nForbidden: `git push --force`, tags, `npm publish`, edits to any repository file, and any change to the issue's body or labels.",
+        "steps": [
+          "Confirm the phase gate is green and `git status --porcelain` is clean apart from the plan directories; record `git rev-parse --short HEAD`.",
+          "Write the comment body to `/tmp/gh13-comment.md` with the contract's content, quoting both acceptance criteria from `gh issue view 13 --repo Alfar-Lab/sangkar-mcp --json body`.",
+          "Post it with `gh issue comment 13 --repo Alfar-Lab/sangkar-mcp --body-file /tmp/gh13-comment.md` and record the returned issue URL.",
+          "Close only if both criteria are demonstrated: `gh issue close 13 --repo Alfar-Lab/sangkar-mcp --comment \"Fixed in <sha>: graph.size_bytes now reports the size of the file the reader opened.\"` Otherwise report the unmet criterion and leave it open.",
+          "Delete the temp file and record the comment URL, the issue state and any unmet criterion in `progress`."
+        ],
+        "verify": "Done when `gh issue view 13 --repo Alfar-Lab/sangkar-mcp --json state,comments` shows the new comment, the state is `CLOSED` (or the comment names the criterion that is still unmet and the state is `OPEN`), `git status --porcelain` matches the state recorded before this task, the temp file is deleted, and the comment URL is recorded in `progress`."
+      },
+      "status": "todo",
+      "progress": [],
+      "pre_request": [
+        "TASK-007"
+      ]
+    }
+  ]
+}
