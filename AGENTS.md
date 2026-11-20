@@ -40,7 +40,8 @@ argument.
 - `README.md` — for users, in a fixed shape: `## sangkar-mcp`, `## Installation & Requirements`,
   `## Usage` (`### MCP & Skill`, `### CLI`), `## License`, `## Future Works`. Maintainer material
   belongs in `docs/maintainers.md`, not in a new top-level README section.
-- `docs/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`.
+- `src/prompts/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`; the suite pins
+the two byte for byte.
 - `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/`, `.ppm/sangkar-telemetry/` — completed plans;
   `.ppm/sangkar-daemon/` — in progress; task JSON is the execution record for each. Do not edit
   `.ppm/*/tasks/*.json` by hand.

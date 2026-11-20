@@ -65,6 +65,6 @@ entry — a tool call never takes a project argument.
 ## Keeping it true
 
 `SKILL.md` restates what `src/tools/*/manifest.ts` declares: argument names, defaults, enum values,
-and the budget ceilings. `docs/INSTRUCTIONS.md` is the in-protocol version of the same advice. When
+and the budget ceilings. `src/prompts/INSTRUCTIONS.md` is the in-protocol version of the same advice. When
 a manifest changes, the skill changes in the same commit, or an agent is told about a tool that no
 longer answers that way.

@@ -67,6 +67,8 @@ src/indexer/                the writer — runs in a spawned process, never in t
   persist.ts                write a unit; metrics, tested_by, FTS delta, tombstones, generation
   worker.ts                 the index process: lock, incremental routing, publish, exit codes
   watch.ts                  debounced polling that spawns the worker
+src/prompts/                INSTRUCTIONS.md, the agent-facing guide `INSTRUCTIONS_TEXT` ships; the suite
+                            pins the two byte for byte, so it is data, not a module — no .ts lives here
 tests/                      58 files, see `.agents/prompts/test-map.md`
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
