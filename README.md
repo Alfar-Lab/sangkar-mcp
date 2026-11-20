@@ -25,11 +25,11 @@ bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
 
 Pin `@beta` rather than the bare name: `latest` is a moving target, because npm created a
 `0.0.0-stage` holding version that took the tag when the name was first claimed. Today `beta` serves
-`0.2.0-beta.1`; `0.2.0-beta.2` is tagged and released on GitHub and reaches the registry on the next
+`0.2.0-beta.1`; `0.3.0-beta.1` is tagged and released on GitHub and reaches the registry on the next
 publish, which needs the maintainer's OTP. Before it lands:
 
 ```sh
-bun install -g github:Alfar-Lab/sangkar-mcp#v0.2.0-beta.2
+bun install -g github:Alfar-Lab/sangkar-mcp#v0.3.0-beta.1
 ```
 
 ### From a checkout
@@ -233,5 +233,5 @@ nodes, 9 347 edges (5 894 `calls`), 11 519 unresolved call sites, 115 `not_index
 4. **Grammar WASM is not embedded in the compiled binary.** Grammars load from `node_modules` at index
    time, so `dist/sangkar` serves an index but cannot build one. Compiling the 12-language set in is
    what the distribution plan waits for.
-5. **`0.2.0-beta.2` is not on npm yet.** The `beta` tag still serves `0.2.0-beta.1`; the publish needs
+5. **`0.3.0-beta.1` is not on npm yet.** The `beta` tag still serves `0.2.0-beta.1`; the publish needs
    the maintainer's OTP. Until then, install from the tag.
