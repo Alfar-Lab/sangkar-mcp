@@ -125,8 +125,17 @@
         ],
         "verify": "Done when `gh issue view 13 --repo Alfar-Lab/sangkar-mcp --json state,comments` shows the new comment, the state is `CLOSED` (or the comment names the criterion that is still unmet and the state is `OPEN`), `git status --porcelain` matches the state recorded before this task, the temp file is deleted, and the comment URL is recorded in `progress`."
       },
-      "status": "todo",
-      "progress": [],
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-20T08:43:16Z",
+          "detail": "Commented and closed. Comment URL: https://github.com/Alfar-Lab/sangkar-mcp/issues/13#issuecomment-7034679577 — posted from /tmp/gh13-comment.md via --body-file, read back byte-identical except GitHub's trailing newline. Issue state before: OPEN (0 comments) -> after: CLOSED (2 comments: mine + the close comment \"Fixed in 70d7a8c: graph.size_bytes now reports the size of the file the reader opened...\"). Body carries: sha 70d7a8c (+743fb77), git show --stat --oneline HEAD verbatim, both acceptance criteria quoted verbatim from the issue body each followed by evidence (criterion 1: before nodes:11/size_bytes:696320 vs after size_bytes:172032 with the 696320-byte unserved file and the g-served reader; live CLI status/summary/expand on generation g-f7d998 with payload.graph size_bytes 172032 = stat; criterion 2: the 2 store-refresh cases + 1 tools-status case with their assertions), commands table (typecheck 0, lint 0 / 134 files, bun test 906 pass / 0 fail / 5670 expects / 58 files, db:drift no changes), the 1-of-7 acceptance p95 flake disclosed as pre-existing, and the local-branch-not-pushed note. No unmet criterion. porcelain before and after this task: identical (\" M .ppm/fix-ghissue13/tasks/phase_1.json\" only — this plan's own bookkeeping). HEAD still 70d7a8c. Temp files /tmp/gh13-comment.md and /tmp/gh13-posted.md deleted. No repository file, issue body, title, labels or earlier comment touched."
+        },
+        {
+          "time": "2026-11-20T08:43:37Z",
+          "detail": "Orchestrator-verified: issue Alfar-Lab/sangkar-mcp#13 is CLOSED with 2 comments; evidence comment https://github.com/Alfar-Lab/sangkar-mcp/issues/13#issuecomment-7034679577 quotes sha 70d7a8c, the verbatim git show --stat, both acceptance criteria with the measured before/after payload (before: nodes 11 / size_bytes 696320 against a 172032-byte opened file; after: size_bytes 172032 against a 696320-byte file on disk), the live CLI generation g-f7d998 numbers, test counts (tools-status 26, store-refresh 9, full suite 906 pass / 0 fail), drift clean, the disclosed acceptance criterion-4 p95 flake, and that the branch is local and not pushed. No number in the comment is invented; 696320 is the measured value, not the plan's 720896 expectation. Repository untouched by this task: porcelain shows only the plan bookkeeping .ppm/fix-ghissue13/tasks/phase_1.json; temp comment file deleted."
+        }
+      ],
       "pre_request": [
         "TASK-007"
       ]
