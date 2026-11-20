@@ -27,13 +27,15 @@ argument.
 
 ## Docs and plans
 
-- `docs/my-product/` — the design record: `DESIGN.md` (objectives, contracts, absence semantics, acceptance),
-  `TELEMETRY.md` (record schemas, the privacy prohibition, the verb, the report),
+- `docs/my-product/` — the **product design record**: `DESIGN.md` (objectives, contracts, absence
+  semantics, acceptance), `TELEMETRY.md` (record schemas, the privacy prohibition, the verb, the report),
   `TOOLS-SPEC.md` (per-tool params, payload keys, budgets), `DATABASE.md` (tables, index plan, publish
-  protocol), `TECH-SPEC.md` (runtime facts, module isolation, Drizzle, parser strategy), `GRAPH-MODEL.md`,
-  `INDEXING-PIPELINE.md`, `STORAGE-ARCHITECTURE.md`.
-- `docs/research/` — the two reference implementations' analysis and the real MCP payloads captured from them
-  (`tool-outputs/`). Those numbers are the oracles the parity tests use.
+  protocol), `TECH-SPEC.md` (runtime facts, module isolation, Drizzle, parser strategy),
+  `INDEXING-PIPELINE.md` (triggers, registration, the per-repo policy file).
+- `docs/research/` — the **product-related research record**: the two reference implementations analysed
+  from their own source (`TOOL-SURFACE.md`, `TOOL-USAGE-ANALYSIS.md`, `GRAPH-MODEL.md`,
+  `STORAGE-ARCHITECTURE.md`, `INDEXING-PIPELINE.md`) and `tool-outputs/`, the real MCP payloads
+  `TOOL-OUTPUTS.md` documents. Those numbers are the oracles the parity tests use.
 - `docs/maintainers.md` — for whoever builds the artifact or cuts a release: distribution, the npm
   traps, the checks. It does not ship in the npm tarball; the procedure itself is the project skill
   `.agents/skills/build-n-deploy/SKILL.md`.
@@ -41,7 +43,7 @@ argument.
   `## Usage` (`### MCP & Skill`, `### CLI`), `## License`, `## Future Works`. Maintainer material
   belongs in `docs/maintainers.md`, not in a new top-level README section.
 - `src/prompts/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`; the suite pins
-the two byte for byte.
+  the two byte for byte.
 - `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/`, `.ppm/sangkar-telemetry/` — completed plans;
   `.ppm/sangkar-daemon/` — in progress; task JSON is the execution record for each. Do not edit
   `.ppm/*/tasks/*.json` by hand.

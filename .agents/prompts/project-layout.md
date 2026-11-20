@@ -73,7 +73,15 @@ tests/                      58 files, see `.agents/prompts/test-map.md`
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
                             arguments, defaults or budget ceilings move here in the same commit
-docs/                       design record — read before changing behaviour
+docs/                       the record — read before changing behaviour
+  my-product/               the product design record: what this product must do and the contracts it
+                            keeps — DESIGN.md (objectives, absence semantics, acceptance),
+                            TOOLS-SPEC.md, DATABASE.md, TECH-SPEC.md, TELEMETRY.md, INDEXING-PIPELINE.md
+  research/                 the product-related research record these decisions rest on: the two
+                            reference implementations read from their own source (TOOL-SURFACE.md,
+                            TOOL-USAGE-ANALYSIS.md, GRAPH-MODEL.md, STORAGE-ARCHITECTURE.md,
+                            INDEXING-PIPELINE.md) and tool-outputs/, the 49 real MCP payloads
+                            TOOL-OUTPUTS.md documents and the parity tests quote as oracles
 .ppm/                       two completed PPM plans (see `AGENTS.md` § "Docs and plans")
 .sangkar/graph.db           this repo's graph (git-ignored); `.codegraph/` is the pre-rename store
 ```
