@@ -22,8 +22,17 @@
         ],
         "verify": "`bun run typecheck` exits 0 (proves the field is optional: no `tests/` literal was edited); `bun run lint` exits 0; `bun test tests/read-files.test.ts` is green. Done when: `grep -n \"dbSizeBytes\" src/shared/store/read/context.ts` shows the optional member and `grep -c \"five fields\" src/shared/store/read/context.ts` prints 0, and `git diff --stat` names only src/shared/store/read/context.ts."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-20T08:06:55Z",
+          "detail": "Changed src/shared/store/read/context.ts only (+18/-6): added optional `readonly dbSizeBytes?: number | null;` to `ToolContext` with the specified doc comment; interface doc block now says \"six fields\" and gained the `dbSizeBytes` bullet (config bullet re-terminated with ';'); module header clause at :5 now names \"the size recorded for the file the reader opened\". Import list unchanged (AppConfig, Cursor*, Logger, GraphReader); no import from src/tools/** or src/index.ts; no tests touched. Checks (worktree root, bun 1.4.4): `bun run typecheck` exit 0; `bun run lint` exit 0 (134 files, no fixes); `bun test tests/read-files.test.ts` 22 pass / 0 fail (92 expect); extra `bun test tests/boundary.test.ts` 13 pass / 0 fail. `grep -n dbSizeBytes src/shared/store/read/context.ts` -> :49 (doc bullet), :66 (optional member); `grep -c \"five fields\"` -> 0. `git diff --stat` names src/shared/store/read/context.ts plus a pre-existing .ppm/fix-ghissue13/tasks/phase_0.json modification that was already dirty before my edits (orchestrator bookkeeping, not touched by me); `git ls-files -o --exclude-standard` empty."
+        },
+        {
+          "time": "2026-11-20T08:07:19Z",
+          "detail": "Orchestrator-verified: diff is src/shared/store/read/context.ts only (+18/-6); `bun run typecheck` exit 0, `bun run lint` exit 0 (134 files), `bun test tests/read-files.test.ts tests/boundary.test.ts` 35 pass / 0 fail; grep shows dbSizeBytes at :49 (bullet) and :66 (optional member), \"five fields\" count 0. Members and doc wording match the contract; imports unchanged; no schema/dependency/payload change."
+        }
+      ]
     },
     {
       "id": "TASK-002",
@@ -49,8 +58,17 @@
         ],
         "verify": "`bun run typecheck` exits 0; `bun run lint` exits 0; `bun test tests/store-refresh.test.ts tests/tools-status.test.ts` green (7 + 25 = 32 pass, unchanged — this task adds no behaviour). Done when: `grep -n \"buildContext(\" src/index.ts` shows the definition plus three call sites and every call passes a third argument, and `git diff --stat` names only src/index.ts."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-20T08:08:57Z",
+          "detail": "buildContext now carries the pre-open fingerprint size into ToolContext.dbSizeBytes. Only src/index.ts changed (+16/-4, git diff --stat names src/index.ts alone from this task; .agents/prompts/rules.md, docs/my-product/TECH-SPEC.md, src/shared/store/read/context.ts and .ppm/* were already dirty from other tasks in the wave and untouched here).\nSignature: buildContext(config: AppConfig, reader: GraphReader, dbSizeBytes: number | null): ToolContext (src/index.ts:411), sets dbSizeBytes on the returned object; two-line doc comment says the value is the pre-open fingerprint's size, describing the file the handle opened, and is the one place a payload may read a size from.\nThree call sites (grep -n \"buildContext(\" src/index.ts shows 411 def + 481 + 530 + 990, each with a third arg):\n- openStore :481 -> fingerprint.size (same local const the ready Store stamps; non-null after the empty check).\n- refreshStore replacement :530 -> now.size (the fingerprint taken before openReader, same value stamped on the replacement).\n- openFor :990 -> dbSizeBytes derived as store.kind === \"ready\" ? (store.fingerprint?.size ?? null) : null, with the \"belongs to the handle this call serves, never a stat of the path\" comment.\nUntouched: Store/FileFingerprint members, pre-open fingerprint order+comment (now :446-451), sameFile, refusal path, single statSync (only :316 in fingerprintOf), src/index.ts:1210 spread inherits the field, no test or handler edits.\nVerify (worktree root): bun run typecheck -> exit 0 (tsc --noEmit); bun run lint -> exit 0, 134 files checked, no fixes; bun test tests/store-refresh.test.ts tests/tools-status.test.ts -> 32 pass / 0 fail, 216 expect() calls, exit 0."
+        },
+        {
+          "time": "2026-11-20T08:10:27Z",
+          "detail": "Orchestrator-verified: diff is src/index.ts only (+16/-4); buildContext gains third param dbSizeBytes: number | null with the two-line doc comment; calls at :481 (fingerprint.size), :530 (now.size), :990 (store.fingerprint?.size ?? null, null when not ready). `bun run typecheck` exit 0, `bun run lint` exit 0 (134 files), 5 targeted suites 79 pass / 0 fail. Invariants checked in source: single statSync at :316 inside fingerprintOf, no new Store/FileFingerprint member, CLI spread at :1210 untouched."
+        }
+      ]
     },
     {
       "id": "TASK-003",
@@ -75,8 +93,17 @@
         ],
         "verify": "`git diff --stat` names only docs/my-product/TECH-SPEC.md and .agents/prompts/rules.md. Done when: `grep -n 'dbSizeBytes' docs/my-product/TECH-SPEC.md .agents/prompts/rules.md` returns exactly one hit in each file, `grep -c 'now`, `config`)' .agents/prompts/rules.md` prints 0 (the old five-name list is gone; the pattern is single-quoted so the backticks stay literal), the added table row has three cells, and `bun test tests/instructions.test.ts` is green (that test pins `INSTRUCTIONS_TEXT`, which neither edited file feeds)."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-20T08:09:59Z",
+          "detail": "Docs seam documented; no source/test touched.\n1) docs/my-product/TECH-SPEC.md:367 (immediately after the `config` row at :366, before blank line :368) added one 3-cell row: \"| `dbSizeBytes` | `number \\| null`, optional | the size recorded for the file this reader opened (the store fingerprint's `size`, taken before the handle was opened), never re-measured, so a handler cannot publish a size that belongs to a file this handle is not serving |\". Table shape kept (field | type | why injected). No claim about what `status.graph.size_bytes` currently publishes; wording is a handler constraint only.\n2) .agents/prompts/rules.md:25-26 in the \"- **Tools never touch a connection.**\" bullet (:24 untouched): old \"( `reader`, `cursor`, `log`, `now`, `config` )\" replaced by \"( `reader`, `cursor`, `log`, `now`, `config`, and the size recorded for the file the reader opened, `dbSizeBytes` )\"; no sentence added, tail re-wrapped onto :26 at 100-char width, remainder of bullet byte-identical (whole-file whitespace-normalized token diff vs HEAD shows only that parenthetical).\nVERIFY (all from worktree root, exit codes real):\n- git diff --stat -- docs/my-product/TECH-SPEC.md .agents/prompts/rules.md -> \"2 files changed, 3 insertions(+), 1 deletion(-)\"; no other path appears in my diff.\n- grep -n 'dbSizeBytes' docs/my-product/TECH-SPEC.md .agents/prompts/rules.md -> 1 hit per file (TECH-SPEC.md:367, rules.md:26), exit 0.\n- grep -c 'now`, `config`)' .agents/prompts/rules.md -> 0 (exit 1); old five-name list gone.\n- new-row cell count via awk on :367 after neutralizing escaped \\| -> 3 cells.\n- bun test tests/instructions.test.ts -> 12 pass, 0 fail, 50 expect(), exit 0.\nNOT RUN: full `bun test`, typecheck, lint — out of scope for a docs-only change and unreliable here because other workers' in-flight edits are present in this shared worktree (git status also shows M src/index.ts, M src/shared/store/read/context.ts, M .ppm/fix-ghissue13/tasks/phase_0.json from other workers; untouched by me)."
+        },
+        {
+          "time": "2026-11-20T08:10:27Z",
+          "detail": "Orchestrator-verified: diff is docs/my-product/TECH-SPEC.md (+1) and .agents/prompts/rules.md (+2/-1) only. TECH-SPEC.md:367 adds the three-cell dbSizeBytes row after config; rules.md:25-26 replaces the five-name parenthetical with the six-name form, no other prose changed. `bun test tests/instructions.test.ts` 12 pass in the combined run (79 pass / 0 fail across 5 files). No sentence claims status already publishes the opened size."
+        }
+      ]
     },
     {
       "id": "TASK-004",
@@ -101,8 +128,17 @@
         ],
         "verify": "Done when `bun run typecheck` exits 0, `bun run lint` exits 0, `bun test tests/read-files.test.ts tests/store-refresh.test.ts tests/tools-status.test.ts` reports `54 pass / 0 fail` (22 + 7 + 25, the measured baseline — no test file is edited in this phase), `git status --porcelain` lists exactly the four modified plan files of this phase plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/` and nothing else (`.ppm/fix-ghissue14/` is pre-existing and out of scope; a mismatch is reported, never repaired), and `stat -c '%s %Y' .sangkar/graph.db` still prints `4677632 1795158731`. Record every command's output tail in `progress`."
       },
-      "status": "todo",
-      "progress": []
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-20T08:11:55Z",
+          "detail": "Read-only gate, worktree /home/ljosalfar-server/Documents/researchs/codegraph-mcp-gh13, HEAD 76b4678 on fix/gh-issue-13, bun 1.4.4. No file edited; no task status changed.\n1. `bun run typecheck` -> exit 0 (\"$ tsc --noEmit\", no diagnostics). PASS.\n2. `bun run lint` -> exit 0 (\"Checked 134 files in 504ms. No fixes applied.\"). PASS.\n3. `bun test tests/read-files.test.ts tests/store-refresh.test.ts tests/tools-status.test.ts` -> exit 0, \"54 pass / 0 fail / 308 expect() calls / Ran 54 tests across 3 files. [1161.00ms]\" = 22+7+25 measured baseline. PASS.\n4. `git status --porcelain -z | tr '\\0' '\\n'` and plain `git status --porcelain` both print exactly 5 lines: \" M .agents/prompts/rules.md\", \" M .ppm/fix-ghissue13/tasks/phase_0.json\", \" M docs/my-product/TECH-SPEC.md\", \" M src/index.ts\", \" M src/shared/store/read/context.ts\". No other path. `git ls-files -o --exclude-standard` is empty (0 untracked files). DEVIATION (expected, pre-announced): the plan predicted 4 \" M\" lines + \"?? .ppm/fix-ghissue13/\" + \"?? .ppm/fix-ghissue14/\". In this worktree the plan files are tracked (committed in 76b4678), so the ppm bookkeeping appears as the tracked modification \" M .ppm/fix-ghissue13/tasks/phase_0.json\" (orchestrator-owned, +34/-7, status/progress edits only) and there are no \"??\" entries at all. .ppm/fix-ghissue14/ is tracked here too (7 tracked files) and its porcelain output is empty (0 lines) — clean, untouched, out of scope. Verdict on the criterion's intent (only the plan's own files moved): PASS.\n5. `stat -c '%s %Y' .sangkar/graph.db` in the worktree -> exit 1, \"stat: cannot statx '.sangkar/graph.db': No such file or directory\" (the .sangkar directory does not exist here; gitignored, never created). Per the brief, the read-only stat against the main repo: `stat -c '%s %Y' /home/ljosalfar-server/Documents/researchs/codegraph-mcp/.sangkar/graph.db` -> exit 0, prints \"4665344 1795161959\". DEVIATION: this does not match the expected \"4677632 1795158731\" — the main repo's graph.db has been re-indexed/published since the plan was measured (size and mtime both differ). Nothing touched; reported, not repaired. Criterion NOT VERIFIED (deviation recorded, not a defect in this worktree's changes).\nExtra checks:\n- `git diff --stat -- src docs .agents` = .agents/prompts/rules.md (+2/-1), docs/my-product/TECH-SPEC.md (+1/-0), src/index.ts (+16/-4), src/shared/store/read/context.ts (+18/-6); 4 files, +37/-11. Diff read in full: the only behaviour change is the optional `readonly dbSizeBytes?: number | null` member on ToolContext plus buildContext's third parameter threaded from the pre-open fingerprint (fingerprint.size / now.size / store.fingerprint?.size ?? null); the rest is doc comment prose in src and the matching rules.md + TECH-SPEC.md rows. No test edit: `git status --porcelain tests` = 0 lines and `git diff --exit-code HEAD -- tests` = exit 0. No payload key change: grep of added src lines for \"payload\" matches only one comment line, and the added `dbSizeBytes:` is a parameter type, not an envelope key. No schema/migration change: `git status --porcelain src/shared/store/migrations` = 0 lines (same with --untracked-files=all). No package.json/bun.lock change: `git status --porcelain package.json bun.lock` = 0 lines. All PASS.\n- `src/tools/status/handler.ts` byte-identical to HEAD: `git diff --exit-code HEAD -- src/tools/status/handler.ts` = exit 0; blob hashes 7a83580d7c49f2a8bb7986e116c6ca82b88f0203 for both `git rev-parse HEAD:...` and `git hash-object ...`. PASS.\n- buildContext call sites: definition at src/index.ts:411, calls at :481 (openStore), :530 (refreshStore), :990 (openFor), all passing a third argument; the `{ ...store.context }` spread sites are not in the diff. PASS.\nSummary: typecheck PASS, lint PASS, tests PASS (54/0), git-status criterion PASS on intent with the tracked-bookkeeping deviation recorded, graph.db criterion NOT VERIFIED (main-repo file now 4665344 1795161959; worktree file absent), no-test-edit/no-payload-key/no-schema/no-dependency checks PASS, handler-identity check PASS."
+        },
+        {
+          "time": "2026-11-20T08:12:26Z",
+          "detail": "Orchestrator-reverified: typecheck 0, lint 0 (134 files), 3 suites 54 pass / 0 fail / 308 expect; porcelain = 5 lines (4 product files + the tracked ppm bookkeeping .ppm/fix-ghissue13/tasks/phase_0.json); git diff --exit-code HEAD -- tests clean, src/tools/status/handler.ts untouched, src/shared/store/migrations clean, no package.json/bun.lock change. Deviation recorded, not repaired: plan dirs are tracked in this worktree so no `??` entries, and the main repo's .sangkar/graph.db now reads 4665344 1795161959 (external re-index by another session; nothing here wrote it — the worktree has no .sangkar at all)."
+        }
+      ]
     }
   ]
 }

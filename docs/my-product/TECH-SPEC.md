@@ -364,6 +364,7 @@ export async function handle(ctx: ToolContext, args: TraceArgs): Promise<Envelop
 | `log` | `Logger` scoped to the tool name | log lines are attributable without every call site naming itself |
 | `now` | `() => Date` | makes staleness and cursor expiry testable |
 | `config` | `AppConfig` | a tool must not read `process.env` |
+| `dbSizeBytes` | `number \| null`, optional | the size recorded for the file this reader opened (the store fingerprint's `size`, taken before the handle was opened), never re-measured, so a handler cannot publish a size that belongs to a file this handle is not serving |
 
 Rules for handlers:
 

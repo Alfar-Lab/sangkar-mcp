@@ -486,6 +486,7 @@ describe("status: complete coverage", () => {
     expect(payload.graph).toEqual({
       nodes: 13_955,
       edges: 130_044,
+      // The fallback proof: this fixture context records no size, so the `stat` of DB_PATH answers.
       size_bytes: DB_BYTES,
       db_path: DB_PATH,
     });
@@ -514,6 +515,14 @@ describe("status: complete coverage", () => {
       paths_total: 0,
       not_indexed_total: 0,
     });
+  });
+
+  test("size_bytes is the size recorded at open, not a stat of the path", () => {
+    // Issue #13's reproduction, in miniature: the served generation was 172032 bytes while the
+    // file on disk was 720896. The recorded value wins; DB_PATH itself is DB_BYTES (2048).
+    const payload = expectOk(handle({ ...contextFor(CLEAN), dbSizeBytes: 172_032 }));
+    expect(payload.graph.size_bytes).toBe(172_032);
+    expect(payload.graph.db_path).toBe(DB_PATH);
   });
 
   test("a directory request expands to the files and skips under it", () => {

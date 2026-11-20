@@ -22,7 +22,8 @@ Other invariants that break the product when violated:
   banned by biome's `suspicious/noConsole` rule (only `error` and `warn` are allowed) and the protocol is
   asserted end-to-end by `tests/mcp-surface.test.ts`.
 - **Tools never touch a connection.** A handler receives `ToolContext` from `#shared/store/read/context.ts`
-  (`reader`, `cursor`, `log`, `now`, `config`). It does not open a database, does not import `drizzle-orm`,
+  (`reader`, `cursor`, `log`, `now`, `config`, and the size recorded for the file the reader opened,
+  `dbSizeBytes`). It does not open a database, does not import `drizzle-orm`,
   does not read `process.env`: the settings that do come from the environment are read once, in
   `src/shared/config.ts` (`SANGKAR_CURSOR_KEY`, `SANGKAR_TELEMETRY`, and the machine-level
   `SANGKAR_HOME`). `src/index.ts` reads no environment variable and starts no watcher — the old
