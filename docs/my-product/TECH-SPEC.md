@@ -12,7 +12,7 @@ probe commands are given so they can be re-run.
 
 ## 1. Verified runtime baseline
 
-Probed with `bun 1.4.4` (`~/.bun/bin/bun`, not on `PATH`).
+Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
 
 | Capability | Result | Consequence for this design |
 |---|---|---|

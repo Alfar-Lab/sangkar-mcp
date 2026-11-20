@@ -74,11 +74,11 @@ and reaches the registry on the next publish.
 ## Checks
 
 ```sh
-export PATH="$HOME/.bun/bin:$PATH"   # `bun` is not on PATH here, and the scripts shell out to it
+export PATH="$HOME/.bun/bin:$PATH"   # only needed in a stripped shell; `bun` is on PATH here
 bun run typecheck && bun run lint && bun run test && bun run db:drift
 bun test tests/binary-smoke.test.ts  # builds the standalone artifact and drives one tools/call
 bun run acceptance                   # budgets, latency, the prepared-statement ratio
 ```
 
 `bun test` uses fixtures and temp directories only: no network, no writes into the repository. The
-invariants each file guards are mapped in `AGENTS.md` §Test map.
+invariants each file guards are mapped in `AGENTS.test-map.md`.

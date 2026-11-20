@@ -2,7 +2,7 @@
 name: build-n-deploy
 description: "Cut a sangkar-mcp release from version choice to deployment: pick the SemVer bump under the house standard, write the version into both files, sync README.md with what shipped, run the preflight, commit, tag v[MAJOR].[MINOR].[PATCH]-[TAG].[ITERATION], push and publish the GitHub Release, then hand the maintainer the npm publish command that needs their OTP. Use when asked to release, deploy, bump a version, cut a tag, sync or refresh the README before a release, write release notes, deploy to GitHub, or publish sangkar-mcp to npm."
 license: MIT
-compatibility: Bun 1.4.4+ at ~/.bun/bin/bun (not on PATH), git, a `gh` CLI logged in to Alfar-Lab/sangkar-mcp, npm logged in as the package owner with 2FA. Never runs `npm publish` itself — that step belongs to the maintainer.
+compatibility: Bun 1.4.4+ on PATH as `bun` (~/.bun/bin/bun), git, a `gh` CLI logged in to Alfar-Lab/sangkar-mcp, npm logged in as the package owner with 2FA. Never runs `npm publish` itself — that step belongs to the maintainer.
 ---
 
 # build-n-deploy
@@ -12,8 +12,8 @@ with what shipped, prove the tree with the preflight, tag and publish on GitHub,
 maintainer the npm command. Steps 1–8 are yours. The publish itself (step 9) is a command you print,
 never a command you run: `npm publish` needs an OTP only the maintainer has.
 
-This skill restates `docs/maintainers.md` §Publishing to npm and the Definition of done in `AGENTS.md`. When
-either moves, this file moves in the same commit.
+This skill restates `docs/maintainers.md` §Publishing to npm and the Definition of done in
+`AGENTS.run-build.md`. When either moves, this file moves in the same commit.
 
 ## 1. The version standard
 
@@ -133,11 +133,10 @@ under the same AGENTS.md rule.
 
 ## 5. Preflight
 
-`bun` is not on `PATH` on this machine, and the scripts shell out to `bun`, so the export is part of
-the command:
+`bun` is on `PATH` on the maintainer's machine, so the preflight is the bare command; export it only in a
+stripped shell that has no profile:
 
 ```sh
-export PATH="$HOME/.bun/bin:$PATH"
 bun run typecheck && bun run lint && bun run test && bun run db:drift
 ```
 

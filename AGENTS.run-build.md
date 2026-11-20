@@ -4,8 +4,12 @@ How to run and check the code on this machine. Entry point: [`AGENTS.md`](AGENTS
 
 ## Run it
 
-`bun` is **not on `PATH`** on this machine; the binary is `~/.bun/bin/bun`. `bun link` puts `sangkar` on
-PATH, otherwise invoke `bun run bin/sangkar.ts`.
+`bun` **is on `PATH`** on this machine: 1.4.4, reached as `bun` through `~/.local/bin/bun` →
+`~/.bun/bin/bun`, and `.profile` / `.bashrc` add `$BUN_INSTALL/bin` as well. `sangkar` is linked into
+`~/.local/bin` too. A checkout whose link you have not made runs `bun run bin/sangkar.ts`.
+
+A stripped shell has none of that — `env -i`, a cron job, a CI image without the profile — and there the
+export is part of the command: `PATH="$HOME/.bun/bin:$PATH"`.
 
 ```sh
 bun install
@@ -15,10 +19,9 @@ bun run bin/sangkar.ts trace 'handleRequest' --depth 1
 bun run mcp                           # MCP server on stdio
 ```
 
-A script that shells out to `bun` (`test`, `acceptance`, `db:parity`) fails with
-`bun: command not found` unless the binary is on `PATH`, because the script body is a `bun …`
-command and not a re-entry through the same binary:
-`PATH="$HOME/.bun/bin:$PATH" ~/.bun/bin/bun run test`.
+A script that shells out to `bun` (`test`, `acceptance`, `db:parity`) inherits this `PATH`, so the call is
+plain: `bun run test`. Verified the other way round too — `bun run db:parity` runs, and its script body is a
+`bun test …` command that resolves the same binary.
 
 | Script | Does |
 |---|---|
