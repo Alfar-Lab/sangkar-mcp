@@ -404,7 +404,15 @@ function refusalOf(error: unknown): AppError {
   });
 }
 
-function buildContext(config: AppConfig, reader: GraphReader): ToolContext {
+/**
+ * `dbSizeBytes` is the `size` of the fingerprint taken *before* the handle was opened, so it
+ * describes the file this reader serves and is the one place a payload may read a size from.
+ */
+function buildContext(
+  config: AppConfig,
+  reader: GraphReader,
+  dbSizeBytes: number | null,
+): ToolContext {
   return {
     reader,
     // Bound to the repository it serves: one process answers for several trees, and a page token
@@ -414,6 +422,7 @@ function buildContext(config: AppConfig, reader: GraphReader): ToolContext {
     log,
     now: () => new Date(),
     config,
+    dbSizeBytes,
   };
 }
 
@@ -469,7 +478,7 @@ export function openStore(config: AppConfig): Store {
     return {
       kind: "ready",
       conn,
-      context: buildContext(config, reader),
+      context: buildContext(config, reader, fingerprint.size),
       staleReason: guard.staleReason,
       fingerprint,
     };
@@ -518,7 +527,7 @@ export function refreshStore(store: Store, config: AppConfig): Store {
     const replacement: Store = {
       kind: "ready",
       conn,
-      context: buildContext(config, reader),
+      context: buildContext(config, reader, now.size),
       staleReason: guard.staleReason,
       fingerprint: now,
     };
@@ -975,7 +984,10 @@ async function runMcp(
     const store = refreshStore(pool.acquire(root), repoConfig);
     pool.replace(root, store);
     const reader = store.kind === "ready" ? store.context.reader : unreadableReader();
-    return { store, context: buildContext(repoConfig, reader) };
+    // The size belongs to the handle this call serves: the print `refreshStore` recorded (or kept)
+    // for the file it opened, never a stat of the path.
+    const dbSizeBytes = store.kind === "ready" ? (store.fingerprint?.size ?? null) : null;
+    return { store, context: buildContext(repoConfig, reader, dbSizeBytes) };
   };
 
   const recorderFor = (repoRoot: string): Telemetry => {

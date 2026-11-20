@@ -2,10 +2,11 @@
  * The context every tool handler receives (`TECH-SPEC.md` §6, `plan.constraint_invariant.md`).
  *
  * It is the whole reason a handler is testable without a database and without a server: the
- * reader, the cursor pair, the logger, the clock and the resolved config all arrive as values,
- * so a handler never opens a connection, never reads the environment and never mints an envelope
- * from ambient state. `handle(ctx: ToolContext, args)` is therefore the same signature in every
- * tool, and a fake `ToolContext` built from `#shared/*` alone is a complete unit-test seam.
+ * reader, the cursor pair, the logger, the clock, the resolved config and the size recorded for
+ * the file the reader opened all arrive as values, so a handler never opens a connection, never
+ * reads the environment and never mints an envelope from ambient state.
+ * `handle(ctx: ToolContext, args)` is therefore the same signature in every tool, and a fake
+ * `ToolContext` built from `#shared/*` alone is a complete unit-test seam.
  *
  * This module imports nothing from `src/tools/**` or `src/index.ts` — deliberately, and asserted
  * by `tests/read-files.test.ts`. A shared module that reached for the composition root would
@@ -36,7 +37,7 @@ export interface CursorFacade {
 }
 
 /**
- * Everything a handler may know about the process. The five fields are the entire seam:
+ * Everything a handler may know about the process. The six fields are the entire seam:
  *
  * - `reader` is the aggregate `GraphReader`; there is no connection anywhere in this type, so a
  *   tool cannot query SQL even by accident;
@@ -44,7 +45,10 @@ export interface CursorFacade {
  * - `log` is pre-scoped to the tool name, so a log line is attributable without every call site
  *   naming itself, and nothing is ever written to stdout (that is the MCP protocol);
  * - `now` is injected, so staleness and cursor expiry are testable rather than wall-clock;
- * - `config` is the resolved configuration, so no handler reads the environment.
+ * - `config` is the resolved configuration, so no handler reads the environment;
+ * - `dbSizeBytes` is the size recorded for the file this reader opened — read once from the file
+ *   fingerprint and never re-measured, because a publish renames a new file over `graph.db` and a
+ *   `stat` would describe a file this handle is not serving.
  */
 export interface ToolContext {
   readonly reader: GraphReader;
@@ -52,4 +56,12 @@ export interface ToolContext {
   readonly log: Logger;
   readonly now: () => Date;
   readonly config: AppConfig;
+  /**
+   * The byte size of the `graph.db` this reader opened, recorded by the composition root when the
+   * file was fingerprinted (before `openReader`) and never re-measured: a publish renames a new
+   * file over the path, so a `stat` taken in a handler can describe a generation this handle
+   * cannot serve. `null` when no file was served; absent on a hand-written fake written before
+   * the field existed, which is why it is optional.
+   */
+  readonly dbSizeBytes?: number | null;
 }
