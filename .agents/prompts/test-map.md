@@ -1,6 +1,6 @@
-# AGENTS.test-map.md
+# Test map
 
-Which tests guard which change. Entry point: [`AGENTS.md`](AGENTS.md).
+Which tests guard which change. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 | If you change… | These will tell you |
 |---|---|
@@ -32,4 +32,4 @@ Which tests guard which change. Entry point: [`AGENTS.md`](AGENTS.md).
 | budgets and latency end to end | `acceptance.test.ts` |
 | the shipped binary | `binary-smoke.test.ts` |
 
-What this map does **not** cover is listed in [`AGENTS.state-gaps.md`](AGENTS.state-gaps.md).
+What this map does **not** cover is listed in [`state-gaps.md`](state-gaps.md).

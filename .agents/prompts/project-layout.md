@@ -1,7 +1,7 @@
-# AGENTS.project-layout.md
+# Project layout
 
-The tree, the recipes and the data model. Entry point: [`AGENTS.md`](AGENTS.md). The module rules that make
-this shape mandatory are in [`AGENTS.rules.md`](AGENTS.rules.md).
+The tree, the recipes and the data model. Entry point: [`AGENTS.md`](../../AGENTS.md). The module rules that
+make this shape mandatory are in [`rules.md`](rules.md).
 
 ## Layout
 
@@ -67,7 +67,7 @@ src/indexer/                the writer — runs in a spawned process, never in t
   persist.ts                write a unit; metrics, tested_by, FTS delta, tombstones, generation
   worker.ts                 the index process: lock, incremental routing, publish, exit codes
   watch.ts                  debounced polling that spawns the worker
-tests/                      58 files, see `AGENTS.test-map.md`
+tests/                      58 files, see `.agents/prompts/test-map.md`
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
                             arguments, defaults or budget ceilings move here in the same commit

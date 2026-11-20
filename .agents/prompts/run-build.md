@@ -1,6 +1,6 @@
-# AGENTS.run-build.md
+# Run and build
 
-How to run and check the code on this machine. Entry point: [`AGENTS.md`](AGENTS.md).
+How to run and check the code on this machine. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 ## Run it
 

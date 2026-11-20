@@ -13,7 +13,7 @@ maintainer the npm command. Steps 1–8 are yours. The publish itself (step 9) i
 never a command you run: `npm publish` needs an OTP only the maintainer has.
 
 This skill restates `docs/maintainers.md` §Publishing to npm and the Definition of done in
-`AGENTS.run-build.md`. When either moves, this file moves in the same commit.
+`.agents/prompts/run-build.md`. When either moves, this file moves in the same commit.
 
 ## 1. The version standard
 
@@ -129,7 +129,7 @@ What those checks enforce:
 Commit the result as its own change, `docs(readme): <what was stale>`, before the release commit: a
 README edit folded into `chore(release)` hides it from anyone reading the log. If the behaviour a
 `docs/my-product/*.md` file specifies moved too, that doc moves in the change commit that moved it,
-under the same AGENTS.md rule.
+under the same `.agents/prompts/rules.md` rule.
 
 ## 5. Preflight
 

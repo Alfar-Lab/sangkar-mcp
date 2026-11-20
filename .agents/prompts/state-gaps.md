@@ -1,6 +1,6 @@
-# AGENTS.state-gaps.md
+# State and gaps
 
-Plan state and the open work. Entry point: [`AGENTS.md`](AGENTS.md).
+Plan state and the open work. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 ## Current state and known gaps
 

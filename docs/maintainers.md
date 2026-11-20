@@ -81,4 +81,4 @@ bun run acceptance                   # budgets, latency, the prepared-statement 
 ```
 
 `bun test` uses fixtures and temp directories only: no network, no writes into the repository. The
-invariants each file guards are mapped in `AGENTS.test-map.md`.
+invariants each file guards are mapped in `.agents/prompts/test-map.md`.

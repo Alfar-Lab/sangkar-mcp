@@ -1,7 +1,7 @@
 # AGENTS.md
 
-Guidance for an agent working **in** this repository. `README.md` is for users; this file and the
-`AGENTS.*.md` files beside it are for whoever edits the code.
+Guidance for an agent working **in** this repository. `README.md` is for users; this file routes to the
+prompts under `.agents/prompts/`, which are for whoever edits the code.
 
 ## What this is
 
@@ -18,11 +18,11 @@ argument.
 
 | File | Holds |
 |---|---|
-| [`AGENTS.rules.md`](AGENTS.rules.md) | The six module rules enforced by `tests/boundary.test.ts`, the invariants that break the product when violated, and the coding conventions. **Read this before your first edit.** |
-| [`AGENTS.project-layout.md`](AGENTS.project-layout.md) | The module tree with one line per file, the recipes (add a language, a tool, a payload field, a telemetry field, a table), and the data model in one screen. |
-| [`AGENTS.run-build.md`](AGENTS.run-build.md) | How to run the CLI and the servers on this machine, the script table, and the definition of done. |
-| [`AGENTS.test-map.md`](AGENTS.test-map.md) | The map from "what you changed" to "the tests that will tell you". |
-| [`AGENTS.state-gaps.md`](AGENTS.state-gaps.md) | Plan state and the three measured gaps the suite does **not** catch (test/method kinds, binding recall). |
+| [`.agents/prompts/rules.md`](.agents/prompts/rules.md) | The six module rules enforced by `tests/boundary.test.ts`, the invariants that break the product when violated, the coding conventions, and the rule that these files move with the change they describe. **Read this before your first edit.** |
+| [`.agents/prompts/project-layout.md`](.agents/prompts/project-layout.md) | The module tree with one line per file, the recipes (add a language, a tool, a payload field, a telemetry field, a table), and the data model in one screen. |
+| [`.agents/prompts/run-build.md`](.agents/prompts/run-build.md) | How to run the CLI and the servers on this machine, the script table, and the definition of done. |
+| [`.agents/prompts/test-map.md`](.agents/prompts/test-map.md) | The map from "what you changed" to "the tests that will tell you". |
+| [`.agents/prompts/state-gaps.md`](.agents/prompts/state-gaps.md) | Plan state and the three measured gaps the suite does **not** catch (test/method kinds, binding recall). |
 | [`docs/`](docs/) | The design record — read before changing behaviour. |
 
 ## Docs and plans
