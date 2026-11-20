@@ -433,13 +433,13 @@ function specDescription(): string {
 }
 
 describe("impact manifest", () => {
-  test("carries the spec's description verbatim and the five documented arguments", () => {
+  test("carries the spec's description verbatim and the six documented arguments", () => {
     expect(manifest.name).toBe("impact");
     expect("profile" in manifest).toBe(false);
     // Widened to `string` so `expect` compares text rather than the literal type.
     const description: string = manifest.description;
     expect(description).toBe(specDescription());
-    expect(Object.keys(input)).toEqual(["paths", "base", "depth", "budget", "cursor"]);
+    expect(Object.keys(input)).toEqual(["paths", "base", "depth", "budget", "cursor", "repo"]);
     expect(input.paths).toMatchObject({ type: "array", items: { type: "string" } });
     expect(input.base).toMatchObject({ type: "string" });
     expect(input.depth).toMatchObject({ type: "integer", default: 2, min: 1, max: 4 });

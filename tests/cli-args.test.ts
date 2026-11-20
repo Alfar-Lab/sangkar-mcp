@@ -267,7 +267,16 @@ describe("cli args: refusals keep the schema's own message", () => {
 describe("cli args: parseArgs is reached, not reimplemented", () => {
   test("defaults and dropped keys behave exactly as a protocol call", () => {
     expect(parseCliArgs("index", indexInput, [])).toEqual(parseArgs("index", indexInput, {}));
-    expect(parseCliArgs("index", indexInput, [])).toEqual({ force: false, mode: "full" });
+    expect(parseCliArgs("index", indexInput, [])).toEqual({
+      force: false,
+      mode: "full",
+      register: true,
+    });
+    expect(parseCliArgs("index", indexInput, ["--no-register"])).toEqual({
+      force: false,
+      mode: "full",
+      register: false,
+    });
     expect(parseCliArgs("status", statusInput, [])).toEqual({ paths: [], budget: 800 });
     // A key no manifest declares never reaches the handler, whichever layer asks.
     expect(parseArgs("search", searchInput, { query: "q", colour: "red" })).toEqual({

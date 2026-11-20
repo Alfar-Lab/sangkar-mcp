@@ -38,11 +38,24 @@ describe("instructions: the guide names the surface", () => {
     expect(prose).toContain("a rebuild is a repair");
   });
 
+  test("the guide takes `repo` and no longer claims a bound repository", () => {
+    expect(namesTool(INSTRUCTIONS_TEXT, "repo")).toBe(true);
+    // Claims this task retires: the surface now serves the whole registry.
+    expect(INSTRUCTIONS_TEXT).not.toContain("bound at startup");
+    expect(INSTRUCTIONS_TEXT).not.toContain("Do not pass a project argument");
+    // Who watches the graph is a real fact an agent must not infer from this process.
+    expect(INSTRUCTIONS_TEXT).toContain("daemon");
+    expect(INSTRUCTIONS_TEXT).not.toContain("server already knows");
+  });
+
   test("the three anti-patterns are each stated", () => {
     const antiPatterns: readonly (readonly [string, RegExp])[] = [
       ["do not read total_relation gte as none", /do not read `total_relation: gte` as none/i],
       ["do not use trace to read source", /do not use `trace` to read source/i],
-      ["do not pass a project argument", /do not pass a project argument/i],
+      [
+        "do not expect repo to work for an unregistered path",
+        /do not expect `repo` to work for an unregistered path/i,
+      ],
     ];
     const unstated = antiPatterns
       .filter(([, pattern]) => !pattern.test(INSTRUCTIONS_TEXT))

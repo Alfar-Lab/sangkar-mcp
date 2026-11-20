@@ -1,8 +1,8 @@
 # Telemetry design
 
-**Normative for** `src/shared/telemetry/**`, the `SANGKAR_TELEMETRY` switch in `src/shared/config.ts`
-and the `sangkar telemetry` verb. Companion to `TECH-SPEC.md` §11 (stdout discipline) and to the
-environment table in `README.md`.
+**Normative for** `src/shared/telemetry/**`, the `SANGKAR_TELEMETRY` switch in `src/shared/config.ts`,
+the per-repo settings in `src/shared/repo-config.ts` and the `sangkar telemetry` verb. Companion to
+`TECH-SPEC.md` §11 (stdout discipline) and to the environment table in `README.md`.
 
 Every claim here is checkable against the code that ships today. Where the implementation and this
 document disagree, one of them is a defect — there is no third story.
@@ -13,21 +13,30 @@ document disagree, one of them is a defect — there is no third story.
 
 Local-only usage telemetry. Three JSON-Lines record kinds are appended to
 `<dataDir>/telemetry/YYYY-MM-DD.jsonl`, one line per record, and `sangkar telemetry` folds the daily
-files into a single self-contained HTML file.
+files into a single self-contained HTML file — or, with `--serve`, answers with the same kind of page
+for every registered repository (§6.1).
 
-Nothing is uploaded. There is no network code path in `src/shared/telemetry/**`: the sink's only
-imports are `node:fs` and `node:path`, and the report's only script is the inline one in `html.ts`.
-The `TelemetrySink` interface (`sink.ts`) is the seam a future uploader would implement; until one
-exists, "local only" is a property of the code rather than of a promise.
+Nothing is uploaded, and nothing leaves the machine. The sink has no uploader: `sink.ts` imports
+`node:fs` and `node:path` only, and `TelemetrySink` is the seam a future uploader would implement —
+until one exists, "local only" is a property of the code rather than of a promise. One listener does
+live in this directory, and it is the report server: `serve.ts` is `Bun.serve` on loopback and
+nothing else (§6.1), serving a page built the way `--out` builds its file — `html-multi.ts` reuses
+`html.ts`'s stylesheet and panels and adds no external font, script, image or stylesheet, so the
+machine-wide report is exactly as self-contained as the single-repo one. Nothing here opens an
+outbound connection: a report of every repository on the machine is a document that stays on the
+machine, whether it is read from a file or from a socket.
 
 | Piece | File | Owns |
 |---|---|---|
 | record schema and the three builders | `record.ts` | the shape, the field order, every derived field |
 | identity | `identity.ts` | `install_id`, `session_id` |
 | recorder | `telemetry.ts` | the clock, `seq`, the buffer, the flush |
+| per-repo decision | `for-repo.ts` | whether a repository records, and into which directory |
 | destination | `sink.ts` | one append per daily file |
 | read and fold | `report.ts` | skip rules, aggregation, ratios |
 | render | `html.ts` | the document, inline CSS/JS/JSON |
+| render every repository | `html-multi.ts` | one section per source directory, plus the machine total |
+| serve | `serve.ts` | the loopback-only listener, its three routes, the default port |
 | verb | `cli.ts` | flags, exit codes, the one stdout line |
 
 ---
@@ -52,6 +61,43 @@ as an unset variable — which is the documented default.
 Off means no file and no directory is created. `jsonlSink` calls `mkdirSync` on its first non-empty
 write, and `createTelemetry` is never constructed, so a disabled installation leaves no
 `<dataDir>/telemetry/` behind. It does not mean "written and then ignored".
+
+### 2.1 The recording precedence
+
+Three inputs, one decision. The decision is `recordingEnabled` in `src/shared/repo-config.ts`, called
+from exactly one place — `telemetryForRepo` in `src/shared/telemetry/for-repo.ts` — because a daemon
+serving several trees must decide per tree, while consent is per machine:
+
+| Input | Read from | What "no" means |
+|---|---|---|
+| `SANGKAR_TELEMETRY` | `src/shared/config.ts`, once per process, as `config.telemetry.enabled` | the process records nothing, for every repository it serves |
+| registration | `<home>/sangkar.json` through `readRegistry` | a tree the registry does not list is not recorded, whatever its own file says |
+| the repo's settings | `<repo>/.sangkar/config.json` through `readRepoConfig` | `"telemetry": false` disables that one repository |
+
+A call is recorded only when all three say yes. The order between them is the point of the section:
+`SANGKAR_TELEMETRY=off` **outranks the repo file**, so no repository can opt itself back in past the
+operator, and the repo file's `false` **outranks the default of `true`**, so the file can only narrow
+what the machine allows — never widen it. Registration sits between the two: a tree the operator never
+registered is not a tree this installation agreed to describe. When the recorder is built, its
+directory is the selected repository's own `<dataDir>/telemetry`, not the startup tree's, because a
+daemon that swapped trees would otherwise write into the wrong one.
+
+The settings file is one small JSON object, snake_case on disk and camel case in TypeScript, mapped in
+that one module:
+
+```json
+{"watch":true,"watch_interval":2000,"telemetry":true}
+```
+
+A missing, unreadable or unparseable file means every default: `watch: true`, `watch_interval: 2000`,
+`telemetry: true`. A bad field falls back alone, and a field that is not a JSON boolean is a typo that
+takes its default rather than being interpreted — a quoted `"false"` must not read as consent.
+`watch_interval` is milliseconds and is clamped into the band the daemon can honour: below `1000`
+becomes `1000` (a poll faster than one save per window costs more than the edit it notices), above
+`300000` becomes `300000`, and anything that is not a positive integer — `"2000"`, `2000.5`, `0`,
+`-1` — falls back to `2000` instead of being guessed at. `sangkar repo config <path> --watch`,
+`--watch-interval` and `--telemetry` write the file and then print the values a re-read returns, so a
+clamped interval is reported as the daemon will actually use it.
 
 ---
 
@@ -211,6 +257,9 @@ with `status: "error"` is a refusal that never reached a handler.
 A record holds numbers, closed-union identifiers and timestamps. It never holds source text, symbol
 names, qualified names, file paths, `search.query`, `impact.paths`, cursor strings, error message
 text, a repository remote URL, git identity, a hostname or the value of an environment variable.
+Records keep carrying none of those on the served page either: what `sangkar telemetry --serve` names
+is the **directory each section's records were read from**, because the operator asked for that
+attribution, and the server binds loopback only (§6.1).
 
 The reason is not that the file is local. A local-only file is still a file that gets pasted into an
 issue, attached to a bug report or synced with a dotfiles repository, and a symbol name or a path is
@@ -245,11 +294,11 @@ Two enforcement points keep the rule from being a matter of discipline:
 ## 6. The verb and its flags
 
 ```
-sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]
+sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]
 ```
 
-`--repo-root` and `--data-dir` are the global flags every verb takes; the first two belong to this
-one.
+`--repo-root` and `--data-dir` are the global flags every verb takes; `--out`, `--serve`, `--port`,
+`--host` and `--since` belong to this one.
 
 | Behaviour | Rule |
 |---|---|
@@ -270,8 +319,44 @@ UTC is the calendar of the whole feature: the daily file name, the day boundary 
 at UTC midnight, so a host's timezone cannot split one day's records across two files.
 
 The verb reads the telemetry directory and nothing else — no graph, no store, no kernel — so it
-answers on a tree that was never indexed. Its dependencies are the config loader, `report.ts`,
-`html.ts` and the two exit-code constants; it opens no connection and imports no reader.
+answers on a tree that was never indexed; `--serve` additionally reads the registry, which is a file.
+Its dependencies are the config loader, `report.ts`, `html.ts`, `serve.ts` and the two exit-code
+constants. It opens no outbound connection and imports no reader, and the only socket it ever owns is
+the loopback listener below.
+
+### 6.1 `sangkar telemetry --serve [--port] [--host]`
+
+`--serve` answers over HTTP instead of writing a file. The two answers are exclusive: `--serve` with
+`--out` is a usage error, because a caller that named both has not decided which one it wants.
+
+| Rule | Value |
+|---|---|
+| default port | `7317` (`DEFAULT_REPORT_PORT`); `--port 0` asks the kernel for one, and the announcement prints the port actually bound |
+| port shape | a base-10 integer in `0..65535`; `1e3`, `80.5`, `+80` and the empty string are refused as usage errors, not coerced |
+| default host | `127.0.0.1` |
+| allowed hosts | exactly `127.0.0.1`, `::1`, `localhost` — the literal allow-list `LOOPBACK_HOSTS`, matched as strings |
+| any other host | refused **before** a socket exists: the reason and the usage block on stderr, exit `2` |
+| routes | `GET /` renders the report, `HEAD /` answers status and headers only, `GET /healthz` answers `ok`, everything else is `404` (`HEAD /healthz` included: the contract names the method of every route) |
+| `--since` | applies to the served page as it does to the file: one clock reading, one window, shared by every section and by the machine total |
+| stdout | one line, `serving <url> (<n> repositories)`, written after the listener is bound and before the wait |
+| stop | `SIGINT` or `SIGTERM` closes the listener and the verb exits `0` |
+
+**Loopback only, and nothing else.** A report of every repository on the machine is not something the
+network gets to read, so the host is checked against a literal allow-list before `Bun.serve` is
+reached. `localhost` is in the list because it is the spelling a person types; a hostname that merely
+*resolves* to loopback is not, because accepting one would need a DNS lookup whose answer can change
+between the check and the bind.
+
+**One section per source directory, plus a machine total.** The page is rebuilt on every request
+rather than at bind time: a daemon serves for days, and a page rendered once would stop mentioning the
+records written after it started. The registry is read per request, and each registered root becomes a
+section labelled `<basename> — <root>` whose `source directory` line names the telemetry directory that
+section's numbers were read from — the attribution says where a number came from, not what it
+contains. A root with no telemetry directory is still a section, because "this repository recorded
+nothing" is an answer, and dropping it would hide a tree that was registered but never used. The
+`machine total` section comes first and is the only one that always exists: every section's records in
+one fold, with the summed unparsed count, so an empty registry still states the window, the clock and
+the reason the page looks empty.
 
 ---
 
@@ -315,8 +400,8 @@ differ only where the directory did — which is what lets a report be diffed ag
 - **No retention and no pruning.** Daily `.jsonl` files are appended to and never rewritten, rotated
   or deleted. Growth is the operator's to manage; a silent delete in a telemetry path is a surprise
   nobody asked for.
-- **No auto-open of the browser.** The verb prints the path and exits; opening a window is not a side
-  effect a report generator should have.
+- **No auto-open of the browser.** The verb prints the path and exits, or with `--serve` announces the
+  URL and waits to be stopped; opening a window is not a side effect a report generator should have.
 - **No sampling.** Every call is recorded. A sampled denominator would make the `eq` ratio and every
   percentile a claim about a different population than the one in the file.
 

@@ -1,14 +1,21 @@
 ---
-name: sangkar-graph
-description: "Answer code-structure questions from an indexed call graph instead of grepping: who calls this, what does this call, what does my change reach, is it tested, does it exist at all. Use when the repository is indexed by sangkar (MCP tools status, summary, trace, search, impact, expand, index; or the sangkar CLI): callers, callees, call chain, dependencies, impact analysis, blast radius, risk before an edit or merge, test gaps, or an absence claim."
+name: use-sangkar-mcp
+description: "Answer code-structure questions from an indexed call graph instead of grepping: who calls this, what does this call, what does my change reach, is it tested, does it exist at all. Use when the repository is indexed by sangkar (MCP tools status, summary, trace, search, impact, expand, index — each takes `repo` to name a registered repository — or the sangkar CLI): callers, callees, call chain, dependencies, impact analysis, blast radius, risk before an edit or merge, test gaps, or an absence claim. A background daemon keeps the graph fresh, not the server, so read read_status before trusting an answer."
 license: MIT
-compatibility: sangkar MCP server bound to this repository, or the sangkar CLI on PATH. Bun 1.4.4+.
+compatibility: sangkar MCP server over a registered repository (or one named with --repo-root), or the sangkar CLI on PATH. Bun 1.4.4+.
 ---
 
-# sangkar: four questions, seven tools, one bound repository
+# sangkar: four questions, seven tools, every registered repository
 
-The server is bound to one repository at startup. There is no `project` argument, no query
-language, and no index to build before asking: `index` is a repair, not a step.
+The server serves every repository in the registry. Pass `repo` — a path or a basename — to answer
+from another one; omit it for the working directory's repository, or for the only registered one. A
+name that is not registered answers `not_found` with a hint instead of falling back, because
+answering from the wrong tree is the worst answer this design could give. There is no query
+language and no index to build before asking: `index` is a repair, not a step.
+
+Freshness is the daemon's, not the server's. A background daemon — `sangkar daemon start` — watches
+the registered trees and reindexes them; this process only reads, so an answer is as fresh as its
+`read_status` generation, and nothing here waits for a watcher.
 
 Some clients prefix the tool names with the server name (`sangkar_trace`,
 `mcp__sangkar__trace`). Same tools, same arguments.
@@ -40,7 +47,8 @@ conclusion drawn from `payload`:
    walk stopped at the depth you asked for. It is not the end of the list.
 5. `next`: `null`, or a cursor that continues *this same call*. Pass it back as `cursor`, unchanged.
 6. `read_status`: `generation`, `indexed_at`, `stale`, `stale_reason`, `decisive`. A stale or
-   non-decisive generation is a reason to re-ask later, not to state a fact now.
+   non-decisive generation is a reason to re-ask later, not to state a fact now: the daemon brings
+   the graph current, and re-calling is how you wait for that.
 7. `next_tools`: the tools worth calling next, already filtered for this answer. Prefer it over
    guessing.
 
@@ -74,6 +82,10 @@ Every tool ships a budget sized for its own job (`status` 800, `summary` 1200, `
 
 ## Per-tool arguments worth knowing
 
+- `repo` is accepted by all seven tools: a registered repository's path or basename, resolved before
+  the tool does any work. Omit it for the working directory's tree; `sangkar repo add <path>`
+  registers one, and a path that is not registered answers `not_found` rather than being served
+  unwatched.
 - `summary`: `scope` (`change` default, `repo`, `area`), `target` (the path for `area`, ignored
   otherwise), `base`, `budget`, `cursor`. A repository-wide summary is a selection, not a census.
 - `trace`: `query` is the only required argument and accepts a bare name, a dotted name
@@ -92,8 +104,9 @@ Every tool ships a budget sized for its own job (`status` 800, `summary` 1200, `
   `budget`.
 - `status`: `paths` (default: the whole repository), `budget`. Cheap and idempotent: call it
   freely, and poll it while `bootstrapping` tells you to wait `retry_after_ms`.
-- `index`: `force`, `mode` (`full`, `fast`). Only when `status` reports a broken or unbuildable
-  graph. A rebuild is a repair.
+- `index`: `force`, `mode` (`full`, `fast`), `register` (default `true`: the tree joins the
+  registry, so the daemon watches it). Only when `status` reports a broken or unbuildable graph. A
+  rebuild is a repair.
 
 ## When `status` says `ambiguous`
 
@@ -106,8 +119,10 @@ degree, which is what decides between two same-named functions.
 
 - Do not use `trace` to read source. It returns relationships, not code. Read files with your own
   reader; `expand` `{what: "source"}` exists for the twenty-line case, not as a viewer.
-- Do not pass a `project` or repository argument. There is none.
-- Do not rebuild the graph to answer a question: the server keeps the graph current itself, and a
+- Do not pass a `project` argument, and do not expect `repo` to reach a tree that is not
+  registered. `repo` selects among registered repositories; `--repo-root` on the CLI is how one
+  command points at a tree the daemon does not watch.
+- Do not rebuild the graph to answer a question: the daemon keeps registered trees current, and a
   reindex is expensive next to a `status` call.
 - Do not infer an area from `scope: "repo"` output, and do not raise `depth` to 4 to avoid a second
   call: two one-hop calls read better than one truncated four-hop answer.
@@ -117,7 +132,7 @@ degree, which is what decides between two same-named functions.
 
 | `error.code` | What to do |
 |---|---|
-| `bootstrapping` | No graph yet. Wait `retry_after_ms` and re-call `status`; read files directly meanwhile. |
+| `bootstrapping` | No graph yet. Wait `retry_after_ms` and re-call `status`; read files directly meanwhile. A registered tree gets its first graph from the daemon; an unregistered one only from `sangkar index`. |
 | `index_locked` | Another indexer holds the writer lock. Retry after `retry_after_ms`; do not loop. |
 | `not_found` / `ambiguous` | The answer, not a failure. Check near misses, narrow with `kinds` or `path`. |
 | `cursor_invalid`, `cursor_expired`, `cursor_mismatch` | Drop the cursor and re-ask for the first page. Cursors are signed and bound to one generation, so an edit invalidates them; never reuse a cursor on a different query. |
@@ -144,9 +159,15 @@ Exit codes come from `status`: `0` for `ok`/`ambiguous`/`not_found` (a negative 
 answer), `1` for `error`/`bootstrapping`, `2` for a usage refusal. `sangkar index` exits `2` when
 nothing changed and `75` when another indexer holds the lock.
 
+`sangkar repo add .` registers a tree, and `sangkar daemon start` runs the process that watches every
+registered one; neither is a tool call. An unregistered tree is served only by an explicit
+`--repo-root`, and nothing refreshes it for you.
+
 ## First call in a session
 
-1. `status`, when freshness matters or a previous answer looked thin. Otherwise skip it.
+1. `status`, when freshness matters or a previous answer looked thin. Otherwise skip it. Pass the
+   same `repo` on every call once you know which registered tree the task is about, so two answers
+   never come from two repositories.
 2. `summary` with no arguments.
 3. `search` or `trace` on the symbol the task names, then `impact` before you edit.
 4. `status` with `paths` before you tell the user that something does not exist.

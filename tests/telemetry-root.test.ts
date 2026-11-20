@@ -1,15 +1,24 @@
-import { afterAll, describe, expect, test } from "bun:test";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
 import { appendFile, mkdir, mkdtemp, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import {
+  canonicalRoot,
+  EMPTY_REGISTRY,
+  readRegistry,
+  registerRepo,
+  writeRegistry,
+} from "#shared/registry";
 
 /**
  * The telemetry wiring, proven through the shipped executable: every record here was written by a
  * real process — `bin/sangkar.ts`, spawned with `process.execPath` — over a real temp tree and its
- * own data dir. Nothing imports `runWorker`, a handler or the server's registry, because the point
- * of the file is the path a user runs: the entry, the argv grammar, the composition root's
- * recorder, the worker's single exit path, and the sink that puts the line on disk.
+ * own data dir. Nothing imports `runWorker`, a handler or the server, because the point of the file
+ * is the path a user runs: the entry, the argv grammar, the composition root's recorder, the
+ * worker's single exit path, and the sink that puts the line on disk. The one import from `src/` is
+ * `#shared/registry`, which here is the on-disk file and not a running server's state: the suite
+ * seeds each tree it means to record into its own `<home>/sangkar.json`.
  *
  * Five properties justify the shape:
  *
@@ -17,7 +26,13 @@ import { dirname, join, resolve } from "node:path";
  *   append-only and two processes may write the same one, so a read tolerates several files and
  *   groups nothing: each line stands alone.
  * - **No setting is inherited.** The spawn helper deletes every `SANGKAR_*` key first and then sets
- *   only what a case needs, so nothing passes because this machine happened to export it.
+ *   only what a case needs, so nothing passes because this machine happened to export it. Every
+ *   spawn gets this suite's own `mkdtemp` home as `SANGKAR_HOME`, for two reasons: an `index` run
+ *   registers the tree it indexed, so nothing here may reach the developer's real
+ *   `~/.config/sangkar/sangkar.json`; and registration is part of `telemetryForRepo`'s precedence
+ *   (`consent && registered && repo.telemetry`), so a case that reads a record runs in a tree the
+ *   suite's own `<home>/sangkar.json` lists — seeded through `registerRepo`, so the entry is the
+ *   canonical spelling the verb compares against.
  * - **A defaulted name is not a supplied name.** `parseArgs` fills every declared default, so
  *   `arg_names_set` has to come from the argv reader and the request's own keys — `status` records
  *   `[]`, and `trace --depth 1` records `["depth","query"]` while `budget_tokens` still reports the
@@ -136,7 +151,11 @@ interface Telemetry {
   readonly records: readonly TelemetryRecord[];
 }
 
-/** The repository's own settings, removed: nothing can pass because of an inherited variable. */
+/**
+ * The repository's own settings, removed — including any inherited `SANGKAR_HOME` and
+ * `SANGKAR_TELEMETRY` — so nothing can pass because of an inherited variable. `childEnv` supplies
+ * the home, and a case that wants telemetry off asks for it explicitly.
+ */
 function cleanEnv(): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
@@ -151,8 +170,43 @@ function cleanEnv(): Record<string, string> {
 /** Temp roots are removed in `afterAll`, so a failed assertion cannot leave a directory behind. */
 const roots: string[] = [];
 
-/** One fixture tree per case, each with its own data dir. */
-async function makeTree(label: string): Promise<Tree> {
+/**
+ * The machine-level home every spawn runs against — this suite's own, and one of `roots` so
+ * `afterAll` removes it. Two things live under it: the identity `SANGKAR_HOME` names, and
+ * `<home>/sangkar.json`, the registry `telemetryForRepo` reads through `registered`. The file starts
+ * as the documented empty shape (`{"version":1,"repos":[]}`), so every later write is an append to
+ * a file that already exists rather than a first touch of a missing one.
+ */
+let home = "";
+let registryPath = "";
+
+beforeAll(async () => {
+  home = await mkdtemp(join(tmpdir(), "sangkar-telemetry-home-"));
+  roots.push(home);
+  registryPath = join(home, "sangkar.json");
+  writeRegistry(registryPath, EMPTY_REGISTRY);
+});
+
+/**
+ * Seed one tree into this suite's registry, the precondition a recorded run needs. The write is
+ * `registerRepo`, the same read-modify-write the `index` verb performs, so an entry seeded here and
+ * one the verb appends are the same bytes, and the check behind it is the file rather than the
+ * helper's own return value.
+ */
+function register(tree: Tree): void {
+  registerRepo(registryPath, tree.repo);
+  if (!readRegistry(registryPath).repos.includes(canonicalRoot(tree.repo))) {
+    throw new Error(`could not seed ${tree.repo} into ${registryPath}`);
+  }
+}
+
+interface TreeOptions {
+  /** `false` builds a tree this suite deliberately leaves out of its registry. */
+  readonly registered?: boolean;
+}
+
+/** One fixture tree per case, each with its own data dir and, by default, a registry entry. */
+async function makeTree(label: string, options: TreeOptions = {}): Promise<Tree> {
   const root = await mkdtemp(join(tmpdir(), `sangkar-telemetry-${label}-`));
   roots.push(root);
   const repo = join(root, "repo");
@@ -163,12 +217,17 @@ async function makeTree(label: string): Promise<Tree> {
     await mkdir(dirname(file), { recursive: true });
     await writeFile(file, content);
   }
-  return { root, repo, data };
+  const tree: Tree = { root, repo, data };
+  if (options.registered !== false) {
+    register(tree);
+  }
+  return tree;
 }
 
-/** A wrapper is quiet by construction: this file never needs the watcher, so it never runs one. */
+/** A wrapper is quiet by construction: `mcp` starts no watcher any more, so nothing needs muting. */
 function childEnv(extra: Record<string, string>): Record<string, string> {
-  return { ...cleanEnv(), SANGKAR_NO_WATCH: "1", ...extra };
+  // `SANGKAR_HOME` last: the suite decides the registry, never a case's own extra.
+  return { ...cleanEnv(), ...extra, SANGKAR_HOME: home };
 }
 
 function collect(proc: ReturnType<typeof Bun.spawn>): Promise<Run> {
@@ -570,6 +629,33 @@ describe("telemetry through the shipped command", () => {
         payloadTokens: call.payload_tokens,
         truncated: call.truncated,
       }).toEqual({ tool: "status", status: "absent", payloadTokens: 0, truncated: false });
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "case F: a first index of an unregistered tree records nothing, yet registers the tree",
+    async () => {
+      // The tree exists on disk but is absent from `<home>/sangkar.json`, and `main` builds the
+      // one-shot recorder before the verb's second duty runs — so this process is handed the null
+      // recorder: registration is a precondition of recording, not a consequence of the same run.
+      const tree = await makeTree("unregistered", { registered: false });
+      const first = await runCli(["index", "--repo-root", tree.repo, "--data-dir", tree.data]);
+      expectExit(first, 0, "the first sangkar index on an unregistered tree");
+      // A null recorder never creates the directory: the run left no telemetry at all, not an
+      // empty file, and no `index_run` for the run that did the indexing.
+      expect(existsSync(join(tree.data, "telemetry"))).toBe(false);
+
+      // …yet the run still did its second duty, so the next process in this tree is recorded.
+      expect(readRegistry(registryPath).repos).toContain(canonicalRoot(tree.repo));
+
+      const status = await runCli(["status", "--repo-root", tree.repo, "--data-dir", tree.data]);
+      expectExit(status, 0, "sangkar status after the registering index");
+      const records = (await readTelemetry(tree.data)).records;
+      expect(ofKind(records, "index_run")).toEqual([]);
+      const call = one(ofKind(records, "call"), "call record");
+      expect({ tool: call.tool, status: call.status }).toEqual({ tool: "status", status: "ok" });
+      expect(ofKind(records, "session").map((session) => session.session_mode)).toContain("cli");
     },
     RUN_TIMEOUT_MS,
   );

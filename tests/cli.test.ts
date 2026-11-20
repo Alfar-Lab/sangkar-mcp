@@ -17,12 +17,14 @@ import { TOOL_NAMES } from "#shared/instructions";
  * - **The bootstrap is the CLI's own.** A fresh tree has no store for a tool call to answer from, so
  *   `sangkar index --mode full` must create `repo/.sangkar/graph.db`; indexing through the imported
  *   `runWorker` would prove the worker, not the command under test.
- * - **No setting is inherited.** `cleanEnv()` deletes every `SANGKAR_*` key, so nothing can pass
- *   because this machine happened to export one: the tree is found by autodetect, the data dir by
- *   the `.sangkar` convention, and nothing is configured out of band.
+ * - **No setting is inherited.** `cleanEnv()` deletes every `SANGKAR_*` key and hands back a
+ *   `SANGKAR_HOME` of this suite's own, so nothing can pass because this machine happened to export
+ *   one, and nothing — an index run registers its repository — can write the developer's real
+ *   `~/.config/sangkar/sangkar.json`: the tree is found by autodetect, the data dir by the
+ *   `.sangkar` convention, and the machine-level home is a temp directory deleted in `afterAll`.
  * - **stdout belongs to the payload.** A tool answer is exactly one JSON document closed by one
- *   newline, or the five human `status` lines; a usage refusal writes nothing to stdout at all.
- *   Diagnostics are stderr.
+ *   newline, or the five human `status` lines, or the one `serving …` line; a usage refusal writes
+ *   nothing to stdout at all. Diagnostics are stderr.
  * - **The fixture is a temp tree with no `.git`.** Autodetect therefore has to fall back to the
  *   `.sangkar` directory the index creates — the property the nested-directory case exists for.
  *
@@ -73,8 +75,12 @@ interface Run {
   readonly stderr: string;
 }
 
-/** The repository's own settings, removed: the fixture tree is discovered, never configured. */
-function cleanEnv(): Record<string, string> {
+/**
+ * The repository's own settings, removed: the fixture tree is discovered, never configured. The
+ * one `SANGKAR_*` a run does get is this suite's temp home, which `spawnCli` passes in — without it
+ * an index run would register its tree in the developer's own `~/.config/sangkar/sangkar.json`.
+ */
+function cleanEnv(extra: Readonly<Record<string, string>> = {}): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith("SANGKAR_") || value === undefined) {
@@ -82,14 +88,19 @@ function cleanEnv(): Record<string, string> {
     }
     env[key] = value;
   }
-  return env;
+  return { ...env, ...extra };
+}
+
+/** Every spawned run's machine-level home: a temp directory, so nothing reaches the real one. */
+function spawnEnv(): Record<string, string> {
+  return cleanEnv({ SANGKAR_HOME: home });
 }
 
 function spawnCli(args: readonly string[], cwd: string): Promise<Run> {
   const proc = Bun.spawn({
     cmd: [process.execPath, "run", CLI_ENTRY, ...args],
     cwd,
-    env: cleanEnv(),
+    env: spawnEnv(),
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -102,6 +113,38 @@ function spawnCli(args: readonly string[], cwd: string): Promise<Run> {
     ]);
     return { code, stdout, stderr };
   })();
+}
+
+/**
+ * A pipe read as it fills, so a long-running child can be asked to stop after its first line without
+ * anyone having to guess how long a bind takes. `firstLine` resolves at the first newline (or when
+ * the pipe closes, which is the child dying without one) and `all` once the pipe is done.
+ */
+interface Streamed {
+  readonly firstLine: Promise<string>;
+  readonly all: Promise<string>;
+}
+
+function streamed(stream: ReadableStream<Uint8Array>): Streamed {
+  const decoder = new TextDecoder();
+  let text = "";
+  let settleLine: (line: string) => void = () => {};
+  const firstLine = new Promise<string>((resolve) => {
+    settleLine = resolve;
+  });
+  const all = (async () => {
+    for await (const chunk of stream) {
+      text += decoder.decode(chunk, { stream: true });
+      const end = text.indexOf("\n");
+      if (end !== -1) {
+        settleLine(text.slice(0, end));
+      }
+    }
+    text += decoder.decode();
+    settleLine(text);
+    return text;
+  })();
+  return { firstLine, all };
 }
 
 /** A failure that carries the child's stderr, because "exited 1" alone never explains itself. */
@@ -188,12 +231,14 @@ async function telemetryFixture(name: string): Promise<{ dataDir: string; report
 let root = "";
 let repo = "";
 let elsewhere = "";
+let home = "";
 let bootstrap: Run | null = null;
 
 const dbPath = (): string => join(repo, ".sangkar", "graph.db");
 
 beforeAll(async () => {
   root = await mkdtemp(join(tmpdir(), "sangkar-cli-"));
+  home = await mkdtemp(join(tmpdir(), "sangkar-cli-home-"));
   repo = join(root, "repo");
   elsewhere = join(root, "elsewhere");
   await mkdir(elsewhere, { recursive: true });
@@ -208,6 +253,7 @@ beforeAll(async () => {
 
 afterAll(async () => {
   await rm(root, { recursive: true, force: true });
+  await rm(home, { recursive: true, force: true });
 });
 
 describe("sangkar CLI", () => {
@@ -426,6 +472,93 @@ describe("sangkar CLI", () => {
       expect(run.stderr).toContain("usage: sangkar telemetry");
       expect(existsSync(join(dataDir, "telemetry", "report.html"))).toBe(false);
       expect(existsSync(dataDir)).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --serve --out exits 2 with the usage block and writes no file",
+    async () => {
+      const out = join(root, "telemetry-serve-out", "report.html");
+      const run = await spawnCli(["telemetry", "--serve", "--out", out], elsewhere);
+      expectExit(run, 2, "sangkar telemetry --serve --out x");
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--serve");
+      expect(run.stderr).toContain("--out");
+      expect(run.stderr).toContain("usage: sangkar telemetry");
+      // The block is where an operator learns the shape of the option it collided with.
+      expect(run.stderr).toContain("--port <n>");
+      expect(run.stderr).toContain("--host <addr>");
+      expect(existsSync(out)).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --serve --host 0.0.0.0 exits 2 with the loopback rule, not a stack",
+    async () => {
+      const run = await spawnCli(
+        ["telemetry", "--serve", "--port", "0", "--host", "0.0.0.0"],
+        elsewhere,
+      );
+      expectExit(run, 2, "sangkar telemetry --serve --host 0.0.0.0");
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("loopback only");
+      expect(run.stderr).toContain("0.0.0.0");
+      expect(run.stderr).toContain("usage: sangkar telemetry");
+      // A usage refusal, not a crash: an uncaught throw would leave frames behind.
+      expect(run.stderr).not.toMatch(/^\s+at /m);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --serve --port outside 0..65535 exits 2 with the reason",
+    async () => {
+      const run = await spawnCli(["telemetry", "--serve", "--port", "70000"], elsewhere);
+      expectExit(run, 2, "sangkar telemetry --serve --port 70000");
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain('--port must be an integer in 0..65535, not "70000"');
+      expect(run.stderr).toContain("usage: sangkar telemetry");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --serve --port 0 serves every repository and stops on SIGTERM",
+    async () => {
+      const proc = Bun.spawn({
+        cmd: [process.execPath, "run", CLI_ENTRY, "telemetry", "--serve", "--port", "0"],
+        cwd: elsewhere,
+        env: spawnEnv(),
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const out = streamed(proc.stdout);
+      const err = streamed(proc.stderr);
+      // A wedge becomes a kill rather than a hung suite.
+      const backstop = setTimeout(() => proc.kill("SIGKILL"), RUN_TIMEOUT_MS);
+      try {
+        const line = await out.firstLine;
+        // `--port 0` is read back from the URL, so no case can collide with a real daemon. The
+        // count comes from the registry under this suite's temp home: the bootstrap registered one.
+        expect(line).toMatch(/^serving http:\/\/127\.0\.0\.1:\d+\/ \(\d+ repositories\)$/);
+        const bound = Number(/http:\/\/127\.0\.0\.1:(\d+)/.exec(line)?.[1]);
+        expect(bound).toBeGreaterThan(0);
+        proc.kill("SIGTERM");
+        expect(await proc.exited).toBe(0);
+        // One line, and the serve path never falls through to the file write.
+        expect(await out.all).toBe(`${line}\n`);
+        expect(existsSync(join(elsewhere, ".sangkar", "telemetry", "report.html"))).toBe(false);
+      } finally {
+        clearTimeout(backstop);
+        if (proc.exitCode === null) {
+          proc.kill("SIGKILL");
+          await proc.exited;
+        }
+        await err.all;
+      }
     },
     RUN_TIMEOUT_MS,
   );

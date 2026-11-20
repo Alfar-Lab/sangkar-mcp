@@ -18,7 +18,8 @@ export type RuleId =
   | "indexer-isolation"
   | "shared-isolation"
   | "drizzle-location"
-  | "root-privileges";
+  | "root-privileges"
+  | "daemon-privileges";
 
 const RULE_TEXT: Record<RuleId, string> = {
   "tool-isolation":
@@ -29,6 +30,8 @@ const RULE_TEXT: Record<RuleId, string> = {
   "drizzle-location": "drizzle-orm may be imported only under src/shared/store/**",
   "root-privileges":
     "src/index.ts is the only module allowed to import the indexer or a tool handler, and it may import only #shared/*, ./indexer/* and ./tools/*/manifest or ./tools/*/handler",
+  "daemon-privileges":
+    "src/daemon/** may import only #shared/*, src/indexer/** and ./ siblings inside src/daemon, never src/tools/**",
 };
 
 export interface Violation {
@@ -209,6 +212,12 @@ const rootPrivileges: RuleCheck = (file, specifier) => {
     return null;
   }
   if (isUnderPrefix(target, "src/indexer")) {
+    // `src/daemon/**` is the second process that legitimately drives the indexer, so it is exempt
+    // from this half the way `src/indexer/**` and `tests/**` are; what it may reach is rule 6's
+    // business. The tool-handler half below still applies to it.
+    if (isUnderPrefix(file, "src/daemon")) {
+      return null;
+    }
     return `only ${ROOT_FILE} (the composition root) may import src/indexer/**, but ${specifier} resolves to ${target}`;
   }
   if (isToolHandler(target)) {
@@ -217,12 +226,38 @@ const rootPrivileges: RuleCheck = (file, specifier) => {
   return null;
 };
 
+/**
+ * Rule 6: the daemon serves every registered repo in one process, so it may hold the store's
+ * kernel and drive the indexer — but it is a reader, never a tool: a handler is the composition
+ * root's to call. The daemon also gets no private alias beyond `#shared`, so `package.json` keeps
+ * exactly one alias to audit.
+ */
+const daemonPrivileges: RuleCheck = (file, specifier) => {
+  if (!isUnderPrefix(file, "src/daemon") || isSharedAlias(specifier)) {
+    return null;
+  }
+  const target = resolveSpecifier(file, specifier);
+  if (target === null) {
+    return specifier.startsWith("#")
+      ? `the daemon may use only #shared/*, never the private alias ${specifier}`
+      : null;
+  }
+  if (specifier.startsWith("#")) {
+    return `the daemon may use only #shared/*, never the private alias ${specifier}`;
+  }
+  if (isUnderPrefix(target, "src/daemon") || isUnderPrefix(target, "src/indexer")) {
+    return null;
+  }
+  return `the daemon may import only #shared/*, src/indexer/** and its own ./ siblings, but ${specifier} resolves to ${target}`;
+};
+
 const RULES: ReadonlyArray<{ id: RuleId; check: RuleCheck }> = [
   { id: "tool-isolation", check: toolIsolation },
   { id: "indexer-isolation", check: indexerIsolation },
   { id: "shared-isolation", check: sharedIsolation },
   { id: "drizzle-location", check: drizzleLocation },
   { id: "root-privileges", check: rootPrivileges },
+  { id: "daemon-privileges", check: daemonPrivileges },
 ];
 
 export function evaluateImport(file: string, specifier: string): Violation[] {
@@ -304,8 +339,15 @@ describe("module boundaries on the real tree", () => {
     expect(specifiers.length).toBeGreaterThan(0);
   });
 
-  test("no file violates the five boundary rules", () => {
+  test("no file violates the six boundary rules", () => {
     const violations = [...tree].flatMap(([file, source]) => evaluateSource(file, source));
+    expect(violations.map((violation) => violation.message)).toEqual([]);
+  });
+
+  test("no src/daemon file breaks the daemon boundary rule", () => {
+    const violations = [...tree].flatMap(([file, source]) =>
+      evaluateSource(file, source).filter((violation) => violation.rule === "daemon-privileges"),
+    );
     expect(violations.map((violation) => violation.message)).toEqual([]);
   });
 });
@@ -407,6 +449,26 @@ describe("rule self-check: synthetic imports must be rejected", () => {
         evaluateImport("src/index.ts", specifier).map((violation) => violation.rule),
       ).toContain("root-privileges");
     }
+  });
+
+  test("the daemon may drive the indexer and the kernel, never a tool (rule 6)", () => {
+    // The daemon owns the poller for every registered repo, so the indexer is reachable from it
+    // without rule 5 complaining; `#shared/*` is the rest of its surface.
+    expect(evaluateImport("src/daemon/runtime.ts", "#shared/log")).toEqual([]);
+    expect(evaluateImport("src/daemon/runtime.ts", "../indexer/watch")).toEqual([]);
+
+    const violations = evaluateImport("src/daemon/runtime.ts", "../tools/trace/handler");
+    expect(violations.map((violation) => violation.rule)).toContain("daemon-privileges");
+    expect(violations.map((violation) => violation.message).join("\n")).toContain(
+      "src/tools/trace/handler",
+    );
+
+    // The rule is scoped to the daemon: the same import anywhere else is not its business.
+    expect(
+      evaluateImport("src/shared/log.ts", "../tools/trace/handler").map(
+        (violation) => violation.rule,
+      ),
+    ).not.toContain("daemon-privileges");
   });
 
   test("scan plus the rules reject a synthetic violating source end to end", () => {

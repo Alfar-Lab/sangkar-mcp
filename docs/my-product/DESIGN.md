@@ -340,7 +340,17 @@ CRG silently skips a file when its grammar is unavailable (observed: `xslt`, `li
 The server binds `repo_root` at startup from the working directory (overridable by flag). **No tool takes a `project` argument.** CBM spent 18 of 145 calls (12.4 %) on `list_projects` because its project identity is an unmemorable slug derived from the absolute path
 (`home-…-<repo>`), so the agent must re-discover it instead of remembering it.
 
-Identity: short name = repo basename + 4-char hash of the absolute path. Multi-repo is a separate concern (multiple server instances), not a parameter on six tools.
+Identity: short name = repo basename + 4-char hash of the absolute path.
+
+**The topology is a sidecar: one daemon per machine, one thin server per session.** The daemon (`sangkar daemon run`) is the only process that holds the registry (`$SANGKAR_HOME/sangkar.json`), the only one that watches anything — exactly one watcher per registered, watchable repository — and the only one that serves the usage report. It never speaks MCP and never opens a graph. Each MCP session is still a `sangkar mcp` stdio server, but a thin one: it reads the registry once at start, answers for any of the N registered repositories from a pooled reader keyed by canonical root, and starts no watcher of its own.
+
+Three reasons:
+
+1. **No duplicate pollers.** An agent working in two repositories needs two sessions, so one process per tree gave every session a poller over its own tree, and a third one the moment anything else watched that tree. In the sidecar shape the number of pollers follows the number of registered repositories, not the number of sessions.
+2. **One policy file per repo instead of an env var.** Whether a tree is watched, how often, and whether its usage may be recorded were process settings, so two trees with two preferences needed two launchers and the preference died with the session. They are now `<repo>/.sangkar/config.json` — `watch`, `watch_interval`, `telemetry` — hand-editable, outliving any process, and re-read by the daemon on every reconcile tick.
+3. **One machine-wide report.** Usage records stay in each repository's `.sangkar/telemetry/`, so a report rendered by a process could only ever describe the one tree that process was bound to. The daemon serves one loopback page that covers every registered repository instead.
+
+Compatibility is one selector wide. Every tool takes an optional `repo`: a path, or a registered basename that is unique. It is a registry key, not CBM's project slug, and a call that names no repository keeps the earlier behaviour exactly — the `--repo-root` pinned at start, else the working directory when it is registered, else the only registered tree. The cursor carries the repository it was minted in, so a page minted in one tree is refused `cursor_mismatch` in another even though a single process can serve both.
 
 ### 10.2 Bootstrap lazily, never block
 

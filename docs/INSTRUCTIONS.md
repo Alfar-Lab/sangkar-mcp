@@ -1,9 +1,11 @@
-# Using the graph: five rules, seven tools, one bound repository
+# Using the graph: five rules, seven tools, every registered repository
 
-The server already knows which repository this is: it was bound at startup, so nothing here
-selects a project or builds an index. Every answer carries `read_status` (which generation
-answered) and `coverage` (what could not be indexed), so freshness and gaps are in the response
-rather than in a follow-up call.
+The server serves every repository in the registry: pass `repo`, a path or a basename, to answer
+from another one. Omit it and the working directory's repository, or the only registered one, is
+used; a call naming an unregistered repository fails with `not_found` and a hint listing the
+registry. A background daemon watches registered repositories and this server does not, so an
+answer is only as fresh as its `read_status` generation; every answer carries that with `coverage`
+(what could not be indexed), so gaps are in the response rather than in a follow-up call.
 
 ## 1. Start a task with `summary`
 
@@ -50,8 +52,8 @@ detail from the kind — `members` for a file or class, `edges` for a function o
   call `status` with the paths you care about before claiming nothing exists.
 - **Do not use `trace` to read source.** It returns relationships, not code. Read files with your
   own reader; `expand` with `what: source` exists for the twenty-line case, not as a viewer.
-- **Do not pass a project argument.** There is none: the repository is bound at startup, so a
-  name or a path never needs a project to disambiguate it.
+- **Do not expect `repo` to work for an unregistered path.** It selects among registered
+  repositories; add one with `sangkar repo add <path>` and the next answer can name it.
 
 The surface is seven tools: `status`, `summary`, `trace`, `search`, `impact`, `expand` and
 `index`. `status` says what is indexed, `summary`, `trace` and `search` answer questions about

@@ -498,8 +498,8 @@ describe("expand: manifest", () => {
     expect(manifest.description).toContain("says which it chose");
   });
 
-  test("declares exactly five arguments, one of them required, with the spec's budget default", () => {
-    expect(Object.keys(input)).toEqual(["target", "what", "path", "range", "budget"]);
+  test("declares exactly six arguments, one of them required, with the spec's budget default", () => {
+    expect(Object.keys(input)).toEqual(["target", "what", "path", "range", "budget", "repo"]);
     expect(input.target.required).toBe(true);
     expect([...input.what.values]).toEqual(["members", "edges", "source", "coverage", "outline"]);
     // The same prefix filter `trace` and `search` declare: same name, same type, no enum.

@@ -20,12 +20,12 @@ export const manifest = {
 } as const satisfies { name: string; description: string };
 
 /**
- * The two optional arguments, in the shape `TECH-SPEC.md` §6 fixes for every tool's `input`
+ * The optional arguments, in the shape `TECH-SPEC.md` §6 fixes for every tool's `input`
  * (`{type, default, …}` records, not JSON Schema): the composition root turns this into the JSON
  * Schema it registers, and the handler reads its defaults from here rather than restating them.
  *
- * There is deliberately no `budget` argument: `TOOLS-SPEC.md` §10 gives `index` two optional
- * parameters, and a repair call has no payload worth paging.
+ * There is deliberately no `budget` argument: a repair call publishes counts, not a list, so it has
+ * no payload worth paging.
  */
 export const input = {
   force: {
@@ -41,6 +41,23 @@ export const input = {
     description:
       "full rebuilds the graph from an empty stage; fast republishes only what changed and is the " +
       "cheaper first pass on a huge repository.",
+  },
+  // No default: an absent `repo` means "unselected", which the composition root answers from the
+  // working directory; a default here would make that indistinguishable from a named repository.
+  repo: {
+    type: "string",
+    description:
+      "Registered repository to answer from — its path or basename. " +
+      "Omit it to use the working directory's repository, or the only registered one.",
+  },
+  // Defaulted to true because the run is what makes the tree worth watching: an index nobody can
+  // find again is a call the operator has to repeat. `--no-register` is the opt-out.
+  register: {
+    type: "boolean",
+    default: true,
+    description:
+      "Add this repository to the sangkar registry so the daemon watches it. " +
+      "Use --no-register to index without registering.",
   },
 } as const;
 
@@ -60,10 +77,13 @@ export const example: Record<string, unknown> = { mode: "fast" };
 
 /**
  * A call's arguments. Every field is optional because the schema carries the defaults and an MCP
- * client may send neither, one, or both; the handler applies {@link input}'s defaults itself so a
- * direct call and a protocol call agree.
+ * client may send none of them; the handler applies {@link input}'s defaults itself so a direct
+ * call and a protocol call agree.
  */
 export interface IndexArgs {
   readonly force?: boolean;
   readonly mode?: IndexMode;
+  /** Read by the composition root to pick the tree; the handler indexes the one it is bound to. */
+  readonly repo?: string;
+  readonly register?: boolean;
 }

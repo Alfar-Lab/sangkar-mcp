@@ -1,0 +1,243 @@
+{
+  "phase": "phase_0",
+  "title": "Contracts and shared plumbing",
+  "tasks": [
+    {
+      "id": "TASK-001",
+      "title": "Resolve $SANGKAR_HOME in AppConfig and add withRepo()",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/config.ts",
+        "tests/config.test.ts",
+        "tests/tools-index.test.ts"
+      ],
+      "details": {
+        "goal": "Give the process one machine-level home ($SANGKAR_HOME, default ${XDG_CONFIG_HOME:-$HOME/.config}/sangkar) with the registry and daemon paths derived from it, and a pure helper that rebinds the same machine fields to any repository root so one process can serve N repos.",
+        "contract": "In `src/shared/config.ts`, keep `flagValue`, `detectRepoRoot`, `Budgets`, `TelemetryConfig` and every existing field of `AppConfig` as they are, and add:\n\nexport interface DaemonPaths { readonly pidPath: string; readonly logPath: string }\nexport const HOME_DIR_NAME = \"sangkar\";\nexport interface AppConfig {\n  // existing, unchanged: dataDir, repoRoot, cursorKey, budgets, telemetry\n  readonly home: string;         // $SANGKAR_HOME, else ${XDG_CONFIG_HOME:-$HOME/.config}/sangkar\n  readonly registryPath: string; // <home>/sangkar.json\n  readonly daemon: DaemonPaths;  // <home>/daemon.pid, <home>/daemon.log\n}\nexport function withRepo(config: AppConfig, repoRoot: string, options?: { readonly dataDir?: string }): AppConfig;\n\nHome resolution, in order: `env.SANGKAR_HOME` when set and not empty (a leading `~/` expands against `env.HOME`), else `join(env.XDG_CONFIG_HOME ?? join(env.HOME ?? homedir(), \".config\"), HOME_DIR_NAME)`. `env` is `options.env ?? process.env`, as today. `withRepo` returns a new object: `repoRoot` = the argument (resolved), `dataDir` = `options.dataDir ?? join(repoRoot, DATA_DIR_NAME)`, `telemetry.dir` = `join(dataDir, \"telemetry\")`, and `home`, `registryPath`, `daemon`, `cursorKey`, `budgets`, `telemetry.enabled` copied untouched. This file stays the only reader of the environment: no other file may read `SANGKAR_HOME`.\n\nDo not edit: `src/index.ts`, `src/shared/store/read/context.ts`, anything under `src/tools/**` except the literal named below. `tests/tools-index.test.ts` holds a hand-written `AppConfig` object literal (`harness()`, ~line 111) that a new required field breaks: add `home`, `registryPath` and `daemon` to it and change nothing else in that file.",
+        "steps": [
+          "Add `DaemonPaths`, `HOME_DIR_NAME` and the three new `AppConfig` fields, and resolve `home`/`registryPath`/`daemon` inside `loadConfig` with the order above.",
+          "Export `withRepo()` as described, reusing `DATA_DIR_NAME` for the default data dir.",
+          "Extend `tests/config.test.ts`: `SANGKAR_HOME` wins; `XDG_CONFIG_HOME` is used when `SANGKAR_HOME` is unset; both unset falls back to `$HOME/.config/sangkar`; an empty `SANGKAR_HOME` falls back; a leading `~/` expands; `withRepo` swaps repoRoot/dataDir/telemetry.dir and preserves home, registryPath, daemon, cursorKey and budgets.",
+          "Add `home`, `registryPath` and `daemon` to the `AppConfig` literal in `tests/tools-index.test.ts:harness()` (temp paths under the existing `dir`).",
+          "Confirm nothing else reads the new variables: `grep -rn \"SANGKAR_HOME\\|XDG_CONFIG_HOME\" src` names `src/shared/config.ts` only."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck\nDone when: both test files pass, `tsc --noEmit` exits 0 (the hand-written literal compiles), `withRepo` returns a config whose `telemetry.dir` is `<dataDir>/telemetry`, and the grep in step 5 lists one file."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:06:33Z",
+          "detail": "Implemented in src/shared/config.ts: DaemonPaths, HOME_DIR_NAME, AppConfig.home/registryPath/daemon resolved by resolveHome (SANGKAR_HOME non-empty wins, else ${XDG_CONFIG_HOME:-$HOME/.config}/sangkar; leading ~/ expands against env.HOME), and exported withRepo(config, repoRoot, {dataDir?}) reusing DATA_DIR_NAME and rebuilding telemetry.dir. Tests: tests/config.test.ts gained \"loadConfig home\" (5 cases) and \"withRepo\" (3 cases); tests/tools-index.test.ts harness literal got home/registryPath/daemon. VERIFY: PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/config.test.ts tests/tools-index.test.ts -> 47 pass, 0 fail, 170 expect calls, exit 0. PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck -> exit 0. biome check on the 3 files: clean. grep -rn \"SANGKAR_HOME\\|XDG_CONFIG_HOME\" src -> src/shared/config.ts only (7 hits). No files outside the task list touched."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification (independent): typecheck exit 0; lint clean (115 files); bun test tests/config.test.ts -> 33 pass / 0 fail / 89 expect. Diff inspected: only src/shared/config.ts, tests/config.test.ts, tests/tools-index.test.ts touched (git status confirms no other file). Review item closed by orchestrator: an empty-but-set XDG_CONFIG_HOME previously produced home=join(\"\",\"sangkar\") = cwd-relative \"sangkar\"; now envValue() treats empty SANGKAR_HOME/XDG_CONFIG_HOME/HOME as absent (src/shared/config.ts:resolveHome+expandHome) and tests/config.test.ts gained \"an empty XDG_CONFIG_HOME counts as absent too\". Gate rerun after the fix: typecheck 0, lint 0, eight suites 188 pass / 0 fail. Contract satisfied: withRepo swaps repoRoot/dataDir/telemetry.dir and copies home, registryPath, daemon, cursorKey, budgets, telemetry.enabled."
+        }
+      ]
+    },
+    {
+      "id": "TASK-002",
+      "title": "Add the registry module: read, atomic register, and repo selection",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/registry.ts",
+        "tests/registry.test.ts"
+      ],
+      "details": {
+        "goal": "One module owns `sangkar.json` — reading it without ever throwing, appending a canonicalised repo atomically, and resolving the `repo` a call asked for into one registered root.",
+        "contract": "New `src/shared/registry.ts`, importing `#shared/*` only (no drizzle, no tools, no indexer):\n\nexport const REGISTRY_VERSION = 1;\nexport interface Registry { readonly version: number; readonly repos: readonly string[] }\nexport const EMPTY_REGISTRY: Registry;\nexport function canonicalRoot(path: string, options?: { readonly home?: string }): string;\nexport function readRegistry(path: string, options?: { readonly log?: Logger }): Registry;\nexport function writeRegistry(path: string, registry: Registry): void;\nexport function registerRepo(path: string, repoPath: string, options?: { readonly log?: Logger }): { readonly registry: Registry; readonly added: boolean };\nexport function removeRepo(path: string, repoPath: string, options?: { readonly log?: Logger }): { readonly registry: Registry; readonly removed: boolean };\nexport interface Selection { readonly ok: true; readonly repoRoot: string }\nexport interface SelectionFailure { readonly ok: false; readonly error: AppError }\nexport function selectRepo(input: { readonly registry: Registry; readonly requested?: string | undefined; readonly cwd: string; readonly pinnedRoot?: string | null }): Selection | SelectionFailure;\n\nFile shape, verbatim: `{\"version\":1,\"repos\":[\"~/Documents/a\",\"/srv/b\"]}`. `canonicalRoot` expands a leading `~/` against `options.home` (default `$HOME`), `resolve()`s, and applies `realpathSync` only when the path exists (a missing path keeps the resolved form). `readRegistry`: a missing file, an unreadable file, a non-object, a missing/!=1 `version`, or a non-array `repos` returns `EMPTY_REGISTRY` and logs exactly one `warn` with the reason; non-string entries are dropped with one `warn`; surviving entries are canonicalised and deduped with the first occurrence keeping its position. `writeRegistry` creates the parent directory recursively and writes `{version: REGISTRY_VERSION, repos}` to `<path>.tmp` then `rename`s it over `path`. `registerRepo`/`removeRepo` are read-modify-write on top of those two and swallow their own IO error into one `warn` (returning the registry they read); `added`/`removed` say whether the file had to change.\n\n`selectRepo` order, and it is the whole contract. **An explicit request outranks a process-level pin; the pin outranks the implicit defaults.**\n1. A supplied `requested` resolves against the registry: canonical path first, then basename; a basename shared by two entries is `ambiguous`, and a name matching nothing is `not_found` even when `pinnedRoot` is set (the pin is a default, not a barrier, so the documented selector never goes silently dead).\n2. Otherwise a non-empty `pinnedRoot` (`--repo-root`) is canonicalised and returned without consulting the registry, which is what keeps every ad-hoc caller working.\n3. Otherwise a registered root equal to `canonicalRoot(cwd)` wins, else exactly one registered repo wins, else `not_found` (none registered) or `ambiguous` (several).\n\nEvery failure is an `AppError` with a hint that lists the registered repos one per line (`sangkar repo add <path>` as the hint when the registry is empty). No new `AppErrorCode`.",
+        "steps": [
+          "Write the module with the constants, `canonicalRoot`, `readRegistry`, `writeRegistry`.",
+          "Add `registerRepo` and `removeRepo` as read-modify-write with the temp-then-rename write.",
+          "Add `selectRepo` with the requested → pinned → cwd → single-registry ladder and the two refusal codes.",
+          "Write `tests/registry.test.ts` over `mkdtemp` directories: missing file returns `EMPTY_REGISTRY` with one warning; `version:2` returns `EMPTY_REGISTRY`; a non-string entry is dropped; `~` expands and duplicates collapse with order preserved; `registerRepo` twice reports `added:false` the second time and leaves one entry; a missing repo path is registered in its resolved (non-realpath) form while an existing one is realpathed; `selectRepo` covers requested-beats-pinned (pinned B + requested A → A), requested-unregistered-with-a-pin → `not_found`, pinned-with-no-requested (empty registry and multi-entry registry → the pin), cwd-match, single-registry, basename, and both refusals with a hint naming the registered repos."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/registry.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck\nDone when: every case above passes, the requested-beats-pinned and pinned-default cases both hold, `not_found` is still reachable while a pin is set, no test throws out of `readRegistry`/`registerRepo`, and `grep -n \"src/tools\\|drizzle\" src/shared/registry.ts` is empty."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:10:09Z",
+          "detail": "src/shared/registry.ts + tests/registry.test.ts created. readRegistry/canonicalRoot/writeRegistry/registerRepo/removeRepo/selectRepo per contract; #shared/* imports only, no new AppErrorCode. canonicalRoot defaults to os.homedir() instead of reading the env, to keep the plan's 'config.ts is the only env reader' grep invariant (TASK-008 gate) intact. verify: bun test tests/registry.test.ts -> 27 pass / 0 fail / 64 expect; bun run typecheck -> exit 0; biome check on both files clean; grep -n 'src/tools|drizzle' src/shared/registry.ts empty; bun test tests/boundary.test.ts 13 pass."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification: bun test tests/registry.test.ts -> 27 pass / 0 fail inside the eight-suite gate (188 pass overall, exit 0); typecheck 0; lint clean. Only src/shared/registry.ts + tests/registry.test.ts created; no other file touched. grep -n \"src/tools|drizzle\" src/shared/registry.ts empty. grep -n process.env src/shared/registry.ts empty (canonicalRoot defaults to os.homedir() deliberately, keeping config.ts the only env reader per the plan constraint; documented deviation from \"default $HOME\", accepted). Exports confirmed for phase_1: readRegistry, registerRepo, removeRepo, selectRepo, canonicalRoot, REGISTRY_VERSION, EMPTY_REGISTRY, Selection/SelectionFailure, SelectRepoInput, RegisterResult/RemoveResult."
+        }
+      ]
+    },
+    {
+      "id": "TASK-003",
+      "title": "Add the per-repo config module with defaults, clamping and the recording precedence",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/repo-config.ts",
+        "tests/repo-config.test.ts"
+      ],
+      "details": {
+        "goal": "`<repo>/.sangkar/config.json` decides whether a repo is watched, how often, and whether its usage is recorded — with defaults and clamping that a broken file cannot break.",
+        "contract": "New `src/shared/repo-config.ts`, `#shared/*` imports only:\n\nexport const WATCH_INTERVAL_DEFAULT_MS = 2_000;\nexport const WATCH_INTERVAL_MIN_MS = 1_000;\nexport const WATCH_INTERVAL_MAX_MS = 300_000;\nexport interface RepoConfig {\n  readonly repoRoot: string;\n  readonly dataDir: string;\n  readonly watch: boolean;\n  readonly watchIntervalMs: number;\n  readonly telemetry: boolean;\n}\nexport const DEFAULT_REPO_SETTINGS: { readonly watch: true; readonly watchIntervalMs: 2000; readonly telemetry: true };\nexport function repoConfigPath(dataDir: string): string; // join(dataDir, \"config.json\")\nexport function readRepoConfig(repoRoot: string, options?: { readonly dataDir?: string; readonly log?: Logger }): RepoConfig;\nexport function writeRepoConfig(config: RepoConfig): void;\nexport function recordingEnabled(input: { readonly consent: boolean; readonly repo: RepoConfig; readonly registered: boolean }): boolean;\n\nFile shape, verbatim: `{\"watch\":true,\"watch_interval\":2000,\"telemetry\":true}` (snake_case on disk, camelCase in TypeScript). `readRepoConfig` resolves `dataDir` as `options.dataDir ?? join(repoRoot, \".sangkar\")` and reads `repoConfigPath(dataDir)`; a missing file, an unparseable file or a non-object yields `DEFAULT_REPO_SETTINGS` plus exactly one `warn` naming the reason and the path. Field rules: `watch`/`telemetry` must be JSON booleans, anything else takes the default (one `warn`); `watch_interval` must be an integer — a non-integer, a negative number, `0` or a wrong type falls back to `WATCH_INTERVAL_DEFAULT_MS`, while an integer in `1..999` clamps up to `WATCH_INTERVAL_MIN_MS` and one above `WATCH_INTERVAL_MAX_MS` clamps down to it. `writeRepoConfig` creates the data dir and writes the snake_case shape. `recordingEnabled` is `consent && registered && repo.telemetry` (env `off` outranks config, config `false` outranks the default) — no environment read in this file. Do not edit `src/shared/config.ts`, which keeps the machine-level consent.",
+        "steps": [
+          "Write the constants, `RepoConfig`, `DEFAULT_REPO_SETTINGS` and `repoConfigPath`.",
+          "Implement `readRepoConfig` with the missing/invalid → defaults path and one shared warn helper.",
+          "Implement the clamp ladder for `watch_interval` and the boolean fallbacks.",
+          "Implement `writeRepoConfig` (snake_case) and `recordingEnabled`.",
+          "Write `tests/repo-config.test.ts` over `mkdtemp` trees: no file → defaults, one warning; unparseable → defaults; `watch:\"yes\"` → default true; `5`/`-1`/`\"2000\"`/`2.5` → 2000; `1` → 1000; `999` → 1000; `500000` → 300000; a full valid file round-trips through `writeRepoConfig` then `readRepoConfig`; `recordingEnabled` is false for each of consent false, registered false and `telemetry:false`, and true only when all three hold."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/repo-config.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck\nDone when: the matrix above passes, no case throws, and `grep -n \"process.env\" src/shared/repo-config.ts` is empty."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:09:36Z",
+          "detail": "New src/shared/repo-config.ts: WATCH_INTERVAL_{DEFAULT,MIN,MAX}_MS (2000/1000/300000), RepoConfig, DEFAULT_REPO_SETTINGS, repoConfigPath(join(dataDir,\"config.json\")), readRepoConfig(repoRoot,{dataDir?,log?}) with one-warn-per-rejection (file-level fallback to all defaults, per-field fallback for watch/telemetry), intervalOf clamp ladder (non-integer/<=0/wrong type -> 2000; <1000 -> 1000; >300000 -> 300000), writeRepoConfig (mkdirSync recursive + snake_case {\"watch\":..,\"watch_interval\":..,\"telemetry\":..}), recordingEnabled = consent && registered && repo.telemetry. Imports #shared/log only; no process.env. New tests/repo-config.test.ts over mkdtemp trees covers the required matrix. VERIFY: PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/repo-config.test.ts -> 17 pass, 0 fail, 66 expect calls, exit 0. typecheck -> exit 0 (whole tree). biome check --write on both new files -> clean. grep -n \"process.env\" src/shared/repo-config.ts -> empty (exit 1). Also ran tests/boundary.test.ts -> 13 pass, 0 fail."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification: bun test tests/repo-config.test.ts -> 17 pass / 0 fail inside the gate (188 pass overall, exit 0); typecheck 0; lint clean; only src/shared/repo-config.ts + tests/repo-config.test.ts created. grep -n process.env src/shared/repo-config.ts empty. Escaped barrel exports confirmed for phase_1: WATCH_INTERVAL_DEFAULT_MS/MIN/MAX, RepoConfig, DEFAULT_REPO_SETTINGS, repoConfigPath, readRepoConfig, writeRepoConfig, recordingEnabled."
+        }
+      ]
+    },
+    {
+      "id": "TASK-004",
+      "title": "Bind cursors to one repository without touching a handler",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "src/shared/cursor.ts",
+        "tests/cursor.test.ts"
+      ],
+      "details": {
+        "goal": "A cursor minted while serving repo A must be refused when a call in repo B resumes it, and no tool handler learns about it: the facade stamps and checks the repo identity.",
+        "contract": "In `src/shared/cursor.ts`:\n\nexport interface CursorBindings { readonly key: string; readonly repoId?: string }\nexport function createCursors(bindings: CursorBindings): Cursor;\n\n`CursorPayload` and `CursorExpectation` keep exactly their four and three fields — handlers build those literals (eight `ctx.cursor.sign({...})` call sites in six handlers) and must not be edited. The signed wire payload becomes `CursorPayload & { readonly repo: string }`, where `repo` is `bindings.repoId ?? \"\"`. `sign()` therefore serialises five fields; `verify()` decodes the token, and when its `repo` differs from the facade's own binding it returns `{ ok: false, code: \"cursor_mismatch\", hint: HINT_MISMATCH }` (the existing constant — no new refusal code, no new hint text). A tampered `repo` field must keep failing the MAC as `cursor_invalid` before any comparison. `CURSOR_KEY_MIN_BYTES`, `CURSOR_TAG_BYTES`, `MAX_TOKEN_CHARS` and every hint string stay unchanged, and `src/shared/store/read/context.ts` is not edited.",
+        "steps": [
+          "Add `CursorBindings` and the internal wire type; update `sign` to append `repo` and `verify` to compare it after the MAC check.",
+          "Keep the unbound default (`repoId` absent → `\"\"`) so every existing call site and test keeps its behaviour.",
+          "Extend `tests/cursor.test.ts`: two bound facades on the same key reject each other's tokens with `cursor_mismatch`; a bound facade accepts its own token; an unbound facade accepts an unbound token and rejects a bound one; flipping the `repo` segment of a valid token yields `cursor_invalid`; every existing case in the file still passes unedited."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/cursor.test.ts tests/contract.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck\nDone when: both files pass and `git diff --name-only 9cedf8a -- src/tools src/shared/store/read/context.ts` is empty."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:05:57Z",
+          "detail": "src/shared/cursor.ts: added CursorBindings + internal CursorWire (CursorPayload & {repo}); sign() serialises five fields, verify() checks repo after the MAC (mismatch -> cursor_mismatch + existing HINT_MISMATCH), generation still outranks it; unbound default repoId absent -> \"\". tests/cursor.test.ts: new 'repo binding' block (4 cases + stamp/tamper); ONE existing assertion edited because the mandated five-field wire makes it fail: 'the payload carries generation, tool, argsHash and position' now also asserts repo: \"\". Verify: bun test tests/cursor.test.ts tests/contract.test.ts -> 41 pass / 0 fail; bun run lint -> clean; bun run typecheck -> only tests/config.test.ts:311 and tests/tools-index.test.ts:111 (AppConfig.home/registryPath/daemon, files owned by other agents). git diff --name-only 9cedf8a -- src/tools src/shared/store/read/context.ts -> empty."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification: gate run -> bun test tests/cursor.test.ts (+ tests/contract.test.ts previously) pass, 188 pass / 0 fail across the eight gate suites; typecheck 0; lint clean. Done-when check run directly: `git diff --name-only 9cedf8a -- src/tools src/shared/store/read/context.ts` prints nothing. Review item closed: the one edited assertion in tests/cursor.test.ts is the wire-payload toEqual, which now also asserts repo: \"\" — the assertion got stricter, no existing case was removed or weakened (diff read in full). CursorPayload/CursorExpectation keep four/three fields; the repo field lives only on the internal wire type."
+        }
+      ]
+    },
+    {
+      "id": "TASK-005",
+      "title": "Add the store pool: one reader per canonical root with idle eviction",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src/shared/store/pool.ts",
+        "tests/pool.test.ts"
+      ],
+      "details": {
+        "goal": "One process serves N repositories with one connection and one prepared cache per root, and closes the ones it has not used for a while.",
+        "contract": "New `src/shared/store/pool.ts`, generic and database-free so it is testable with fakes (`src/shared/store/*` may import `#shared/*`; this file needs neither drizzle nor a `Conn`):\n\nexport const POOL_IDLE_TIMEOUT_MS = 60_000;\nexport interface PoolEntry<T> { readonly root: string; readonly value: T; readonly openedAt: number; readonly lastUsedAt: number }\nexport interface StorePool<T> {\n  acquire(root: string): T;                        // opens via `open` on first use, bumps lastUsedAt otherwise\n  replace(root: string, value: T): void;           // stores a refreshed value; never calls `open` or `close`\n  releaseIdle(now?: number): readonly string[];    // closes and forgets entries idle >= idleTimeoutMs\n  closeAll(): void;\n  entries(): readonly PoolEntry<T>[];\n  readonly size: number;\n}\nexport function createStorePool<T>(options: { readonly open: (root: string) => T; readonly close: (value: T) => void; readonly idleTimeoutMs?: number; readonly now?: () => number }): StorePool<T>;\n\n`acquire` resolves the root with `resolve()` so `a`, `a/` and `./a` name one entry. No timer, no interval, no `setTimeout` inside the module: the caller drives `releaseIdle()` (the composition root on each call), which is what keeps the pool from holding a process open. `replace(root, value)` stores `value` for `root` and does nothing else: it never calls `open` and never calls `close`, so a store refreshed by `refreshStore()` replaces the old entry after the caller has closed the old one. `closeAll` is idempotent and calls `close` once per entry. A throwing `open` must not leave a half-entry behind: the next `acquire` retries the open.",
+        "steps": [
+          "Write the interface and `createStorePool` with the Map keyed by resolved root.",
+          "Implement `acquire`, `replace`, `releaseIdle` (returning the closed roots), `closeAll`, `entries`, `size`.",
+          "Write `tests/pool.test.ts` with a counting fake opener/closer and an injected clock: same root returns the identical value with `open` called once; three roots are three values; `releaseIdle` before the timeout closes nothing; after it, the idle root is closed, `size` drops, and the next `acquire` reopens; a just-used root survives while a stale one is evicted; `closeAll` twice closes once each; a throwing opener leaves `size === 0` and the retry succeeds.",
+          "Assert the module has no timer: `grep -n \"setTimeout\\|setInterval\" src/shared/store/pool.ts` is empty."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/pool.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck\nDone when: all cases pass, `POOL_IDLE_TIMEOUT_MS` is exported and used as the default `idleTimeoutMs`, and the module imports no `node:sqlite`/`drizzle-orm`."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:07:57Z",
+          "detail": "New src/shared/store/pool.ts (~120 lines): POOL_IDLE_TIMEOUT_MS=60_000 default, StorePool<T>/PoolEntry<T> exactly as specified, Map keyed by resolve(root) so a, a/ and ./a are one entry, acquire opens on first use and bumps lastUsedAt, open-before-record so a throwing opener leaves size 0 and retries, replace never calls open/close, releaseIdle(now?) returns the closed canonical roots, closeAll forgets each entry before closing it (idempotent, one close per entry), entries() returns fresh snapshots, size getter. No timer, no node:sqlite, no drizzle-orm (grep for setTimeout|setInterval is empty, exit 1). tests/pool.test.ts: 13 cases (canonical roots, three roots, lastUsedAt/openedAt, default 60_000 vs before/after timeout, reopen after eviction, stale-vs-fresh eviction, explicit now, replace with/without prior acquire, closeAll twice, throwing opener). Verify: bun test tests/pool.test.ts -> 13 pass / 0 fail; bun run typecheck -> clean; bun run lint -> my two files clean via biome check src/shared/store/pool.ts tests/pool.test.ts, repo-wide lint still red only in src/shared/registry.ts + tests/registry.test.ts (another agent's files)."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification: bun test tests/pool.test.ts -> 13 pass / 0 fail inside the gate (188 pass overall, exit 0); typecheck 0; lint clean; only src/shared/store/pool.ts + tests/pool.test.ts created. grep -n \"setTimeout|setInterval\" src/shared/store/pool.ts empty; imports are node:path only (no node:sqlite, no drizzle-orm). POOL_IDLE_TIMEOUT_MS=60_000 exported and used as the default idleTimeoutMs."
+        }
+      ]
+    },
+    {
+      "id": "TASK-006",
+      "title": "Add the daemon-privileges boundary rule and the src/daemon type skeleton",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "tests/boundary.test.ts",
+        "src/daemon/types.ts"
+      ],
+      "details": {
+        "goal": "`src/daemon/**` becomes a privileged tree that may import `#shared/*` and `src/indexer/**` but never a tool handler or tool module, and it starts with the two types every daemon slice shares.",
+        "contract": "In `tests/boundary.test.ts` (the only edit this plan makes to that file):\n\n- `RuleId` gains `\"daemon-privileges\"`, and `RULE_TEXT` gains the exact entry `\"src/daemon/** may import only #shared/*, src/indexer/** and ./ siblings inside src/daemon, never src/tools/**\"`.\n- New `daemonPrivileges` check: for a file under `src/daemon/`, return `null` when the specifier is a `#shared` alias, a `./` sibling that resolves under `src/daemon`, or resolves under `src/indexer`; return a reason naming the offending target when it resolves under `src/tools`, and a reason for a `#tools`/`#indexer`-style private alias other than `#shared`. A file outside `src/daemon` never triggers it.\n- Every other rule must exempt `src/daemon` the way `root-privileges` already exempts `src/indexer` and `tests`: `src/daemon/x.ts` importing `../../indexer/watch` is not a root-privileges violation, while importing a tool handler still is.\n- `RULES` gains `{ id: \"daemon-privileges\", check: daemonPrivileges }`; the synthetic self-check suite gains three cases (daemon → `#shared/log` allowed, daemon → `src/indexer/watch` allowed, daemon → `../tools/trace/handler` reported as `daemon-privileges`), and the real-tree suite gains one assertion that no scanned `src/daemon/**` file reports that rule.\n\nNew `src/daemon/types.ts`, types only, whose module comment states the rule above:\n\nexport interface RepoRuntime {\n  readonly root: string;\n  readonly exists: boolean;\n  readonly watch: boolean;\n  readonly watchIntervalMs: number;\n  readonly telemetry: boolean;\n}\nexport interface DaemonStatus {\n  readonly pid: number | null;\n  readonly startedAt: string | null;\n  readonly home: string;\n  readonly registryPath: string;\n  readonly repos: readonly RepoRuntime[];\n}\n\nKeep the existing five rule ids and their messages byte-identical; do not add a `#daemon` alias to `package.json`; do not import `src/indexer/**` from `types.ts`.",
+        "steps": [
+          "Extend `RuleId` and `RULE_TEXT` with the new id and its exact message.",
+          "Write `daemonPrivileges` and register it in `RULES`.",
+          "Amend the existing checks so `src/daemon/**` is treated like `src/indexer/**` where the rule is about who may import the indexer.",
+          "Add the three synthetic cases and the one real-tree assertion.",
+          "Create `src/daemon/types.ts` with `RepoRuntime` and `DaemonStatus`."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/boundary.test.ts && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run lint\nDone when: the file passes with six rule ids, the three synthetic cases fire on the fake inputs, and lint accepts the new directory."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:09:45Z",
+          "detail": "tests/boundary.test.ts: RuleId + RULE_TEXT gain 'daemon-privileges' (message byte-exact), new daemonPrivileges check registered as sixth RULES entry (daemon: #shared ok, ./ sibling under src/daemon ok, src/indexer ok, src/tools and any other private alias reported with the resolving target, non-daemon files exempt), root-privileges now exempts src/daemon from the indexer half only (a daemon importing a tool handler is still reported), existing five ids/messages untouched; synthetic test 'the daemon may drive the indexer and the kernel, never a tool (rule 6)' covers the three required cases plus scope; real-tree suite gained 'no src/daemon file breaks the daemon boundary rule' and 'five' -> 'six' in the sibling test name. New src/daemon/types.ts: types only (RepoRuntime, DaemonStatus), module comment states the rule, imports nothing. Verify: bun test tests/boundary.test.ts -> 13 pass / 0 fail; bun run typecheck -> clean; bun run lint -> Checked 115 files, no fixes applied (full repo clean)."
+        },
+        {
+          "time": "2026-11-19T15:57:46Z",
+          "detail": "Orchestrator verification: bun test tests/boundary.test.ts -> 13 pass / 0 fail inside the gate (188 pass overall, exit 0); full repo lint clean; typecheck 0. Only tests/boundary.test.ts modified and src/daemon/types.ts created (git status: single file under src/daemon/). daemon-privileges present at RuleId:22, RULE_TEXT:33, RULES:260, synthetic case:461, real-tree assertion:471. src/daemon/types.ts exports RepoRuntime (line 12) and DaemonStatus (line 23), imports nothing."
+        }
+      ]
+    },
+    {
+      "id": "TASK-007",
+      "title": "phase_0 gate: contracts compile and the six new test files pass",
+      "agent": "verify",
+      "size": "S",
+      "files": [],
+      "pre_request": [
+        "TASK-001",
+        "TASK-002",
+        "TASK-003",
+        "TASK-004",
+        "TASK-005",
+        "TASK-006"
+      ],
+      "details": {
+        "goal": "Prove the phase_0 contracts are real before any fan-out worker builds on them: every new module typechecks, lints and passes its own test file, and the pre-existing suite is not broken by the config-field addition.",
+        "contract": "Read-only gate. Do not edit source, tests or plan files: report failures with the failing command and the first error line instead of fixing them. The modules under test are `src/shared/config.ts`, `src/shared/registry.ts`, `src/shared/repo-config.ts`, `src/shared/cursor.ts`, `src/shared/store/pool.ts`, `src/daemon/types.ts` plus `tests/boundary.test.ts`.",
+        "steps": [
+          "Run the six targeted suites listed in `verify`.",
+          "Run `typecheck` and `lint`.",
+          "Run the two suites most likely to break on the new `AppConfig` fields: `tests/acceptance.test.ts` is not required here, but `tests/read-files.test.ts` and `tests/tools-expand.test.ts` construct configs and must compile.",
+          "Confirm the exported surface: `grep -n \"export\" src/shared/registry.ts src/shared/repo-config.ts src/shared/store/pool.ts src/daemon/types.ts` lists every symbol this plan's phase_1 tasks reference.",
+          "Record the command, the counts and any warning in the task progress."
+        ],
+        "verify": "PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run lint && PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/config.test.ts tests/registry.test.ts tests/repo-config.test.ts tests/cursor.test.ts tests/pool.test.ts tests/boundary.test.ts tests/read-files.test.ts tests/tools-expand.test.ts\nDone when: typecheck exits 0, lint exits 0, all eight suites pass, and the grep in step 4 shows the phase_1 symbols (`readRegistry`, `registerRepo`, `removeRepo`, `selectRepo`, `readRepoConfig`, `writeRepoConfig`, `recordingEnabled`, `createStorePool`, `POOL_IDLE_TIMEOUT_MS`, `RepoRuntime`, `DaemonStatus`)."
+      },
+      "status": "completed",
+      "progress": [
+        {
+          "time": "2026-11-19T11:10:49Z",
+          "detail": "Gate not run yet: session stopped on user request after the three wave-1 workers reported. TASK-001..006 are in_progress with worker-reported (not independently verified) evidence. Resume here: re-run this task's verify command, then task_completed for each of TASK-001..006. Three items to check while verifying: (1) an empty-but-set XDG_CONFIG_HOME produced home=join(\"\", \"sangkar\"), a cwd-relative path — decide empty==unset and add a case; (2) TASK-004 modified one existing assertion in tests/cursor.test.ts (added repo:\"\" to a toEqual) — confirm it is only that field and that coverage did not shrink; (3) src/shared/registry.ts defaults canonicalRoot's home to os.homedir() rather than reading the env, a documented deviation from \"default $HOME\". Also note bun is at ~/.local/bin/bun as well as ~/.bun/bin/bun, and ppm lives at ~/.local/bin/ppm."
+        },
+        {
+          "time": "2026-11-19T16:00:34Z",
+          "detail": "GATE PASSED (all evidence independently observed, 2026-11-19). Commands: (1) PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run typecheck -> exit 0 (tsc --noEmit, no output). (2) PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun run lint -> exit 0, 'Checked 115 files in 251ms. No fixes applied.' (3) PATH=\"$HOME/.bun/bin:$PATH\" ~/.bun/bin/bun test tests/config.test.ts tests/registry.test.ts tests/repo-config.test.ts tests/cursor.test.ts tests/pool.test.ts tests/boundary.test.ts tests/read-files.test.ts tests/tools-expand.test.ts -> exit 0, 188 pass 0 fail 1250 expect() calls across 8 files; per-file: config 33, registry 27, repo-config 17, cursor 29, pool 13, boundary 13, read-files 22, tools-expand 34 (sums to 188), no skips. (4) Step-4 grep lists all 11 required phase_1 symbols: readRegistry, registerRepo, removeRepo, selectRepo (src/shared/registry.ts); readRepoConfig, writeRepoConfig, recordingEnabled (src/shared/repo-config.ts); createStorePool, POOL_IDLE_TIMEOUT_MS (src/shared/store/pool.ts); RepoRuntime, DaemonStatus (src/daemon/types.ts) - VERDICT: COMPLETE. Carry-over items re-checked from source, not on trust: (1) orchestrator's empty-env fix in src/shared/config.ts is correct - envValue() treats '' as undefined for SANGKAR_HOME/XDG_CONFIG_HOME/HOME, and tests/config.test.ts has 'an empty XDG_CONFIG_HOME counts as absent too' (passes). (2) tests/cursor.test.ts TASK-004 edit is only repo:\"\" added to one existing toEqual plus a new 6-test 'repo binding' describe (incl. forged-stamp -> cursor_invalid) - coverage expanded, not shrunk. (3) src/shared/registry.ts canonicalRoot defaults home to os.homedir() - documented deviation, comment explains config.ts is the only env reader; accepted. No warnings beyond read-files' migration debug/info logs (pre-existing behavior). No regression or out-of-scope edit found: only src/shared/config.ts, src/shared/cursor.ts, tests/{boundary,config,cursor,tools-index}.test.ts modified vs 9cedf8a; new files are the five reviewed modules + three test files; agent/SKILL.md stays modified as pre-existing. NOTE for orchestrator: task record's Progress line says 'task_completed for each of TASK-001..006' but this worker is barred from status transitions; TASK-001..006 remain in_progress for the orchestrator to close."
+        },
+        {
+          "time": "2026-11-19T16:01:36Z",
+          "detail": "Orchestrator verification (independent, code-auditor session 01a1f488): PASS. typecheck exit 0; lint exit 0 (115 files); eight suites 188 pass / 0 fail (config 33, registry 27, repo-config 17, cursor 29, pool 13, boundary 13, read-files 22, tools-expand 34). Step-4 grep: all 11 phase_1 symbols exported (readRegistry, registerRepo, removeRepo, selectRepo, readRepoConfig, writeRepoConfig, recordingEnabled, createStorePool, POOL_IDLE_TIMEOUT_MS, RepoRuntime, DaemonStatus). Auditor re-derived the three carry-over items from source: empty-env fix correct + tested, cursor.test.ts edit is one field on an existing toEqual (coverage grew, 6 new cases), canonicalRoot homedir default accepted. No regression, no out-of-scope edit; agent/SKILL.md still modified as required. TASK-001..006 closed on this evidence."
+        }
+      ]
+    }
+  ]
+}

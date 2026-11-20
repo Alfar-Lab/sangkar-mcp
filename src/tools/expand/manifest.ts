@@ -6,7 +6,7 @@
  * handler keeps with `payload.what` and `payload.why`. A paraphrase here would be a different
  * contract from the one the spec argues for.
  *
- * Five arguments are the whole surface, and that smallness is the point: `expand` is the one
+ * These arguments are the whole surface, and that smallness is the point: `expand` is the one
  * address for detail, which is what lets the other six tools ship summaries instead of
  * `detail_level` and per-item flags (DESIGN.md §7). `path` is the same prefix filter `trace` and
  * `search` take, because "the `Widget` under `tests/`" is a handle collision an agent can already
@@ -76,6 +76,14 @@ export const input = {
     description:
       "Token budget for the answer, larger by default than `summary`'s because detail is by " +
       "definition the expensive part.",
+  },
+  // No default: an absent `repo` means "unselected", which the root answers from the working
+  // directory; a default here would make that indistinguishable from a named repository.
+  repo: {
+    type: "string",
+    description:
+      "Registered repository to answer from — its path or basename. " +
+      "Omit it to use the working directory's repository, or the only registered one.",
   },
 } as const;
 

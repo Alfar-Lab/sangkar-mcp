@@ -383,7 +383,8 @@ Rules for handlers:
    (`DATABASE.md` §5: `root_mismatch` / `wrong_project_db` / `unsupported_filesystem` / `schema_too_new`).
 2. Import the seven manifests explicitly and register all seven unconditionally — one surface, no
    per-client filtering — building the `ToolContext` every handler receives.
-3. Start the watcher (if enabled) which **spawns** the indexer process on change.
+3. Select the repository for each call from the registry (or the pinned `--repo-root`) and serve it
+   from the pooled reader; start no watcher — the daemon owns every watcher, one per registered repo.
 4. Wire signal handlers to release the write lock and close the DB.
 
 Explicit import list, no directory scanning: with seven tools, the registry is seven lines and the
@@ -396,13 +397,19 @@ need to be resolvable.)
 
 ```mermaid
 flowchart LR
-    A["agent (MCP client)"] -->|stdio| B["bin/sangkar.ts mcp<br/>server process"]
-    B -->|"readonly connection"| DB[(".sangkar/graph.db")]
-    B -->|"spawn on change / index tool"| C["index worker process"]
+    A["agent (MCP client)"] -->|stdio| B["sangkar mcp<br/>thin server, one per session"]
+    B -->|"read registry, read only"| S[("$SANGKAR_HOME/sangkar.json")]
+    B -->|"readonly handle, one per selected repo"| DB[("repo/.sangkar/graph.db")]
+    D["sangkar daemon run<br/>one per machine"] -->|"read per reconcile tick"| S
+    D -->|"one watcher per registered repo"| C["sangkar worker<br/>one child per index run"]
     C -->|"stage -> seal -> rename"| DB
-    C -->|"write.lock"| L[(".sangkar/write.lock")]
-    B -.->|"poll git HEAD + mtimes<br/>no DB writes"| B
+    C -->|"write.lock"| L[("repo/.sangkar/write.lock")]
+    D -->|"loopback only"| P["report page:<br/>every registered repo"]
 ```
+
+The daemon is a sidecar, not a server: it speaks no MCP, opens no graph, and holds only the pid file,
+the registry, the watchers and the report listener. Every arrow into a `graph.db` above is either a
+read-only handle held by a session or a publish by the one worker that ran for that tree.
 
 | Decision | Choice | Reason |
 |---|---|---|
@@ -412,7 +419,7 @@ flowchart LR
 | Write lock | **create-exclusive file** (`wx`) containing PID + start time, mtime heartbeat | **Bun has no `flock`**; SQLite's own lock protects the DB, this only prevents duplicate work (CRG used `flock`; not available here) |
 | Stale lock | PID dead, or heartbeat older than 60 s → reclaim and log | a killed worker must not wedge the repo |
 | Readers during publish | their own handle keeps the previous generation | the `rename()` publish protocol (`DATABASE.md` §5) |
-| Watcher | poll `git HEAD` + file mtimes every 2 s, debounce 500 ms | portable, no inotify/FSEvents dependency; `node:fs.watch` behaves differently across platforms |
+| Watcher | poll `git HEAD` + file mtimes on the repo's own `watch_interval` (default 2 s, clamped to 1000–300000 ms), debounce 500 ms | portable, no inotify/FSEvents dependency; `node:fs.watch` behaves differently across platforms |
 | Cancellation | MCP `notifications/cancelled` → abort signal into the handler; the worker is killed on cancel | CRG checks cancellation at every `check_cancel` boundary |
 
 ---

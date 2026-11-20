@@ -45,6 +45,14 @@ export const input = {
     default: STATUS_DEFAULT_TOKENS,
     description: "Token ceiling for the coverage report, so forty paths cannot blow it up.",
   },
+  // No default: an absent `repo` means "unselected", which the root answers from the working
+  // directory; a default here would make that indistinguishable from a named repository.
+  repo: {
+    type: "string",
+    description:
+      "Registered repository to answer from — its path or basename. " +
+      "Omit it to use the working directory's repository, or the only registered one.",
+  },
 } as const;
 
 /**

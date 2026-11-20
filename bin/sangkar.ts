@@ -20,7 +20,7 @@ if (refusal !== null) {
  * the verb is the bootstrap (a fresh tree has no store for a tool call to answer from) and the tool
  * is what a client calls, with identical arguments.
  */
-const RESERVED = ["mcp", "worker", "index", "telemetry"] as const;
+const RESERVED = ["mcp", "worker", "index", "telemetry", "daemon", "repo"] as const;
 type Reserved = (typeof RESERVED)[number];
 
 const USAGE = `sangkar <name> [arguments] [global flags] — the name comes first.
@@ -30,6 +30,8 @@ verbs
   worker  index worker process, spawned by the server
   index   index the repository; also a tool, with identical arguments
   telemetry  write a self-contained HTML report of the recorded usage (local only; recording is on by default)
+  daemon  run, start, stop or inspect the daemon that watches the registered repositories
+  repo    add, remove, list or configure the repositories this installation serves
 
 tools
   status   report index status: five human lines, or the envelope with --json
@@ -49,6 +51,8 @@ examples
   sangkar trace 'handleRequest' --depth 1
   sangkar mcp --repo-root /path/to/repo
   sangkar telemetry --since 7d
+  sangkar repo add .
+  sangkar daemon status
 
 sangkar index is how the first index is created; until then every tool answers bootstrapping.
 `;
@@ -60,8 +64,32 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>]",
   worker: `usage: sangkar worker ${WORKER_FLAGS}`,
   index: `usage: sangkar index ${WORKER_FLAGS}`,
-  telemetry:
-    "usage: sangkar telemetry [--out <path>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]",
+  // The three flags `--serve` added to the telemetry verb; the block a refusal prints lives in
+  // `src/shared/telemetry/cli.ts`, and these lines are the answer `--help` gives from here.
+  telemetry: `usage: sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]
+  --serve        serve the report for every registered repository on loopback instead of writing one file
+  --port <n>     the port to bind (default: 7317; 0 picks a free port)
+  --host <addr>  the address to bind (default: 127.0.0.1; loopback only)`,
+  // Held verbatim in `src/daemon/cli.ts` and `src/shared/cli/repo.ts`, which print it on a refusal;
+  // a test compares the two so `--help` and a refusal cannot drift apart.
+  daemon: `usage: sangkar daemon [run|start|stop|status] [--port <n>] [--host <addr>]
+  run     run the daemon in the foreground until a signal stops it
+  start   start it as a detached child and return once it holds the pid file
+  stop    stop the daemon this home's pid file names
+  status  one header line, then one line per registered repository
+  --port <n>     the report server's port (default: 7317; 0 picks a free port)
+  --host <addr>  the address to bind (default: 127.0.0.1; loopback only)
+  --port and --host belong to "run"; start runs it with the defaults`,
+  repo: `usage: sangkar repo [add|remove|list|config] <path>
+  add <path>                register a tree and print its canonical path
+  remove <path>             unregister a tree; the tree and its graph are left alone
+  list                      one registered path per line (--json for a JSON document)
+  config <path>             write <path>/.sangkar/config.json and print the effective settings
+  --json                    the registry as {"version":1,"repos":[...]} (list only)
+  --watch <true|false>      whether the daemon watches this tree (config only)
+  --watch-interval <n>      poll period in milliseconds, 1000..300000 (config only)
+  --telemetry <true|false>  whether this tree's usage may be recorded (config only)
+  a relative <path> resolves against the current directory; a leading ~/ is expanded`,
 };
 
 function isReserved(value: string): value is Reserved {
@@ -87,6 +115,18 @@ if (isReserved(requested) && (argv.includes("--help") || argv.includes("-h"))) {
 if (requested === "telemetry") {
   const { runTelemetry } = await import("../src/shared/telemetry/cli");
   process.exit(await runTelemetry(argv.slice(1)));
+}
+
+// Same reason, one layer out: the registry is a JSON file and the daemon owns its own process, so
+// neither verb has a graph to load. Both dispatch here, before the kernel below.
+if (requested === "daemon") {
+  const { runDaemonCli } = await import("../src/daemon/cli");
+  process.exit(await runDaemonCli(argv.slice(1)));
+}
+
+if (requested === "repo") {
+  const { runRepoCli } = await import("../src/shared/cli/repo");
+  process.exit(await runRepoCli(argv.slice(1)));
 }
 
 // Imported lazily: `--help` and an unknown name must exit without loading the kernel.

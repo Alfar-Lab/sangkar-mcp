@@ -1,5 +1,6 @@
 import { randomBytes } from "node:crypto";
 import { existsSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 
 export interface Budgets {
@@ -19,6 +20,15 @@ export interface TelemetryConfig {
   readonly dir: string;
 }
 
+/** The two files a background daemon needs in the machine-level home. */
+export interface DaemonPaths {
+  readonly pidPath: string;
+  readonly logPath: string;
+}
+
+/** The directory name under the config root, so `${XDG_CONFIG_HOME:-$HOME/.config}/sangkar`. */
+export const HOME_DIR_NAME = "sangkar";
+
 /**
  * The resolved process configuration. Resolved once at start; every module that needs a
  * setting receives it from here, because this file is the only reader of the environment.
@@ -33,6 +43,15 @@ export interface AppConfig {
   budgets: Budgets;
   /** The consent switch as a value, so the recorder never reads the environment itself. */
   readonly telemetry: TelemetryConfig;
+  /**
+   * Machine-level home: `$SANGKAR_HOME`, else `<config root>/sangkar`. It belongs to the machine,
+   * not to the tree, so `withRepo()` leaves it alone while swapping the repository fields.
+   */
+  readonly home: string;
+  /** The daemon's repo registry, `<home>/sangkar.json`. */
+  readonly registryPath: string;
+  /** Where the daemon writes its pid and its log, both under `<home>`. */
+  readonly daemon: DaemonPaths;
 }
 
 export interface LoadConfigOptions {
@@ -42,6 +61,11 @@ export interface LoadConfigOptions {
   env?: Record<string, string | undefined>;
   /** Injected for tests; defaults to the process working directory. */
   cwd?: string;
+}
+
+export interface WithRepoOptions {
+  /** Overrides the default `<repoRoot>/.sangkar`; resolved by the caller, not here. */
+  readonly dataDir?: string;
 }
 
 const DEFAULT_BUDGET_TOKENS = 1_200;
@@ -93,12 +117,47 @@ export function detectRepoRoot(cwd: string): string {
 }
 
 /**
+ * An empty variable is an absent one: `SANGKAR_HOME=` or `XDG_CONFIG_HOME=` in a shell profile must
+ * not resolve to a working-directory-relative path, which would scatter the registry and the daemon
+ * files through whatever tree the process happens to start in.
+ */
+function envValue(env: Record<string, string | undefined>, name: string): string | undefined {
+  const value = env[name];
+  return value === undefined || value === "" ? undefined : value;
+}
+
+/**
+ * Expands a leading `~` against `env.HOME`, because the value comes from an env block or a config
+ * file rather than a shell, so nothing else would have expanded it.
+ */
+function expandHome(path: string, env: Record<string, string | undefined>): string {
+  if (!path.startsWith("~/")) {
+    return path;
+  }
+  return join(envValue(env, "HOME") ?? homedir(), path.slice(2));
+}
+
+/**
+ * The machine-level home: `SANGKAR_HOME` when set and non-empty, else the XDG config root with
+ * `HOME_DIR_NAME` appended.
+ */
+function resolveHome(env: Record<string, string | undefined>): string {
+  const explicit = envValue(env, "SANGKAR_HOME");
+  if (explicit !== undefined) {
+    return expandHome(explicit, env);
+  }
+  const configRoot =
+    envValue(env, "XDG_CONFIG_HOME") ?? join(envValue(env, "HOME") ?? homedir(), ".config");
+  return join(configRoot, HOME_DIR_NAME);
+}
+
+/**
  * Resolves the config from the command line and the working directory: `--repo-root` (default
  * autodetected from cwd), `--data-dir` relative to the repo root (default `<repoRoot>/.sangkar`),
- * then the two settings that come from the environment: `SANGKAR_CURSOR_KEY` and the telemetry
- * consent switch `SANGKAR_TELEMETRY` — unset or empty means enabled, and the one spelling `off`
- * disables it. `SANGKAR_NO_WATCH` is deliberately not read here; it is not a tool setting, it is
- * this process deciding whether it owns a poller (see `watcherDisabled` in `src/index.ts`).
+ * then the settings that come from the environment: `SANGKAR_HOME` (the machine-level home, see
+ * `resolveHome`), `SANGKAR_CURSOR_KEY` and the telemetry consent switch `SANGKAR_TELEMETRY` —
+ * unset or empty means enabled, and the one spelling `off` disables it. The old no-watch variable is
+ * gone: the daemon owns the watchers now, so no process decides that from the environment any more.
  */
 export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const argv = options.argv ?? [];
@@ -117,9 +176,14 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       ? join(repoRoot, DATA_DIR_NAME)
       : resolve(repoRoot, rawDataDir);
 
+  const home = resolveHome(env);
+
   return {
     dataDir,
     repoRoot,
+    home,
+    registryPath: join(home, "sangkar.json"),
+    daemon: { pidPath: join(home, "daemon.pid"), logPath: join(home, "daemon.log") },
     // An absent or empty variable yields a per-process key, so a cursor minted by one invocation
     // cannot be verified by another; set SANGKAR_CURSOR_KEY to share cursors across processes.
     cursorKey:
@@ -133,5 +197,25 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       enabled: env.SANGKAR_TELEMETRY !== "off",
       dir: join(dataDir, "telemetry"),
     },
+  };
+}
+
+/**
+ * The same machine-level config rebound to another working tree: one process can serve N repos
+ * without re-reading the environment, because the home, the registry, the daemon files, the key
+ * and the budgets are machine state rather than repo state.
+ */
+export function withRepo(
+  config: AppConfig,
+  repoRoot: string,
+  options: WithRepoOptions = {},
+): AppConfig {
+  const root = resolve(repoRoot);
+  const dataDir = options.dataDir ?? join(root, DATA_DIR_NAME);
+  return {
+    ...config,
+    repoRoot: root,
+    dataDir,
+    telemetry: { ...config.telemetry, dir: join(dataDir, "telemetry") },
   };
 }

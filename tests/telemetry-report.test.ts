@@ -2,7 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { escapeHtml, renderHtml } from "#shared/telemetry/html";
+import { escapeHtml, renderBody, renderHtml } from "#shared/telemetry/html";
+import { renderMultiReport } from "#shared/telemetry/html-multi";
 import {
   type CallRecord,
   type IndexRunRecord,
@@ -151,6 +152,23 @@ function renderedOf(
   overrides: AggregateOverrides = {},
 ): string {
   return renderHtml(aggregateOf(records, overrides), META);
+}
+
+/** Occurrences, not presence: two panels of one kind are a different document from one. */
+function countOf(haystack: string, needle: string): number {
+  return haystack.split(needle).length - 1;
+}
+
+/**
+ * The slice between two markers. A claim about "this section" has to be read from that section, or
+ * a panel copied from a sibling would satisfy every `toContain` below.
+ */
+function between(haystack: string, from: string, to: string): string {
+  const start = haystack.indexOf(from);
+  const end = start < 0 ? -1 : haystack.indexOf(to, start + from.length);
+  expect(start).toBeGreaterThanOrEqual(0);
+  expect(end).toBeGreaterThan(start);
+  return haystack.slice(start, end);
 }
 
 function writeJsonl(dir: string, name: string, lines: readonly string[]): void {
@@ -574,5 +592,171 @@ describe("--since", () => {
     ]);
     expect(read.unparsed).toBe(0);
     expect(read.files).toEqual(["2026-11-18.jsonl"]);
+  });
+});
+
+/**
+ * The machine-wide page: one document for the machine, one section per telemetry directory it read.
+ * The assertions above stay the contract for a section's panels; these pin what the page adds — the
+ * nav, the machine total, the escaping of a caller-supplied label — and that the file is still one
+ * self-contained document rather than N concatenated ones.
+ */
+describe("the machine-wide report", () => {
+  // The six tokens whose presence means the file would fetch something the radio cannot reach.
+  const FORBIDDEN = ["http://", "https://", "src=", "<link", "@import", "url("];
+
+  const ALPHA_LABEL = "alpha-repo /home/u/alpha";
+  const ALPHA_DIR = "/home/u/alpha/.sangkar/telemetry";
+  const BETA_LABEL = "beta-repo /work/beta";
+  const BETA_DIR = "/work/beta/.sangkar/telemetry";
+
+  const alphaRecords: readonly TelemetryRecord[] = [
+    callRecord({ tool: "trace", seq: 1 }),
+    callRecord({ tool: "trace", seq: 2 }),
+  ];
+  const betaRecords: readonly TelemetryRecord[] = [
+    callRecord({ tool: "search", seq: 3, status: "not_found" }),
+    indexRunRecord({ mode: "fast" }),
+  ];
+
+  function twoSections(): string {
+    return renderMultiReport({
+      machine: aggregateOf([...alphaRecords, ...betaRecords]),
+      sections: [
+        { label: ALPHA_LABEL, sourceDir: ALPHA_DIR, data: aggregateOf(alphaRecords) },
+        { label: BETA_LABEL, sourceDir: BETA_DIR, data: aggregateOf(betaRecords) },
+      ],
+      generated_at: GENERATED_AT,
+      since: null,
+    });
+  }
+
+  test("each section draws its own record set and carries its own label", () => {
+    const page = twoSections();
+
+    // Twice per label on purpose: once as the nav link text, once as that section's heading.
+    expect(countOf(page, "alpha-repo")).toBe(2);
+    expect(countOf(page, "beta-repo")).toBe(2);
+
+    const alpha = between(page, '<section id="repo-1"', '<section id="repo-2"');
+    const beta = between(page, '<section id="repo-2"', "</main>");
+
+    expect(countOf(alpha, "alpha-repo")).toBe(1);
+    expect(countOf(alpha, "beta-repo")).toBe(0);
+    expect(countOf(beta, "beta-repo")).toBe(1);
+    expect(countOf(beta, "alpha-repo")).toBe(0);
+
+    // Two different record sets, so two different tables: trace only in alpha, the fast run only
+    // in beta. A page that drew the same table twice would still match every label count above.
+    expect(alpha).toContain("<td>trace</td>");
+    expect(alpha).not.toContain("<td>search</td>");
+    expect(alpha).not.toContain("<td>fast</td>");
+    expect(beta).toContain("<td>search</td>");
+    expect(beta).toContain("<td>fast</td>");
+    expect(beta).not.toContain("<td>trace</td>");
+
+    // The source directory is shown with its section, escaped like every other value.
+    expect(alpha).toContain(`<code>${ALPHA_DIR}</code>`);
+    expect(beta).toContain(`<code>${BETA_DIR}</code>`);
+    expect(alpha).not.toContain(BETA_DIR);
+  });
+
+  test("the machine section comes first, totals the sections and links to each of them", () => {
+    const page = twoSections();
+    const machine = between(page, '<section id="machine"', "<nav");
+    const alpha = aggregateOf(alphaRecords);
+    const beta = aggregateOf(betaRecords);
+    const total = aggregateOf([...alphaRecords, ...betaRecords]);
+
+    // The written total is the sum, not one section's count.
+    expect(total.totals.records).toBe(alpha.totals.records + beta.totals.records);
+    expect(total.totals.records).toBe(4);
+    expect(machine).toContain("records <span>4</span>");
+    expect(machine).toContain("repositories <span>2</span>");
+    // Both repos contribute to the machine table, which neither section table shows alone.
+    expect(machine).toContain("<td>trace</td>");
+    expect(machine).toContain("<td>search</td>");
+
+    // The machine section precedes the nav, which precedes the sections it links to.
+    expect(page.indexOf('id="machine"')).toBeLessThan(page.indexOf("<nav"));
+    expect(page.indexOf("<nav")).toBeLessThan(page.indexOf('id="repo-1"'));
+    expect(countOf(page, '<a href="#repo-1">')).toBe(1);
+    expect(countOf(page, '<a href="#repo-2">')).toBe(1);
+    expect(countOf(page, '<a href="#repo-3">')).toBe(0);
+  });
+
+  test("renderBody is the panels of the single report, reused and not copied", () => {
+    const data = aggregateOf([callRecord({ tool: "trace" }), indexRunRecord()]);
+    expect(renderHtml(data, META)).toContain(renderBody(data));
+
+    const page = renderMultiReport({
+      machine: data,
+      sections: [{ label: ALPHA_LABEL, sourceDir: ALPHA_DIR, data }],
+      generated_at: GENERATED_AT,
+      since: null,
+    });
+
+    // Machine section plus one repo section: the same panel ids, from the same function.
+    expect(countOf(page, '<section id="tools"')).toBe(2);
+    expect(countOf(page, renderBody(data))).toBe(2);
+  });
+
+  test("a hostile label and source directory render escaped and add no script", () => {
+    const hostile = "<script>alert(1)</script>";
+    const page = renderMultiReport({
+      machine: aggregateOf([callRecord()]),
+      sections: [
+        { label: hostile, sourceDir: "/tmp/<b>bold</b>", data: aggregateOf([callRecord()]) },
+      ],
+      generated_at: GENERATED_AT,
+      since: null,
+    });
+
+    expect(page).not.toContain(hostile);
+    expect(countOf(page, "<script")).toBe(0);
+    expect(page).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+    expect(page).toContain("<code>/tmp/&lt;b&gt;bold&lt;/b&gt;</code>");
+  });
+
+  test("one document, one stylesheet, and none of the six forbidden tokens", () => {
+    const page = twoSections();
+
+    expect(countOf(page, "<!doctype html>")).toBe(1);
+    expect(countOf(page, "<html")).toBe(1);
+    expect(countOf(page, "</html>")).toBe(1);
+    expect(countOf(page, "<style>")).toBe(1);
+    expect(countOf(page, "</style>")).toBe(1);
+
+    for (const token of FORBIDDEN) {
+      expect(page).not.toContain(token);
+    }
+
+    // Not a stripped page that trivially holds no token: the sections and the stylesheet are here.
+    expect(page).toContain('id="machine"');
+    expect(page).toContain('id="repo-1"');
+    expect(page).toContain('id="repo-2"');
+    expect(page).toContain('id="index-runs"');
+    expect(page).toContain("--accent: #a2502a;");
+    expect(page.length).toBeGreaterThan(10_000);
+  });
+
+  test("an empty registry still renders the machine section and says why it is empty", () => {
+    const machine = aggregate({ records: [], unparsed: 0, files: [], since: null });
+    const page = renderMultiReport({
+      machine,
+      sections: [],
+      generated_at: GENERATED_AT,
+      since: null,
+    });
+
+    expect(page).toContain("no registered repository has recorded anything yet");
+    expect(page).toContain("nothing recorded yet");
+    expect(page).toContain('id="machine"');
+    expect(page).not.toContain("<nav");
+    expect(page).not.toContain('id="repo-1"');
+    expect(countOf(page, "<style>")).toBe(1);
+    for (const token of FORBIDDEN) {
+      expect(page).not.toContain(token);
+    }
   });
 });

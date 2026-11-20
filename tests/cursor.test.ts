@@ -77,7 +77,7 @@ describe("round trip", () => {
     expect(sign(payload(), KEY)).toBe(sign(payload(), KEY));
   });
 
-  test("the payload carries generation, tool, argsHash and position", () => {
+  test("the payload carries generation, tool, argsHash, position and the repo stamp", () => {
     const token = sign(payload({ position: 3 }), KEY);
     const body = token.slice(0, token.indexOf("."));
     expect(JSON.parse(Buffer.from(body, "base64url").toString("utf8"))).toEqual({
@@ -85,6 +85,7 @@ describe("round trip", () => {
       tool: EXPECTED.tool,
       argsHash: EXPECTED.argsHash,
       position: 3,
+      repo: "",
     });
   });
 });
@@ -196,6 +197,69 @@ describe("cursor_mismatch", () => {
     expect(refused(verify(token, { ...EXPECTED, argsHash: "sha256:ab" }, KEY)).code).toBe(
       "cursor_mismatch",
     );
+  });
+});
+
+describe("repo binding", () => {
+  const REPO_A = "/work/alpha";
+  const REPO_B = "/work/beta";
+
+  function repoOf(token: string): unknown {
+    const body = token.slice(0, token.indexOf("."));
+    return (JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as { repo: unknown }).repo;
+  }
+
+  test("a bound facade stamps its repository into the wire payload", () => {
+    const alpha = createCursors({ key: KEY, repoId: REPO_A });
+    expect(repoOf(alpha.sign(payload()))).toBe(REPO_A);
+  });
+
+  test("a bound facade accepts its own token", () => {
+    const alpha = createCursors({ key: KEY, repoId: REPO_A });
+    expect(accepted(alpha.verify(alpha.sign(payload({ position: 12 })), EXPECTED))).toBe(12);
+  });
+
+  test("two facades on one key refuse each other's tokens as cursor_mismatch", () => {
+    const alpha = createCursors({ key: KEY, repoId: REPO_A });
+    const beta = createCursors({ key: KEY, repoId: REPO_B });
+    // Same key, same tool, same arguments: only the repository differs, and that is enough.
+    for (const [mint, resume] of [
+      [alpha, beta],
+      [beta, alpha],
+    ] as const) {
+      const result = resume.verify(mint.sign(payload()), EXPECTED);
+      expect(refused(result)).toEqual({
+        code: "cursor_mismatch",
+        hint: "re-run the original call with the same tool and arguments",
+      });
+    }
+  });
+
+  test("an unbound facade still accepts unbound tokens", () => {
+    const unbounded = cursors();
+    expect(accepted(unbounded.verify(unbounded.sign(payload({ position: 4 })), EXPECTED))).toBe(4);
+  });
+
+  test("an unbound facade refuses a bound token, and a bound facade an unbound one", () => {
+    const alpha = createCursors({ key: KEY, repoId: REPO_A });
+    expect(refused(cursors().verify(alpha.sign(payload()), EXPECTED)).code).toBe("cursor_mismatch");
+    expect(refused(alpha.verify(cursors().sign(payload()), EXPECTED)).code).toBe("cursor_mismatch");
+  });
+
+  test("rewriting the repo stamp of a valid token breaks the MAC as cursor_invalid", () => {
+    const alpha = createCursors({ key: KEY, repoId: REPO_A });
+    const token = alpha.sign(payload());
+    const tag = token.slice(token.indexOf(".") + 1);
+    const body = token.slice(0, token.indexOf("."));
+    const wire = JSON.parse(Buffer.from(body, "base64url").toString("utf8")) as CursorPayload & {
+      repo: string;
+    };
+    const forged = Buffer.from(JSON.stringify({ ...wire, repo: REPO_B }), "utf8").toString(
+      "base64url",
+    );
+    // The tag covers the repo stamp, so a token pointed at another repository is not a mismatch:
+    // it is not a cursor this key ever minted.
+    expect(refused(alpha.verify(`${forged}.${tag}`, EXPECTED)).code).toBe("cursor_invalid");
   });
 });
 

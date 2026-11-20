@@ -21,7 +21,7 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
 |---|---|---|
 | Naming | bare verbs, no `_tool` suffix | 174 invalid-name attempts / 166 errors in the measured runs, largely suffix and CLI-name confusion |
 | Required args | **at most one** per tool | CRG's 2-arg `query_graph` carried an 11.2 % error rate; argument *count* is a bigger error source than argument *type* |
-| Repo identity | **no `project` argument anywhere** — bound once at startup | CBM spent 12.4 % of its calls on `list_projects` re-discovering a path slug |
+| Repo identity | **no `project` argument anywhere**; the only repository argument is `repo` (§1.3), which *selects* among trees the operator already registered | CBM spent 12.4 % of its calls on `list_projects` re-discovering a path slug |
 | Output | always the same JSON envelope; never a rendered table | the agent parses it; rendering is the client's job |
 | Detail on demand | `cursor` on list tools, `expand(target)` for one item | replaces `detail_level`, `max_*`, `include_source`, `include_neighbors` — the flag explosion both parents grew |
 | Budget | every tool takes `budget` (tokens), always optional, always small by default | CRG's hand-tuned per-tool ceilings were breached 3× on a 530-file repo |
@@ -122,6 +122,42 @@ composition root (§1.1) — so the whole set costs a measured few dozen tokens 
 contract rather than an internal detail: `DESIGN.md` §5 fixes its members, and a second shape would
 have to say twice which of `stale` and `decisive` is authoritative.
 
+### 1.3 The `repo` argument (all seven tools)
+
+Every tool takes one optional argument naming the repository to answer from: type `string`, optional,
+**no default**, "a registered repository's path or basename". The published property schema is
+`{"type": "string"}` plus its description and — deliberately — no `default`, which the manifest
+carries verbatim:
+
+> Registered repository to answer from — its path or basename. Omit it to use the working
+> directory's repository, or the only registered one.
+
+The registry is `<home>/sangkar.json`, the list `sangkar repo add|remove|list` maintains; every entry
+is stored canonicalised, so `~` is expanded, a relative spelling is resolved and symlinks are
+followed before any comparison.
+
+**Resolution order** — `selectRepo` in `src/shared/registry.ts` is the whole contract:
+
+1. **A supplied `repo` is honoured first.** It is matched against the registry as a path, then as a
+   basename. A name that matches no entry is `not_found`; a basename two entries share is
+   `ambiguous`, with the tie in the message and the registry in the hint. This holds *whatever the
+   process was pinned to*: an explicit request that silently fell back to `--repo-root` would be a
+   confident answer about the wrong tree. On the CLI the same argument is `--repo <path|name>`.
+2. **Otherwise an explicit `--repo-root` supplies the default tree**, honoured without consulting
+   the registry — which keeps the ad-hoc invocation on an unregistered tree working.
+3. **Otherwise the working directory.** The registry entry whose canonical root equals the
+   canonicalised cwd answers; failing that, the single registered repo answers a process started
+   anywhere; failing that the call is refused — `not_found` when nothing is registered,
+   `ambiguous` when several are and none matches the cwd — each with the registry as its hint.
+
+Both refusals reuse codes that already existed. `not_found` and `ambiguous` are members of the closed
+union in `src/shared/errors.ts`, and **no new error code was introduced** for any of this: a refusal
+is an `error` envelope whose `error.code` is one of those two on the MCP surface, and the usage exit
+`2` with the message and the registry on stderr on the CLI. **No payload key changed either.**
+`repo` chooses which graph answers and is consumed by the composition root before the handler is
+reached, so it appears in no payload, no `totals` key and no envelope: every payload table below
+(§2–§8) is unchanged, and the only number that moves is the argument count (§10).
+
 ---
 
 ## 2. `status`
@@ -139,6 +175,7 @@ have to say twice which of `stale` and `decisive` is authoritative.
 |---|---|---|---|---|
 | `paths` | array\<string> | optional | `[]` = repo root | The trust question is usually *specific*: "is `src/auth/` indexed, and did it parse cleanly?" A repo-level-only answer forces a second call. This param is what replaces CBM's `check_index_coverage`, the #3 tool at 22 calls. |
 | `budget` | integer | optional | `800` | Coverage of 40 paths must not blow up. 800 is the CRG `get_minimal_context` budget, the one tool in the measured set that stayed reliably small. |
+| `repo` | string | optional | — | Which registered tree to report on; §1.3 orders the fallbacks when it is omitted. |
 
 No `project`, no `verbose`, no `detail`. CBM's `verbose` + `diagnostics=none|summary|full` triple is
 three ways to ask for the same report at three sizes; `budget` and `paths` cover it with fewer axes.
@@ -275,6 +312,7 @@ An example of the census on its own:
 | `budget` | integer | optional | `3200` | The CRG `detect_changes` budget. Large enough for 2 hops of a dense symbol. |
 | `unresolved` | enum `builtin_stdlib`\|`external_package`\|`internal_module`\|`dynamic_property_call`\|`receiver_type_unknown`\|`ambiguous` | optional | all buckets | Narrows the `payload.unresolved` evidence list to one bucket of the closed taxonomy the store already records. Optional because the taxonomy's whole job is explaining a total, and asking for one reason is a drill-down, not the question. |
 | `cursor` | string | optional | `null` | Continuation of *this* query. Replaces `limit`/`offset`/`max_results`. |
+| `repo` | string | optional | — | Selects the tree the query resolves in: one call resolves in one graph (§1.3). |
 
 The `unresolved` value set is the taxonomy itself (`#shared/domain/unresolved.ts`), spread into the
 schema rather than restated, so a bucket added to the taxonomy is filterable in the same commit. It
@@ -438,6 +476,7 @@ node happens.
 | `base` | string | optional | generation's commit | Diff base is a *policy* question (§15 Q4 of `DESIGN.md`). Defaulting to the indexed commit means no git call at query time and no discovery timeout (a real CRG failure mode). Pass an explicit base when you need a different diff. |
 | `budget` | integer | optional | `1200` | This is the hot path at 43 % of measured traffic, so the default is small. `repo` scope is the cold one (3 calls in the measured runs) and must not raise it. |
 | `cursor` | string | optional | `null` | Continuation, mostly for `repo` scope's long lists. |
+| `repo` | string | optional | — | The tree whose change set to describe; one answer describes one graph, never a union (§1.3). |
 
 No `detail_level`. Three scopes × two sizes is six behaviours from one enum; CRG's 13 tools each having
 their own `minimal|standard` (plus one `compact`) is why its payloads could not be reasoned about
@@ -581,6 +620,7 @@ for an empty set. `null` means *not applicable to this scope*; unknown never app
 | `path` | string | optional | repo root | Prefix filter. Justified because "find this name under `tests/`" is a common real need and there is no other way to express it now that every tool lost its structured args. |
 | `budget` | integer | optional | `2000` | Enough for ~20 results with degrees; the measured `semantic_search` equivalent was 880 calls at much larger defaults. |
 | `cursor` | string | optional | `null` | Continuation. |
+| `repo` | string | optional | — | The tree to search; a page never mixes results from two graphs (§1.3). |
 
 No `provider`, no `model`, no `regex`, no `context`/`source_max_lines`. CBM's `search_code` alone has
 five source-shaping knobs; those are file-reader features, not graph features.
@@ -641,6 +681,7 @@ target it resolves — so one sentence describes all three tools.
 | `depth` | integer | optional | `2`, clamped `1–4` | Impact is a transitive question, so depth matters here more than in `trace`. Clamped because unbounded depth is the documented cause of blowups. |
 | `budget` | integer | optional | `2500` | Between `summary` and `trace`. |
 | `cursor` | string | optional | `null` | Continuation for the dependents list. |
+| `repo` | string | optional | — | The tree whose dependents are counted; the seeds and the answer come from one graph (§1.3). |
 
 No `direction`, no `edge_types`, no `fixpoint`, no `seeds`, no `module_limit`. CBM's `detect_changes` has
 nine of these and produced a 190-byte answer on a clean tree; the knobs cost more than the payload.
@@ -722,6 +763,7 @@ nine of these and produced a 190-byte answer on a clean tree; the knobs cost mor
 | `path` | string | optional | repo root | Repo-relative prefix with `search`'s rule (§5), applied to resolution: "the `Widget` under `tests/`" is a handle collision the agent can already meet and has no other way to express. Optional because an unprefixed target is the common case. |
 | `range` | array\<integer> | optional | the node's whole extent | `[from, to]`, 1-based and inclusive. Only `what: "source"` reads it. A source view is priced in lines, so a caller that already knows which lines matter should not pay for the rest — and the tool should not grow a second window argument beside it. |
 | `budget` | integer | optional | `2500` | Detail is by definition the expensive part, so a larger default than `summary`. |
+| `repo` | string | optional | — | The tree the target is resolved in, when the handle came from this server's other tree (§1.3). |
 
 Inference table (disclosed in the response, documented in the instructions):
 
@@ -908,6 +950,7 @@ shown" into one call instead of a reassembly from `file` and `lines`.
 |---|---|---|---|---|
 | `force` | boolean | optional | `false` | The only real need an agent has: "the graph looks wrong, rebuild it". |
 | `mode` | enum `full`\|`fast` | optional | `full` | `fast` republishes only what changed instead of rebuilding from an empty stage — the cheaper first pass on a huge repository. |
+| `repo` | string | optional | — | The tree to reindex; §1.3 orders the fallbacks when it is omitted. |
 
 ### Example output
 
@@ -966,13 +1009,16 @@ budget and points at `depth: 1`, since that is a smaller query rather than a sma
 
 | Tool | required | optional | total |
 |---|---|---|---|
-| `status` | 0 | 2 | 2 |
-| `trace` | 1 | 7 | 8 |
-| `summary` | 0 | 5 | 5 |
-| `search` | 1 | 4 | 5 |
-| `impact` | 0 | 5 | 5 |
-| `expand` | 1 | 4 | 5 |
-| `index` | 0 | 2 | 2 |
+| `status` | 0 | 3 | 3 |
+| `trace` | 1 | 8 | 9 |
+| `summary` | 0 | 6 | 6 |
+| `search` | 1 | 5 | 6 |
+| `impact` | 0 | 6 | 6 |
+| `expand` | 1 | 5 | 6 |
+| `index` | 0 | 3 | 3 |
+
+The optional column includes the shared `repo` argument (§1.3), which every tool carries and no tool
+defaults.
 
 Every declared argument carries an enum or a description in the published `inputSchema`, and the seven
 `example` exports the manifests carry are published as `inputSchema.examples` — §3, §5, §7 and §8

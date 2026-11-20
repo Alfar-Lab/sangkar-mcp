@@ -1,11 +1,12 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import type { Envelope } from "#shared/envelope";
 import type { LogFields, Logger } from "#shared/log";
+import { canonicalRoot, type Registry, readRegistry } from "#shared/registry";
 import { lockPath } from "#shared/store/lock";
 import type { CursorFacade, ToolContext } from "#shared/store/read/context";
 import type { GraphReader } from "#shared/store/read/reader";
@@ -103,7 +104,18 @@ interface Harness {
   readonly logLines: Array<{ msg: string; level: string; fields: LogFields }>;
 }
 
-function harness(generation: string | null = GENERATION_LIVE): Harness {
+interface HarnessOptions {
+  /**
+   * The registry file this call registers into, built from the test's own temp dir. The default is a
+   * fresh home beside the repository, so no test can reach `$HOME/.config/sangkar`.
+   */
+  readonly registryPath?: (dir: string) => string;
+}
+
+function harness(
+  generation: string | null = GENERATION_LIVE,
+  options: HarnessOptions = {},
+): Harness {
   const dir = tempDir();
   const repoRoot = join(dir, "repo");
   const dataDir = join(dir, "data");
@@ -111,6 +123,9 @@ function harness(generation: string | null = GENERATION_LIVE): Harness {
   const config: AppConfig = {
     repoRoot,
     dataDir,
+    home: join(dir, "home"),
+    registryPath: options.registryPath?.(dir) ?? join(dir, "home", "sangkar.json"),
+    daemon: { pidPath: join(dir, "home", "daemon.pid"), logPath: join(dir, "home", "daemon.log") },
     cursorKey: "k".repeat(32),
     budgets: { defaultTokens: 1_200, maxTokens: 32_000 },
     telemetry: { enabled: false, dir: join(dataDir, "telemetry") },
@@ -147,6 +162,15 @@ function payloadOf(env: Envelope<IndexPayload | null>): IndexPayload {
   return env.payload;
 }
 
+/**
+ * The registry on disk, read through the shared reader with a logger of its own: "nothing was
+ * registered" is asserted by reading the file, and a reader that borrowed the harness logger would
+ * add its own warnings to the lines those tests count.
+ */
+function registeredIn(path: string): Registry {
+  return readRegistry(path, { log: recordingLogger([]) });
+}
+
 describe("index manifest", () => {
   test("is not profile-gated and carries TOOLS-SPEC.md §8's description verbatim", () => {
     expect(manifest.name).toBe("index");
@@ -157,18 +181,22 @@ describe("index manifest", () => {
     );
   });
 
-  test("declares exactly the two optional arguments with their documented defaults", () => {
-    expect(Object.keys(input)).toEqual(["force", "mode"]);
+  test("declares exactly the four optional arguments with their documented defaults", () => {
+    expect(Object.keys(input)).toEqual(["force", "mode", "repo", "register"]);
     expect(input.force.default).toBe(false);
     expect(input.mode.values).toEqual(["full", "fast"]);
     expect(input.mode.default).toBe("full");
+    // A repository named by nobody is the one the root is bound to, so `repo` carries no default.
+    expect(input.repo.type).toBe("string");
+    expect("default" in input.repo).toBe(false);
+    expect(input.register.default).toBe(true);
   });
 });
 
 describe("workerInvocation", () => {
   test("runs the CLI entry in worker mode with the server's own tree and data dir", () => {
     const { ctx } = harness();
-    const invocation = workerInvocation(ctx, { force: false, mode: "full" });
+    const invocation = workerInvocation(ctx, { force: false, mode: "full", register: true });
 
     expect(invocation.cmd.at(-2)).toBe("--mode");
     expect(invocation.cmd.at(-1)).toBe("full");
@@ -194,8 +222,12 @@ describe("workerInvocation", () => {
 
   test("force is passed through, and absent when not requested", () => {
     const { ctx } = harness();
-    expect(workerInvocation(ctx, { force: true, mode: "fast" }).cmd).toContain("--force");
-    expect(workerInvocation(ctx, { force: false, mode: "fast" }).cmd).not.toContain("--force");
+    expect(workerInvocation(ctx, { force: true, mode: "fast", register: true }).cmd).toContain(
+      "--force",
+    );
+    expect(workerInvocation(ctx, { force: false, mode: "fast", register: true }).cmd).not.toContain(
+      "--force",
+    );
   });
 });
 
@@ -324,6 +356,114 @@ describe("handle: exit code mapping", () => {
   });
 });
 
+describe("handle: the run registers the tree it indexed", () => {
+  const publishedRun = (): readonly WorkerEvent[] => [
+    event("worker.published", "info", {
+      generation: "g-new",
+      files: 3,
+      edges: 9,
+      durationMs: 5,
+      mode: "full",
+    }),
+  ];
+
+  test("an exit 0 registers the canonical root once and logs it", async () => {
+    const { ctx, logLines } = harness();
+    const env = await handle(ctx, {}, runner(0, publishedRun()));
+
+    expect(env.status).toBe("ok");
+    // The answer is the run's report, untouched by the registration that followed it.
+    expect(env.read_status.generation).toBe("g-new");
+    expect(payloadOf(env).files.scanned).toBe(3);
+    expect(registeredIn(ctx.config.registryPath).repos).toEqual([
+      canonicalRoot(ctx.config.repoRoot),
+    ]);
+
+    const registered = logLines.filter((entry) => entry.msg === "index.registered");
+    expect(registered).toHaveLength(1);
+    expect(registered[0]?.level).toBe("info");
+    expect(registered[0]?.fields).toEqual({ repoRoot: ctx.config.repoRoot, added: true });
+    expect(logLines.filter((entry) => entry.msg === "index.register_failed")).toEqual([]);
+  });
+
+  test("an exit 2 registers too: the tree matched the graph, but it is still the tree", async () => {
+    const { ctx } = harness();
+    const env = await handle(
+      ctx,
+      {},
+      runner(2, [event("worker.nothing_to_do", "info", { files: 4 })]),
+    );
+
+    expect(env.status).toBe("ok");
+    expect(registeredIn(ctx.config.registryPath).repos).toEqual([
+      canonicalRoot(ctx.config.repoRoot),
+    ]);
+  });
+
+  test("a run that failed registers nothing: exit 1, exit 75 and a rejected spawn", async () => {
+    const failed = harness();
+    await handle(failed.ctx, {}, runner(1, [event("worker.failed", "error", { reason: "boom" })]));
+    expect(existsSync(failed.ctx.config.registryPath)).toBe(false);
+
+    const locked = harness();
+    await handle(locked.ctx, {}, runner(75, [event("worker.locked", "warn", { pid: 9 })]));
+    expect(existsSync(locked.ctx.config.registryPath)).toBe(false);
+
+    const rejected = harness();
+    await handle(rejected.ctx, {}, async () => {
+      throw new Error("ENOENT: bun");
+    });
+    expect(existsSync(rejected.ctx.config.registryPath)).toBe(false);
+  });
+
+  test("register:false indexes without publishing the tree to the registry", async () => {
+    const { ctx, logLines } = harness();
+    const env = await handle(ctx, { register: false }, runner(0, publishedRun()));
+
+    expect(env.status).toBe("ok");
+    expect(existsSync(ctx.config.registryPath)).toBe(false);
+    expect(logLines.filter((entry) => entry.msg === "index.registered")).toEqual([]);
+  });
+
+  test("an unwritable registry warns once and leaves the published envelope alone", async () => {
+    const { ctx, dir, logLines } = harness(GENERATION_LIVE, {
+      registryPath: (home) => join(home, "blocked", "sangkar.json"),
+    });
+    // A file where the registry's directory should be: the write cannot land, and `registerRepo`
+    // reports that as `added: false` with the registry it could not extend rather than a throw.
+    writeFileSync(join(dir, "blocked"), "not a directory");
+
+    const env = await handle(ctx, {}, runner(0, publishedRun()));
+
+    expect(env.status).toBe("ok");
+    expect(env.read_status.generation).toBe("g-new");
+    expect(payloadOf(env).files.scanned).toBe(3);
+    const warned = logLines.filter((entry) => entry.msg === "index.register_failed");
+    expect(warned).toHaveLength(1);
+    expect(warned[0]?.level).toBe("warn");
+    expect(String(warned[0]?.fields.reason)).toContain(ctx.config.registryPath);
+    expect(logLines.filter((entry) => entry.msg === "index.registered")).toEqual([]);
+  });
+
+  test("a second run reports added:false and leaves one entry", async () => {
+    const { ctx, logLines } = harness();
+    await handle(ctx, {}, runner(0, publishedRun()));
+    const env = await handle(
+      ctx,
+      {},
+      runner(2, [event("worker.nothing_to_do", "info", { files: 3 })]),
+    );
+
+    expect(env.status).toBe("ok");
+    expect(registeredIn(ctx.config.registryPath).repos).toEqual([
+      canonicalRoot(ctx.config.repoRoot),
+    ]);
+    const registered = logLines.filter((entry) => entry.msg === "index.registered");
+    expect(registered).toHaveLength(2);
+    expect(registered[1]?.fields).toEqual({ repoRoot: ctx.config.repoRoot, added: false });
+  });
+});
+
 describe("handle: the writer stays in the child", () => {
   test("the handler never touches the database file it reports on", async () => {
     const { ctx, dir } = harness();
@@ -425,10 +565,14 @@ describe("streamWorker", () => {
   test("the handler forwards the invocation the runner receives unchanged", async () => {
     const { ctx } = harness();
     let seen: readonly string[] = [];
-    await handle(ctx, { force: true, mode: "fast" }, async (_context, invocation) => {
-      seen = invocation.cmd;
-      return { exitCode: 2, events: [event("worker.nothing_to_do", "info", { files: 0 })] };
-    });
+    await handle(
+      ctx,
+      { force: true, mode: "fast", register: true },
+      async (_context, invocation) => {
+        seen = invocation.cmd;
+        return { exitCode: 2, events: [event("worker.nothing_to_do", "info", { files: 0 })] };
+      },
+    );
     expect(seen).toContain("--force");
     expect(seen.at(-1)).toBe("--force");
     expect(seen).toContain("fast");

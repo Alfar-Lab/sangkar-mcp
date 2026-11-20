@@ -1,0 +1,159 @@
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { type Logger, log } from "#shared/log";
+
+/**
+ * The per-repo settings file (`<dataDir>/config.json`): whether this tree is watched, how often,
+ * and whether its usage may be recorded. The file is hand-editable and outlives any one process,
+ * so every read is defensive — a broken file degrades to the defaults, never to a crash in the
+ * daemon or a tool call.
+ */
+
+export const WATCH_INTERVAL_DEFAULT_MS = 2_000;
+/** Below this a poll costs more than the edit it notices: one save lands in every window. */
+export const WATCH_INTERVAL_MIN_MS = 1_000;
+/** Above this the graph is stale between polls for as long as a working day. */
+export const WATCH_INTERVAL_MAX_MS = 300_000;
+
+export interface RepoConfig {
+  readonly repoRoot: string;
+  readonly dataDir: string;
+  readonly watch: boolean;
+  readonly watchIntervalMs: number;
+  readonly telemetry: boolean;
+}
+
+/**
+ * What an absent, unreadable or unparseable file means. Both switches are `true` because this
+ * file only narrows what the machine allows; the machine-level switch is the one an operator
+ * turns things off with, and `recordingEnabled` still requires consent and registration.
+ */
+export const DEFAULT_REPO_SETTINGS: {
+  readonly watch: true;
+  readonly watchIntervalMs: 2000;
+  readonly telemetry: true;
+} = { watch: true, watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS, telemetry: true };
+
+/** Mirrors the private `DATA_DIR_NAME` in `config.ts`, which is not exported for import. */
+const DATA_DIR_NAME = ".sangkar";
+
+export function repoConfigPath(dataDir: string): string {
+  return join(dataDir, "config.json");
+}
+
+/** The file's own spellings. Snake case on disk, camel case in TypeScript, mapped only here. */
+interface RepoConfigFile {
+  readonly watch?: unknown;
+  readonly watch_interval?: unknown;
+  readonly telemetry?: unknown;
+}
+
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
+}
+
+/**
+ * The interval in milliseconds, clamped into the supported band. A number outside it is a
+ * mistake in the file, not a reason to stop watching, so both ends are clamped rather than
+ * honoured; a non-integer, a zero, a negative or a wrong type is not a slow poll but nonsense,
+ * and takes the default.
+ */
+function intervalOf(raw: unknown): number {
+  if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
+    return WATCH_INTERVAL_DEFAULT_MS;
+  }
+  if (raw < WATCH_INTERVAL_MIN_MS) {
+    return WATCH_INTERVAL_MIN_MS;
+  }
+  return Math.min(raw, WATCH_INTERVAL_MAX_MS);
+}
+
+/**
+ * The settings for `repoRoot`, read from `<dataDir>/config.json`. Each rejection logs exactly one
+ * warning naming the reason and the path — a file-level failure falls back to every default, a
+ * bad field falls back alone, so one typo does not silently discard the others.
+ */
+export function readRepoConfig(
+  repoRoot: string,
+  options: { readonly dataDir?: string; readonly log?: Logger } = {},
+): RepoConfig {
+  const dataDir = options.dataDir ?? join(repoRoot, DATA_DIR_NAME);
+  const path = repoConfigPath(dataDir);
+  const logger = options.log ?? log;
+
+  const defaults = (reason: string): RepoConfig => {
+    logger.warn("repo config ignored, using the defaults", { path, reason });
+    return { repoRoot, dataDir, ...DEFAULT_REPO_SETTINGS };
+  };
+
+  let raw: string;
+  try {
+    raw = readFileSync(path, "utf8");
+  } catch (e) {
+    // A missing file is the normal state of a repo that was indexed but never configured, so the
+    // reason is carried in the warning rather than thrown.
+    return defaults(`unreadable: ${messageOf(e)}`);
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return defaults(`invalid JSON: ${messageOf(e)}`);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return defaults("not a JSON object");
+  }
+
+  const file = parsed as RepoConfigFile;
+  const flag = (name: string, value: unknown, fallback: boolean): boolean => {
+    if (typeof value === "boolean") {
+      return value;
+    }
+    // JSON has no truthiness contract: `"yes"` or `1` here is a typo, and guessing would let a
+    // quoted `"false"` read as consent.
+    logger.warn("repo config field ignored, using the default", {
+      path,
+      field: name,
+      reason: value === undefined ? "missing" : "not a JSON boolean",
+    });
+    return fallback;
+  };
+
+  return {
+    repoRoot,
+    dataDir,
+    watch: flag("watch", file.watch, DEFAULT_REPO_SETTINGS.watch),
+    watchIntervalMs: intervalOf(file.watch_interval),
+    telemetry: flag("telemetry", file.telemetry, DEFAULT_REPO_SETTINGS.telemetry),
+  };
+}
+
+/**
+ * Writes the three settings in the on-disk shape, creating the data dir because a repo that was
+ * never indexed has none yet. The caller owns the write lock elsewhere; this is one small file.
+ */
+export function writeRepoConfig(config: RepoConfig): void {
+  mkdirSync(config.dataDir, { recursive: true });
+  writeFileSync(
+    repoConfigPath(config.dataDir),
+    JSON.stringify({
+      watch: config.watch,
+      watch_interval: config.watchIntervalMs,
+      telemetry: config.telemetry,
+    }),
+  );
+}
+
+/**
+ * The recording precedence: machine consent, then registration, then the repo file. A repo cannot
+ * opt itself in past an operator's `SANGKAR_TELEMETRY=off`, and an unregistered tree is not
+ * recorded no matter what its own file says.
+ */
+export function recordingEnabled(input: {
+  readonly consent: boolean;
+  readonly repo: RepoConfig;
+  readonly registered: boolean;
+}): boolean {
+  return input.consent && input.registered && input.repo.telemetry;
+}

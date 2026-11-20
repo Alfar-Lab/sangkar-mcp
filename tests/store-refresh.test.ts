@@ -21,10 +21,12 @@ import { fingerprintOf, openStore, refreshStore, type Store } from "../src/index
  * refusal that keeps the previous reader), a cursor that outlived its generation (refused), and the
  * absent → ready flow a server started before the first index goes through.
  *
- * The last case is the one only an end-to-end run can show: a spawned `sangkar mcp` with no watcher
- * (`SANGKAR_NO_WATCH=1`) answering `status`, a *different* process publishing over its data dir, and
- * the same session reporting the new generation on its next call — with every answer in the run
- * carrying `read_status.decisive === !read_status.stale`.
+ * The last case is the one only an end-to-end run can show: a spawned `sangkar mcp` answering
+ * `status`, a *different* process publishing over its data dir, and the same session reporting the
+ * new generation on its next call — with every answer in the run carrying
+ * `read_status.decisive === !read_status.stale`. No watcher runs in that server (there is none in
+ * `mcp` at all: the daemon owns the pollers), so the refresh at the top of the next call is the only
+ * way it can learn about the new generation.
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
@@ -58,6 +60,7 @@ const SOURCES: Readonly<Record<string, string>> = {
 };
 
 interface Fixture {
+  readonly home: string;
   readonly repoRoot: string;
   readonly dataDir: string;
   readonly dbPath: string;
@@ -71,21 +74,31 @@ afterAll(async () => {
   }
 });
 
-/** A tree and a data dir per test, both outside the repository and both removed afterwards. */
+/**
+ * A tree, a data dir and a machine-level home per test, all outside the repository and all removed
+ * afterwards. The home is not optional: the `index` verb registers the tree it indexed, so a spawn
+ * without its own `SANGKAR_HOME` would write this machine's real registry.
+ */
 async function fixture(label: string): Promise<Fixture> {
   const root = await mkdtemp(join(tmpdir(), `sangkar-refresh-${label}-`));
   roots.push(root);
+  const home = join(root, "home");
   const repoRoot = join(root, "repo");
   const dataDir = join(root, "data");
+  await mkdir(home, { recursive: true });
   await mkdir(repoRoot, { recursive: true });
   await mkdir(dataDir, { recursive: true });
-  return { repoRoot, dataDir, dbPath: join(dataDir, "graph.db") };
+  return { home, repoRoot, dataDir, dbPath: join(dataDir, "graph.db") };
 }
 
 function configFor(f: Fixture): AppConfig {
   return loadConfig({
     argv: ["--repo-root", f.repoRoot, "--data-dir", f.dataDir],
-    env: { SANGKAR_CURSOR_KEY: CURSOR_KEY, SANGKAR_TELEMETRY: "off" },
+    env: {
+      SANGKAR_HOME: f.home,
+      SANGKAR_CURSOR_KEY: CURSOR_KEY,
+      SANGKAR_TELEMETRY: "off",
+    },
     cwd: f.repoRoot,
   });
 }
@@ -293,8 +306,12 @@ interface ServerSession {
   finish(): Promise<{ exitCode: number; stderr: string; nonJsonLines: readonly string[] }>;
 }
 
-/** The repository's own settings, removed: nothing about the child is inherited by accident. */
-function cleanEnv(): Record<string, string> {
+/**
+ * The repository's own settings, removed: nothing about the child is inherited by accident, and the
+ * machine-level home is the fixture's own — `sangkar index` registers the tree it indexed, so an
+ * inherited `$HOME/.config/sangkar` would be written by this test.
+ */
+function cleanEnv(f: Fixture): Record<string, string> {
   const env: Record<string, string> = {};
   for (const [key, value] of Object.entries(process.env)) {
     if (key.startsWith("SANGKAR_") || value === undefined) {
@@ -302,6 +319,7 @@ function cleanEnv(): Record<string, string> {
     }
     env[key] = value;
   }
+  env.SANGKAR_HOME = f.home;
   // The publish is the fixture's own: no telemetry files beside the graph it writes.
   env.SANGKAR_TELEMETRY = "off";
   return env;
@@ -323,7 +341,7 @@ async function runIndex(f: Fixture, mode: "full" | "fast"): Promise<IndexRun> {
       f.dataDir,
     ],
     cwd: APP_ROOT,
-    env: cleanEnv(),
+    env: cleanEnv(f),
     stdin: "ignore",
     stdout: "pipe",
     stderr: "pipe",
@@ -340,9 +358,10 @@ async function runIndex(f: Fixture, mode: "full" | "fast"): Promise<IndexRun> {
 
 /**
  * A server over stdio, driven the way a client drives it: one request written, one response read,
- * dispatched by the id it carried. `SANGKAR_NO_WATCH=1` is the point of the case — this process
- * owns no poller, so a generation published while it runs can only be noticed by the refresh at the
- * top of the next call.
+ * dispatched by the id it carried. The process owns no poller — `mcp` never starts one, the daemon
+ * owns every watcher — so a generation published while it runs can only be noticed by the refresh
+ * at the top of the next call. Its home is the fixture's own, so the registry it reads is the one
+ * this test wrote.
  */
 async function openServer(f: Fixture): Promise<ServerSession> {
   const proc = Bun.spawn({
@@ -357,7 +376,7 @@ async function openServer(f: Fixture): Promise<ServerSession> {
       f.dataDir,
     ],
     cwd: APP_ROOT,
-    env: { ...process.env, SANGKAR_CURSOR_KEY: CURSOR_KEY, SANGKAR_NO_WATCH: "1" },
+    env: { ...cleanEnv(f), SANGKAR_CURSOR_KEY: CURSOR_KEY },
     stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
@@ -476,8 +495,8 @@ describe("stdio: a publish from another process is what the next answer reports"
         expect(absent.read_status.decisive).toBe(false);
         expect(existsSync(f.dbPath)).toBe(false);
 
-        // Another process publishes. No watcher runs here, so the refresh at the top of the next
-        // call is the only way this server can learn about it.
+        // Another process publishes. No watcher runs here (there is none in `mcp`), so the refresh
+        // at the top of the next call is the only way this server can learn about it.
         const firstRun = await runIndex(f, "full");
         if (firstRun.code !== 0) {
           throw new Error(`the first index exited ${firstRun.code}:\n${firstRun.stderr}`);

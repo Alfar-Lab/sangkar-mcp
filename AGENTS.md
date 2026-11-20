@@ -10,11 +10,13 @@ surfaces with identical behaviour: an MCP server (`sangkar mcp`, stdio) and a sh
 (`sangkar trace <name>`). Four answers: *is the graph current and what does it cover*, *what is connected to
 X*, *what is going on here*, *what can this change reach*.
 
-The repository is bound at startup — autodetected from `cwd` — so **no tool takes a `project` argument**.
+A call answers from one repository: `repo` selects among the registered ones, and a call that names
+none falls back to `--repo-root` or the tree autodetected from `cwd` — so no tool takes a `project`
+argument.
 
 ## Non-negotiables
 
-These five module rules are enforced by `tests/boundary.test.ts` and are a build failure, not a preference.
+These six module rules are enforced by `tests/boundary.test.ts` and are a build failure, not a preference.
 The rule ids below are the exact strings in a violation message.
 
 | Rule | Meaning |
@@ -24,6 +26,7 @@ The rule ids below are the exact strings in a violation message.
 | `shared-isolation` | `src/shared/**` may never import `src/tools/**` or `src/indexer/**`. |
 | `drizzle-location` | `drizzle-orm` may be imported only under `src/shared/store/**`. |
 | `root-privileges` | `src/index.ts` is the only module allowed to import the indexer or a tool handler. |
+| `daemon-privileges` | `src/daemon/** may import only #shared/*, src/indexer/** and ./ siblings inside src/daemon, never src/tools/**` |
 
 Other invariants that break the product when violated:
 
@@ -32,10 +35,10 @@ Other invariants that break the product when violated:
   asserted end-to-end by `tests/mcp-surface.test.ts`.
 - **Tools never touch a connection.** A handler receives `ToolContext` from `#shared/store/read/context.ts`
   (`reader`, `cursor`, `log`, `now`, `config`). It does not open a database, does not import `drizzle-orm`,
-  does not read `process.env`: the two settings that do come from the environment are read once, in
-  `src/shared/config.ts` (`SANGKAR_CURSOR_KEY`, `SANGKAR_TELEMETRY`), and `src/index.ts` reads
-  `SANGKAR_NO_WATCH` deliberately because it is not a tool setting — it is this process deciding whether
-  it owns a poller.
+  does not read `process.env`: the settings that do come from the environment are read once, in
+  `src/shared/config.ts` (`SANGKAR_CURSOR_KEY`, `SANGKAR_TELEMETRY`, and the machine-level
+  `SANGKAR_HOME`). `src/index.ts` reads no environment variable and starts no watcher — the old
+  no-watch variable is gone — because the daemon owns every poller, one per registered repository.
 - **Never build a Drizzle query inside a handler or a loop.** Prepared statements only, via the cache in
   `store/db.ts` (LRU, cap 200). Measured on `bun:sqlite`: a re-built builder costs 42.7 µs per read, a reused
   prepared query 1.7 µs. `tests/acceptance.test.ts` fails if the prepared path is not ≥5× faster than the
@@ -58,11 +61,15 @@ Other invariants that break the product when violated:
 ## Layout
 
 ```
-bin/sangkar.ts              entry point: mcp (default) | worker | index | telemetry, then a tool name
-src/index.ts                composition root: builds ToolContext, registers tools, starts the watcher,
-                            installs SIGINT/SIGTERM, maps handler throws to envelopes
+bin/sangkar.ts              entry point: mcp (default) | worker | index | telemetry | daemon | repo,
+                            then a tool name
+src/index.ts                composition root: builds ToolContext, registers tools, serves the repository
+                            each call selects from the reader pool, registers the repo a successful
+                            `index` run touched, installs SIGINT/SIGTERM, maps handler throws to
+                            envelopes
 src/shared/                 kernel + engine — the only cross-module import target
-  config.ts                 AppConfig, repo-root autodetection, the one env var
+  config.ts                 AppConfig, repo-root autodetection, the machine home (`SANGKAR_HOME`), the
+                            registry and daemon paths, withRepo() for a second repository
   log.ts                    stderr JSON lines
   errors.ts                 AppError + the closed error-code union
   envelope.ts               the response contract (nine metadata fields + payload; error only for
@@ -71,11 +78,19 @@ src/shared/                 kernel + engine — the only cross-module import tar
   cursor.ts                 signed stateless cursors, generation-bound
   paths.ts                  normalizeRel, qn, prefixBounds (half-open; excludes the `src-old` sibling)
   instructions.ts           INSTRUCTIONS_TEXT + nextToolsFor() for `next_tools`
+  registry.ts               `sangkar.json`: read, atomic write, register/remove, and selectRepo()'s order —
+                            the named repo, then the pin, then cwd, then the only registered one
+  repo-config.ts            `<repo>/.sangkar/config.json`: watch, watch_interval (clamped 1000..300000) and
+                            telemetry; a bad file or field falls back to the defaults, recordingEnabled()
+  pidlock.ts                the daemon's pid file: acquire, heartbeat, release, stale reclaim
   cli/args.ts, cli/render.ts  shared CLI parsing and the human-line renderer
+  cli/repo.ts               the `repo` verb: add, remove, list, config
   store/schema.ts           Drizzle table definitions (eleven tables)
   store/migrations/         0000_init.sql + meta/ (drizzle-kit) and raw/0001_fts.sql (FTS5)
   store/migrate.ts          one runner, one ledger, forward-only
   store/db.ts               openReader/openWriter, PRAGMAs, prepared-statement LRU (cap 200)
+  store/pool.ts             one reader per repository root, for the process that serves several; idle
+                            eviction, no timer of its own
   store/lock.ts             create-exclusive write lock (Bun has no flock), stale reclaim
   store/publish.ts          stage → beginWrite → seal → publish → discard; withStage()
   store/read/               the GraphReader boundary: nodes, edges, metrics, coverage, files,
@@ -84,6 +99,17 @@ src/shared/                 kernel + engine — the only cross-module import tar
                             freshness
   telemetry/                records, JSONL sink, aggregator, HTML report; imports #shared/* only,
                             never a tool or the indexer
+  telemetry/for-repo.ts     one tree's recorder: machine consent, then registration, then the repo file
+  telemetry/html-multi.ts   the report page for every registered repository
+  telemetry/serve.ts        the loopback listener that re-renders that page per request
+src/daemon/                 the background process: one pid lock, one watcher per registered repo, one
+                            loopback report server. May import `#shared/*`, `src/indexer/**` and its own
+                            siblings, never `src/tools/**`
+  types.ts                  DaemonStatus / RepoRuntime: the data one status answer carries
+  lifecycle.ts              runDaemon (pid lock, tick, signals) plus start, stop and status
+  reconcile.ts              one pass over sangkar.json that makes the live watchers match it
+  main.ts                   the composition order: lock, reconciler, report server, loop
+  cli.ts                    the `daemon` verb: run | start | stop | status
 src/tools/<name>/           one private module per tool: manifest.ts (name, description, schema) +
                             handler.ts. Seven tools: status, summary, trace, search, impact, expand, index
 src/indexer/                the writer — runs in a spawned process, never in the server
@@ -96,7 +122,7 @@ src/indexer/                the writer — runs in a spawned process, never in t
   persist.ts                write a unit; metrics, tested_by, FTS delta, tombstones, generation
   worker.ts                 the index process: lock, incremental routing, publish, exit codes
   watch.ts                  debounced polling that spawns the worker
-tests/                      40 files, see the map below
+tests/                      58 files, see the map below
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
                             arguments, defaults or budget ceilings move here in the same commit
@@ -125,7 +151,7 @@ command and not a re-entry through the same binary:
 
 | Script | Does |
 |---|---|
-| `bun run test` | whole suite (≈52 s, 726 tests) |
+| `bun run test` | whole suite (900 tests, 58 files) |
 | `bun run typecheck` | `tsc --noEmit` |
 | `bun run lint` | biome over `src tests bin` |
 | `bun run acceptance` | the 9 acceptance assertions, incl. latency and the builder-vs-prepared ratio |
@@ -151,8 +177,19 @@ after the first `sangkar index` (`.gitignore` says as much).
 | one tool's payload or defaults | `tools-<name>.test.ts` |
 | registration, profiles, stdio discipline | `mcp-surface.test.ts`, `tools-smoke.test.ts` |
 | the CLI surface | `cli.test.ts`, `cli-args.test.ts`, `cli-render.test.ts` |
+| the registry file, and how a call selects a repository | `registry.test.ts` |
+| the per-repo settings file, its defaults and its clamp | `repo-config.test.ts` |
+| the reader pool and its idle eviction | `pool.test.ts` |
+| the daemon's pid file | `pidlock.test.ts` |
+| one reconcile pass: missing, unwatched, retuned, forgotten | `daemon-reconcile.test.ts` |
+| the daemon's pid lock, tick and lifecycle verbs | `daemon-lifecycle.test.ts` |
+| the daemon's composition order | `daemon-main.test.ts` |
+| the `daemon` verb's usage and exit codes | `cli-daemon.test.ts` |
+| two registered repositories through one process | `multi-repo.test.ts`, `daemon-integration.test.ts` |
+| the instructions text shipped to an agent | `instructions.test.ts` |
 | the telemetry record shape, the consent switch, the daily id rotation and the privacy invariant | `telemetry.test.ts`, `telemetry-root.test.ts` |
 | the report's aggregation, escaping and self-containment, and the verb | `telemetry-report.test.ts`, `cli.test.ts` |
+| the served multi-repo report, and which repo may record | `telemetry-serve.test.ts`, `telemetry-precedence.test.ts` |
 | budgets and latency end to end | `acceptance.test.ts` |
 | the shipped binary | `binary-smoke.test.ts` |
 
@@ -194,7 +231,9 @@ query; `unresolved` next to `edge.calls` is the binding failure rate.
 
 All three plans are complete (`ppm plan_status`): `codegraph-mvp` 36/36, `cgraph-cli` 22/22,
 `sangkar-telemetry` 22/22 — local usage records under `<dataDir>/telemetry/` (`SANGKAR_TELEMETRY=off`
-disables them) and `sangkar telemetry`, the offline HTML report they are read with. The suite is green.
+disables them) and `sangkar telemetry`, the offline HTML report they are read with. `sangkar-daemon` is in
+progress: the daemon, the machine registry and the per-repo config are in the tree, and
+`ppm plan_status` has its task counts. The suite is green.
 
 Three things the tests do **not** catch, re-measured on 2026-11-19 from a scratch index of this tree
 taken after phase 1 of `issue-remediation` (`index --data-dir /tmp/…`): **1 640 nodes**, **9 347 edges**
@@ -231,8 +270,8 @@ the shared corpus) because the edge taxonomies differ. If you add edge kinds, de
 - `docs/research/` — the two reference implementations' analysis and the real MCP payloads captured from them
   (`tool-outputs/`). Those numbers are the oracles the parity tests use.
 - `docs/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`.
-- `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/` — completed plans; `.ppm/sangkar-telemetry/` — in progress; task
-  JSON is the execution record for each. Do not edit
+- `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/`, `.ppm/sangkar-telemetry/` — completed plans;
+  `.ppm/sangkar-daemon/` — in progress; task JSON is the execution record for each. Do not edit
   `.ppm/*/tasks/*.json` by hand.
 - `.ppm/issue-remediation/` — the plan that closed issues #1, #2, #4, #6, #7, #8 and the remainder of #9:
   relative imports bind, every read answers from a refreshed store, `coverage.tests` and the repo-wide

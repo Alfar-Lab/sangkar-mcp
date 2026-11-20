@@ -6,10 +6,10 @@
  * drift in what agents are told the tool does.
  *
  * `input` is data, not validation: the composition root parses arguments against this table, so
- * the four-argument surface (plus the 1–4 depth clamp every caller is promised) is declared once
- * here, and the handler reads its defaults from this same literal instead of restating them.
- * `paths` and `cursor` carry no default because their absence is meaningful: no `paths` means the
- * working-tree diff, and no `cursor` means the first page.
+ * the argument surface (plus the 1–4 depth clamp every caller is promised) is declared once here,
+ * and the handler reads its defaults from this same literal instead of restating them. `paths`,
+ * `repo` and `cursor` carry no default because their absence is meaningful: no `paths` means the
+ * working-tree diff and no `cursor` means the first page.
  */
 export const manifest = {
   name: "impact",
@@ -42,6 +42,14 @@ export const input = {
   cursor: {
     type: "string",
     description: "Continuation token a previous truncated answer returned.",
+  },
+  // No default: an absent `repo` means "unselected", which the root answers from the working
+  // directory; a default here would make that indistinguishable from a named repository.
+  repo: {
+    type: "string",
+    description:
+      "Registered repository to answer from — its path or basename. " +
+      "Omit it to use the working directory's repository, or the only registered one.",
   },
 };
 

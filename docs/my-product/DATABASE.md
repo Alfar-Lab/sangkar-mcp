@@ -148,6 +148,7 @@ One database file per project, **inside the project directory**:
 <repo-root>/.sangkar/graph.db-shm
 <repo-root>/.sangkar/write.lock      <- single-writer flock, outside the DB
 <repo-root>/.sangkar/.gitignore      <- a single `*`, written on first index
+<repo-root>/.sangkar/config.json     <- this tree's policy file: watch, watch_interval, telemetry
 ```
 
 Resolution order: `<root>/.sangkar/` → `--data-dir <path>`. A relative `--data-dir` resolves against
@@ -166,6 +167,15 @@ Rules:
 4. **One database per working tree.** A linked `git worktree` gets its own `.sangkar/`, because its
    files really are different; the answering database is always reported in
    `status.payload.project.db_path`.
+
+**`$SANGKAR_HOME` holds no graph.** The machine-level home — `$SANGKAR_HOME`, else
+`${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` — holds exactly the three files that belong to the
+installation rather than to a tree: `sangkar.json` (the registry of registered roots), `daemon.pid`
+(the daemon's singleton lock) and `daemon.log`. No `graph.db` is ever resolved there, and the daemon
+opens no database at all (§5). `config.json` is the one file a repository gains that is neither a
+graph nor a lock: this tree's `watch`, `watch_interval` and `telemetry` settings, hand-editable,
+read by the daemon on every reconcile tick and by the server once per process, and degrading to the
+defaults with one warning when it is missing or malformed (`INDEXING-PIPELINE.md` §3).
 
 Why in the tree rather than a shared cache dir: the database beside the code *is* the project identity, so
 no registry and no `project` argument is needed (CBM spent 12.4 % of its calls on `list_projects`
@@ -491,6 +501,19 @@ compare against   -> canonical(db).parent.parent   and   canonical(cwd)
 Serving a graph that belongs to a different tree is the worst failure this design can produce — worse than
 a stale graph, because staleness is disclosed and a mismatched graph is not. Hence a hard refusal rather
 than a warning in the unrelated case.
+
+**The guard runs per opened root, never per process.** A session that serves several repositories runs
+the comparison above once for every store it opens, and the pool (`src/shared/store/pool.ts`) keeps
+exactly one reader — a connection and its prepared-statement cache — per canonical root. A mismatch is
+therefore refused for the entry it belongs to: the calls that select that repository answer
+`wrong_project_db` and the others keep serving, instead of one tree's problem taking down a process that
+serves N of them.
+
+**The daemon never opens a write connection.** It holds `daemon.pid`, reads `sangkar.json` and each
+`<repo>/.sangkar/config.json`, and spawns `sangkar worker` for every index run; the stage, the write
+lock and the publish belong to that child alone. That is what keeps the single-writer rule above true
+with one daemon and any number of sessions: `write.lock` is contended by workers, never by the
+processes that read.
 
 Delete-on-re-parse is file-scoped, never wholesale: `ON DELETE CASCADE` from `file` would be tempting,
 but a file row survives re-parsing (it is the staleness manifest), so rows are deleted explicitly by

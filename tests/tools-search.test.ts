@@ -279,8 +279,8 @@ describe("tools/search manifest", () => {
     );
   });
 
-  test("declares five arguments with query as the only required one", () => {
-    expect(Object.keys(input)).toEqual(["query", "kind", "path", "budget", "cursor"]);
+  test("declares six arguments with query as the only required one", () => {
+    expect(Object.keys(input)).toEqual(["query", "kind", "path", "budget", "cursor", "repo"]);
     expect(input.query).toEqual({
       type: "string",
       required: true,

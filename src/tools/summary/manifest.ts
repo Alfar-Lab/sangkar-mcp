@@ -49,6 +49,16 @@ export const input = {
     type: "string",
     description: "Continuation token a previous truncated answer returned.",
   },
+  /**
+   * Which repository to answer from. No default: an absent `repo` means "unselected", which the
+   * root answers from the working directory; a default would erase that distinction.
+   */
+  repo: {
+    type: "string",
+    description:
+      "Registered repository to answer from — its path or basename. " +
+      "Omit it to use the working directory's repository, or the only registered one.",
+  },
 } as const;
 
 /**

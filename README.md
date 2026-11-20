@@ -2,8 +2,9 @@
 
 A read-only MCP server over one repository's call graph, and the `sangkar` command that serves the
 same seven tools from a shell. It indexes the tree into a SQLite database and answers what changed,
-who calls what, what a change reaches, and what the index could not cover. The repository is bound
-at startup, so no tool takes a project argument.
+who calls what, what a change reaches, and what the index could not cover. Each call answers from one
+repository: `repo`, a registered path or basename, selects it, and omitting the argument takes the
+working directory's repository or the only registered one.
 
 ## Install
 
@@ -82,6 +83,8 @@ sangkar <tool> [arguments] [global flags] — the name comes first
 | `sangkar trace 'db.write' --depth 1 --direction out` | Callees of one symbol, one hop. |
 | `sangkar impact` | What the working-tree diff reaches. |
 | `sangkar index --mode fast --force` | Force a fast re-index. |
+| `sangkar repo add .` | Register this tree, so the daemon watches and records it. |
+| `sangkar daemon start` | Start the background daemon: one watcher per registered repository, plus the report server. |
 | `sangkar trace --help` | `trace`'s own usage, exit 0. |
 
 Output:
@@ -96,8 +99,9 @@ Output:
   `--help` are globals in the same sense. The name comes first — a global written before it is read
   as the tool name and refused with exit 2.
 - `--help` exits 0 with that tool's usage block, or, on a verb, the verb's own usage line:
-  `sangkar mcp --help`, `sangkar index --help`, `sangkar worker --help`. It is answered before any
-  argument is checked, so it works with a required argument still missing.
+  `sangkar mcp --help`, `sangkar index --help`, `sangkar worker --help`, `sangkar daemon --help`,
+  `sangkar repo --help`. It is answered before any argument is checked, so it works with a required
+  argument still missing.
 - `sangkar index` streams progress as JSON log lines on stderr and exits 0 once it publishes.
   Nothing else reaches stdout.
 
@@ -106,6 +110,27 @@ answer is still an answer — `1` for `error` and `bootstrapping`, and `2` for a
 (unknown tool, unknown option, missing value, bad type). `sangkar index` has two of its own, because
 it is the worker rather than a tool call: `2` when nothing changed and there was nothing to publish,
 and `75` when another indexer holds the lock.
+
+## Registered repositories, and the daemon
+
+There are two tiers, and a tree can be in either. A repository listed in the machine registry —
+`${XDG_CONFIG_HOME:-$HOME/.config}/sangkar/sangkar.json` — is watched and recorded by
+`sangkar daemon`, one background process for every registered tree. A tree that is not registered
+is still usable, one command at a time, by naming it with `--repo-root`; it is neither watched nor
+recorded, so its graph is only as fresh as the last `sangkar index`. Registration is what makes an
+index keep itself current, and it leaves the tree itself untouched.
+
+```sh
+cd /path/to/repo
+sangkar repo add .            # register this tree; prints its canonical path
+sangkar daemon start          # one process: a watcher per registered repo, and the report server
+sangkar telemetry --serve     # that server's page: every registered repo, on 127.0.0.1:7317
+```
+
+`sangkar repo list`, `sangkar repo remove <path>` and `sangkar repo config <path>` inspect and edit
+the same registry: `config` writes `<path>/.sangkar/config.json`, the three per-repo switches (watch,
+watch interval 1000–300000 ms, telemetry). The daemon reads them every five seconds, so a registry
+or config edit is noticed without a restart.
 
 ## MCP
 
@@ -143,7 +168,7 @@ client needs before the tools exist at all.
 | `search` | Symbols by keyword (BM25) with file:line and in/out degree — locations and shape, not source. |
 | `impact` | What a change set reaches: dependents, affected entry points, the tests that cover them, and a risk score; defaults to the working-tree diff. |
 | `expand` | More detail for one item from an earlier answer — `members`, `edges`, short `source`, or `coverage`. |
-| `index` | Force a full or fast re-index, or repair a graph the watcher could not fix. Not for normal use. |
+| `index` | Force a full or fast re-index, or repair a graph the daemon could not fix. Not for normal use. |
 
 Registered names are exactly these seven, in this order: no `_tool` suffix, no aliases, and no
 eighth name. MCP and the `sangkar` command publish the same surface; the instructions tell an agent
@@ -161,6 +186,7 @@ One directory per working tree, beside the code it describes:
 
 ```
 <repo>/.sangkar/graph.db          the graph
+<repo>/.sangkar/config.json       per-repo watch and telemetry settings, written by sangkar repo config
 <repo>/.sangkar/graph.db-wal      WAL sidecars, never committed
 <repo>/.sangkar/graph.db-shm
 <repo>/.sangkar/write.lock        single-writer flock, outside the database
@@ -227,7 +253,7 @@ Three settings remain, and all three are read from the environment rather than a
 | Variable | Default | Meaning |
 |---|---|---|
 | `SANGKAR_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; when unset the process generates its own key, so cursors do not survive across invocations — set it to share cursors between processes |
-| `SANGKAR_NO_WATCH` | unset | any value stops the watcher; set by tests |
+| `SANGKAR_HOME` | `${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` | the machine-level home, holding `sangkar.json` (the registry), `daemon.pid` and `daemon.log`; an empty value counts as unset |
 | `SANGKAR_TELEMETRY` | unset | usage telemetry under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables it, and when off no file and no directory is created |
 
 ## Distribution

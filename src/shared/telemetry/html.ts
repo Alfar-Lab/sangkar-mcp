@@ -356,13 +356,34 @@ function trendScript(data: ReportData): string {
 })();`;
 }
 
+/**
+ * The panels of one report, without <html>/<head>: the multi-repo page reuses them.
+ *
+ * The header panel stays out of here on purpose: it carries the clock and the window label, which
+ * belong to the caller, and the multi-repo page states both once for the whole machine.
+ */
+export function renderBody(data: ReportData): string {
+  const empty = data.totals.records === 0;
+  return `${toolsPanel(data.tools, empty)}
+${truncationPanel(data.truncation, empty)}
+${relationsPanel(data.relations, empty)}
+${coveragePanel(data.coverage, empty)}
+${argNamesPanel(data.arg_names, empty)}
+${trendPanel(data.unresolved_trend, empty)}
+${indexRunsPanel(data.index_runs, empty)}
+${sessionsPanel(data.sessions, empty)}${empty ? `\n${emptyPanel()}` : ""}`;
+}
+
+/**
+ * The whole file: `head` is everything before the panels — doctype, the one stylesheet and this
+ * report's header panel — and {@link renderBody} draws the rest, so no panel is spelled twice.
+ */
 export function renderHtml(
   data: ReportData,
   meta: { readonly generated_at: string; readonly since: string | null },
 ): string {
-  const empty = data.totals.records === 0;
   const windowLabel = meta.since === null ? "all records" : meta.since;
-  return `<!doctype html>
+  const head = `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -530,14 +551,8 @@ td.empty {
 <body>
 <main>
 ${headerPanel(data.totals, windowLabel, meta.generated_at)}
-${toolsPanel(data.tools, empty)}
-${truncationPanel(data.truncation, empty)}
-${relationsPanel(data.relations, empty)}
-${coveragePanel(data.coverage, empty)}
-${argNamesPanel(data.arg_names, empty)}
-${trendPanel(data.unresolved_trend, empty)}
-${indexRunsPanel(data.index_runs, empty)}
-${sessionsPanel(data.sessions, empty)}${empty ? `\n${emptyPanel()}` : ""}
+`;
+  return `${head}${renderBody(data)}
 </main>
 <script>
 ${trendScript(data)}

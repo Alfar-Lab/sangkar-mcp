@@ -50,6 +50,23 @@ export interface CursorExpectation {
   argsHash: string;
 }
 
+/**
+ * What the composition root binds the facade to: the HMAC key, and the repository whose pages
+ * this facade may address. One process serves several repositories, so a token is only valid in
+ * the repository it was minted in; a handler never sees this, it just signs and verifies.
+ */
+export interface CursorBindings {
+  readonly key: string;
+  /** Absent means unbound — the single-repository behaviour that predates the daemon. */
+  readonly repoId?: string;
+}
+
+/**
+ * The wire form is wider than `CursorPayload`: `repo` is stamped by the facade, never supplied by
+ * a handler, so the eight `ctx.cursor.sign({...})` call sites keep their four-field literals.
+ */
+type CursorWire = CursorPayload & { readonly repo: string };
+
 /** The three refusals of `errors.ts`'s union a cursor can produce (DATABASE.md §8). */
 export type CursorRefusalCode = "cursor_invalid" | "cursor_expired" | "cursor_mismatch";
 
@@ -69,8 +86,8 @@ export interface CursorRefusal {
 export type CursorResult = CursorAcceptance | CursorRefusal;
 
 /**
- * The cursor seam a tool receives in `ToolContext.cursor` (TECH-SPEC.md §6): bound to one key,
- * so no handler ever holds the HMAC secret.
+ * The cursor seam a tool receives in `ToolContext.cursor` (TECH-SPEC.md §6): bound to one key
+ * and one repository, so no handler ever holds the HMAC secret or has to name a repo.
  */
 export interface Cursor {
   sign(payload: CursorPayload): string;
@@ -108,6 +125,11 @@ function isPayload(value: unknown): value is CursorPayload {
   );
 }
 
+/** A decoded token must carry the facade's `repo` stamp; an unbound facade stamps `""`. */
+function isWire(value: unknown): value is CursorWire {
+  return isPayload(value) && typeof (value as Partial<CursorWire>).repo === "string";
+}
+
 function tagFor(key: string, body: string): Buffer {
   return createHmac("sha256", key).update(body).digest().subarray(0, CURSOR_TAG_BYTES);
 }
@@ -124,14 +146,15 @@ function refusal(code: CursorRefusalCode, hint: string): CursorRefusal {
  * Throws `AppError("internal")` for a short key or a malformed payload: both are server bugs,
  * never client input.
  */
-export function sign(payload: CursorPayload, key: string): string {
+export function sign(payload: CursorPayload, key: string, repo = ""): string {
   assertKey(key);
   if (!isPayload(payload)) {
     throw new AppError("internal", "invalid cursor payload", {
       hint: "generation, tool and argsHash must be non-empty strings; position a non-negative integer",
     });
   }
-  const body = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  const wire: CursorWire = { ...payload, repo };
+  const body = Buffer.from(JSON.stringify(wire), "utf8").toString("base64url");
   return `${body}.${tagFor(key, body).toString("base64url")}`;
 }
 
@@ -141,7 +164,12 @@ export function sign(payload: CursorPayload, key: string): string {
  * (re-run) rather than `cursor_mismatch`, and a tampered token as `cursor_invalid` rather than
  * either.
  */
-export function verify(token: string, expected: CursorExpectation, key: string): CursorResult {
+export function verify(
+  token: string,
+  expected: CursorExpectation,
+  key: string,
+  repo = "",
+): CursorResult {
   assertKey(key);
   if (typeof token !== "string" || token.length === 0 || token.length > MAX_TOKEN_CHARS) {
     return refusal("cursor_invalid", HINT_INVALID);
@@ -166,12 +194,17 @@ export function verify(token: string, expected: CursorExpectation, key: string):
     // Only a key holder can reach this; a signed-but-unparseable payload is still not a page.
     return refusal("cursor_invalid", HINT_INVALID);
   }
-  if (!isPayload(decoded)) {
+  if (!isWire(decoded)) {
     return refusal("cursor_invalid", HINT_INVALID);
   }
 
   if (decoded.generation !== expected.generation) {
     return refusal("cursor_expired", HINT_RE_RUN);
+  }
+  // Repo is part of the call's identity — the same tool and arguments in another repository are
+  // still another page — so it joins the mismatch check, after the MAC proved the stamp genuine.
+  if (decoded.repo !== repo) {
+    return refusal("cursor_mismatch", HINT_MISMATCH);
   }
   if (decoded.tool !== expected.tool || decoded.argsHash !== expected.argsHash) {
     return refusal("cursor_mismatch", HINT_MISMATCH);
@@ -180,15 +213,16 @@ export function verify(token: string, expected: CursorExpectation, key: string):
 }
 
 /**
- * Binds the key once, at the composition root, and returns the `{sign, verify}` pair a
- * `ToolContext` carries. The key length check happens here so a misconfigured server fails at
- * startup rather than at the first truncation.
+ * Binds the key and the repository once, at the composition root, and returns the
+ * `{sign, verify}` pair a `ToolContext` carries. The key length check happens here so a
+ * misconfigured server fails at startup rather than at the first truncation.
  */
-export function createCursors(options: { key: string }): Cursor {
-  const { key } = options;
+export function createCursors(bindings: CursorBindings): Cursor {
+  const { key } = bindings;
+  const repo = bindings.repoId ?? "";
   assertKey(key);
   return {
-    sign: (payload) => sign(payload, key),
-    verify: (token, expected) => verify(token, expected, key),
+    sign: (payload) => sign(payload, key, repo),
+    verify: (token, expected) => verify(token, expected, key, repo),
   };
 }

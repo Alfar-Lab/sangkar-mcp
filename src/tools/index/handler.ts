@@ -34,6 +34,7 @@ import {
 } from "#shared/envelope";
 import { AppError } from "#shared/errors";
 import type { LogLevel } from "#shared/log";
+import { canonicalRoot, registerRepo } from "#shared/registry";
 import { lockPath } from "#shared/store/lock";
 import type { ToolContext } from "#shared/store/read/context";
 import { type IndexArgs, type IndexMode, input } from "./manifest";
@@ -96,6 +97,7 @@ export interface WorkerInvocation {
 export interface WorkerArgs {
   readonly force: boolean;
   readonly mode: IndexMode;
+  readonly register: boolean;
 }
 
 /**
@@ -119,7 +121,11 @@ function messageOf(error: unknown): string {
 }
 
 function resolveArgs(args: IndexArgs): WorkerArgs {
-  return { force: args.force ?? input.force.default, mode: args.mode ?? input.mode.default };
+  return {
+    force: args.force ?? input.force.default,
+    mode: args.mode ?? input.mode.default,
+    register: args.register ?? input.register.default,
+  };
 }
 
 /**
@@ -545,6 +551,32 @@ function failedInternal(
 }
 
 /**
+ * Publishes this tree into the machine's registry, so the daemon watches what was just indexed.
+ *
+ * Registering is a convenience for the next call, so it must never take down this one: a throw
+ * becomes one warning and the caller returns the envelope the run already mapped. That is also why
+ * the returned registry is inspected — `registerRepo` swallows a refused write and answers
+ * `added: false` with the registry it could not extend, so membership of the root is the only
+ * evidence the write took. A repository that was already registered reports `added: false` too, and
+ * in that case its root *is* an entry.
+ */
+function registerTree(ctx: ToolContext): void {
+  const repoRoot = ctx.config.repoRoot;
+  try {
+    const result = registerRepo(ctx.config.registryPath, repoRoot, { log: ctx.log });
+    if (!result.registry.repos.includes(canonicalRoot(repoRoot))) {
+      ctx.log.warn("index.register_failed", {
+        reason: `the registry at ${ctx.config.registryPath} was not updated`,
+      });
+      return;
+    }
+    ctx.log.info("index.registered", { repoRoot, added: result.added });
+  } catch (error) {
+    ctx.log.warn("index.register_failed", { reason: messageOf(error) });
+  }
+}
+
+/**
  * Runs the worker and maps its status byte to an envelope: 0 published, 2 nothing to do, 75 locked,
  * 1 and anything else failed. Never throws — a rejected spawn becomes the same `internal` failure
  * an exit 1 does, because a caller of a repair tool needs a reason, not an exception.
@@ -576,12 +608,30 @@ export async function handle(
     );
   }
   const elapsedMs = Math.max(0, ctx.now().getTime() - startedAt);
+  const env = envelopeOf(ctx, report, resolved, snapshot, elapsedMs);
 
+  // Only a run that succeeded leaves a tree worth watching, and only after the report is mapped:
+  // registering an exit 1, a 75 or a rejected spawn would add a repository the next call cannot
+  // read, and a refused registration must never change the answer this call already has.
+  if ((report.exitCode === 0 || report.exitCode === 2) && resolved.register) {
+    registerTree(ctx);
+  }
+  return env;
+}
+
+/** The four mappings, in one place so {@link handle} can answer before it registers. */
+function envelopeOf(
+  ctx: ToolContext,
+  report: WorkerReport,
+  args: WorkerArgs,
+  snapshot: LiveSnapshot,
+  elapsedMs: number,
+): Envelope<IndexPayload | null> {
   switch (report.exitCode) {
     case 0:
-      return published(ctx, report, resolved, snapshot);
+      return published(ctx, report, args, snapshot);
     case 2:
-      return nothingToDo(ctx, report, snapshot, resolved, elapsedMs);
+      return nothingToDo(ctx, report, snapshot, args, elapsedMs);
     case 75:
       return locked(ctx, report, snapshot);
     default:

@@ -2,7 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { detectRepoRoot, flagValue, loadConfig } from "#shared/config";
+import { detectRepoRoot, flagValue, HOME_DIR_NAME, loadConfig, withRepo } from "#shared/config";
 import { CURSOR_KEY_MIN_BYTES } from "#shared/cursor";
 
 /**
@@ -195,6 +195,152 @@ describe("loadConfig", () => {
     expect(config.budgets.defaultTokens).toBe(1_200);
     expect(config.budgets.maxTokens).toBe(32_000);
     expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
+  });
+});
+
+describe("loadConfig home", () => {
+  test("SANGKAR_HOME wins over the XDG config root and names the derived paths", () => {
+    const bare = tempDir("sangkar-home-explicit-");
+    const config = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: "/machine/home", XDG_CONFIG_HOME: "/xdg/config", HOME: "/home/tester" },
+      cwd: bare,
+    });
+    expect(config.home).toBe("/machine/home");
+    expect(config.registryPath).toBe(join("/machine/home", "sangkar.json"));
+    expect(config.daemon.pidPath).toBe(join("/machine/home", "daemon.pid"));
+    expect(config.daemon.logPath).toBe(join("/machine/home", "daemon.log"));
+  });
+
+  test("XDG_CONFIG_HOME is the parent of the sangkar dir when SANGKAR_HOME is unset", () => {
+    const bare = tempDir("sangkar-home-xdg-");
+    const config = loadConfig({
+      argv: [],
+      env: { XDG_CONFIG_HOME: "/xdg/config", HOME: "/home/tester" },
+      cwd: bare,
+    });
+    expect(config.home).toBe(join("/xdg/config", HOME_DIR_NAME));
+    expect(config.registryPath).toBe(join("/xdg/config", HOME_DIR_NAME, "sangkar.json"));
+    expect(config.daemon.pidPath).toBe(join("/xdg/config", HOME_DIR_NAME, "daemon.pid"));
+  });
+
+  test("both unset falls back to $HOME/.config/sangkar", () => {
+    const bare = tempDir("sangkar-home-fallback-");
+    const config = loadConfig({ argv: [], env: { HOME: "/home/tester" }, cwd: bare });
+    expect(config.home).toBe(join("/home/tester", ".config", HOME_DIR_NAME));
+    expect(config.daemon.logPath).toBe(
+      join("/home/tester", ".config", HOME_DIR_NAME, "daemon.log"),
+    );
+  });
+
+  test("an empty SANGKAR_HOME counts as absent, so the fallbacks decide", () => {
+    const bare = tempDir("sangkar-home-empty-");
+    const withXdg = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: "", XDG_CONFIG_HOME: "/xdg/config" },
+      cwd: bare,
+    });
+    expect(withXdg.home).toBe(join("/xdg/config", HOME_DIR_NAME));
+
+    // A bare `SANGKAR_HOME=` in a shell profile must not put the registry in the working directory.
+    const homeOnly = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: "", HOME: "/home/tester" },
+      cwd: bare,
+    });
+    expect(homeOnly.home).toBe(join("/home/tester", ".config", HOME_DIR_NAME));
+  });
+
+  test("an empty XDG_CONFIG_HOME counts as absent too", () => {
+    const bare = tempDir("sangkar-home-empty-xdg-");
+    const config = loadConfig({
+      argv: [],
+      env: { XDG_CONFIG_HOME: "", HOME: "/home/tester" },
+      cwd: bare,
+    });
+    // `join("", "sangkar")` would be the relative "sangkar": a cwd-relative home, not a machine one.
+    expect(config.home).toBe(join("/home/tester", ".config", HOME_DIR_NAME));
+  });
+
+  test("a leading ~/ expands against HOME, because no shell expanded it", () => {
+    const bare = tempDir("sangkar-home-tilde-");
+    const config = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: "~/machine/sangkar", HOME: "/home/tester" },
+      cwd: bare,
+    });
+    expect(config.home).toBe(join("/home/tester", "machine", "sangkar"));
+  });
+
+  test("is machine state: --repo-root and --data-dir do not move it", () => {
+    const root = tempDir("sangkar-home-machine-");
+    const config = loadConfig({
+      argv: ["--repo-root", root, "--data-dir", "var/graph"],
+      env: { SANGKAR_HOME: "/machine/home" },
+      cwd: tmpdir(),
+    });
+    expect(config.dataDir).toBe(join(root, "var", "graph"));
+    expect(config.home).toBe("/machine/home");
+    expect(config.registryPath).toBe(join("/machine/home", "sangkar.json"));
+  });
+});
+
+describe("withRepo", () => {
+  test("swaps the repo fields and copies every machine field untouched", () => {
+    const first = tempDir("sangkar-withrepo-first-");
+    const second = tempDir("sangkar-withrepo-second-");
+    const base = loadConfig({
+      argv: ["--repo-root", first],
+      env: { SANGKAR_HOME: "/machine/home", SANGKAR_CURSOR_KEY: "k".repeat(32) },
+      cwd: tmpdir(),
+    });
+    expect(base.repoRoot).toBe(first);
+
+    const rebound = withRepo(base, second);
+    expect(rebound).not.toBe(base);
+    expect(rebound.repoRoot).toBe(resolve(second));
+    expect(rebound.dataDir).toBe(join(resolve(second), ".sangkar"));
+    expect(rebound.telemetry.dir).toBe(join(rebound.dataDir, "telemetry"));
+
+    expect(rebound.home).toBe(base.home);
+    expect(rebound.registryPath).toBe(base.registryPath);
+    expect(rebound.daemon).toEqual(base.daemon);
+    expect(rebound.cursorKey).toBe(base.cursorKey);
+    expect(rebound.budgets).toEqual(base.budgets);
+    expect(rebound.telemetry.enabled).toBe(base.telemetry.enabled);
+    // The argument config keeps the first tree, so one binding cannot silently move another.
+    expect(base.repoRoot).toBe(first);
+    expect(base.dataDir).toBe(join(first, ".sangkar"));
+    expect(base.telemetry.dir).toBe(join(first, ".sangkar", "telemetry"));
+  });
+
+  test("resolves the root it is given and honours an explicit data dir", () => {
+    const parent = tempDir("sangkar-withrepo-parent-");
+    const base = loadConfig({ argv: [], env: { SANGKAR_HOME: "/machine/home" }, cwd: parent });
+
+    // `resolve` is the process cwd's business, not the previous root's: the caller hands over a path.
+    expect(withRepo(base, "child").repoRoot).toBe(resolve("child"));
+
+    const explicit = withRepo(base, parent, { dataDir: join(parent, "var", "graph") });
+    expect(explicit.repoRoot).toBe(parent);
+    expect(explicit.dataDir).toBe(join(parent, "var", "graph"));
+    expect(explicit.telemetry.dir).toBe(join(parent, "var", "graph", "telemetry"));
+    // Consent is a machine-level switch, so the rebound config carries it, not re-derives it.
+    expect(explicit.telemetry).not.toBe(base.telemetry);
+    expect(explicit.telemetry.enabled).toBe(true);
+  });
+
+  test("carries a disabled consent switch across the rebind", () => {
+    const bare = tempDir("sangkar-withrepo-off-");
+    const other = tempDir("sangkar-withrepo-off-other-");
+    const base = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: "/machine/home", SANGKAR_TELEMETRY: "off" },
+      cwd: bare,
+    });
+    const rebound = withRepo(base, other);
+    expect(rebound.telemetry.enabled).toBe(false);
+    expect(rebound.telemetry.dir).toBe(join(resolve(other), ".sangkar", "telemetry"));
   });
 });
 

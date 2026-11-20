@@ -1,8 +1,9 @@
 /**
  * The composition root (`TECH-SPEC.md` §7): the one module that knows both halves of the app. It
- * resolves the config and runs the open-time guard, registers the seven tools, dispatches a CLI
- * invocation to one of them, starts the watcher, and wires the exit path — so every other module
- * can be tested without a server and without a database.
+ * resolves the config and the registry and runs the open-time guard, registers the seven tools,
+ * dispatches a CLI invocation to one of them, serves every registered repository from a pool of
+ * readers, and wires the exit path — so every other module can be tested without a server and
+ * without a database.
  *
  * Two rules shape the file:
  *
@@ -21,9 +22,10 @@
  * adding a dependency and a second schema dialect to express the same seven tools.
  *
  * The seven manifests are imported explicitly (`TECH-SPEC.md` §7: the registry is seven lines, no
- * directory scanning, and the dependency graph stays readable). The watcher and the worker are the
- * only `./indexer/*` imports, and they are root-only by design: a tool may never spawn an index run
- * of its own, and the watcher is never allowed to import the writer it spawns.
+ * directory scanning, and the dependency graph stays readable). The worker is the only
+ * `./indexer/*` import, and it is root-only by design: a tool may never spawn an index run of its
+ * own, and nothing here polls a tree — the daemon owns the watchers, one per registered repo
+ * (`src/daemon/**`), so a `sangkar mcp` process only ever reads.
  */
 import { existsSync, realpathSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -52,7 +54,7 @@ import {
   renderEnvelope,
   statusLines,
 } from "#shared/cli/render";
-import { type AppConfig, flagValue, loadConfig } from "#shared/config";
+import { type AppConfig, flagValue, loadConfig, withRepo } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import {
   bootstrapping,
@@ -65,14 +67,23 @@ import {
 import { AppError, isAppError } from "#shared/errors";
 import { INSTRUCTIONS_TEXT, nextToolsFor } from "#shared/instructions";
 import { type Logger, log } from "#shared/log";
+import {
+  canonicalRoot,
+  type Registry,
+  readRegistry,
+  registerRepo,
+  selectRepo,
+} from "#shared/registry";
+import { readRepoConfig } from "#shared/repo-config";
 import { type Conn, openReader } from "#shared/store/db";
 import { type LockHandle, release } from "#shared/store/lock";
 import { readSchemaVersion, schemaVersion } from "#shared/store/migrate";
+import { createStorePool, type StorePool } from "#shared/store/pool";
 import type { ToolContext } from "#shared/store/read/context";
 import { type GraphReader, makeReader } from "#shared/store/read/reader";
+import { telemetryForRepo } from "#shared/telemetry/for-repo";
 import type { SessionMode } from "#shared/telemetry/record";
-import { createTelemetry, nullTelemetry, type Telemetry } from "#shared/telemetry/telemetry";
-import { startWatch, type WatchHandle } from "./indexer/watch";
+import type { Telemetry } from "#shared/telemetry/telemetry";
 import { runWorker, type WorkerMode } from "./indexer/worker";
 import { handle as expandHandle } from "./tools/expand/handler";
 import {
@@ -148,7 +159,7 @@ type ToolHandler = (
   args: ToolArgs,
 ) => Envelope<unknown> | Promise<Envelope<unknown>>;
 
-interface RegisteredTool {
+export interface RegisteredTool {
   readonly name: string;
   readonly description: string;
   readonly input: InputLiteral;
@@ -396,7 +407,10 @@ function refusalOf(error: unknown): AppError {
 function buildContext(config: AppConfig, reader: GraphReader): ToolContext {
   return {
     reader,
-    cursor: createCursors({ key: config.cursorKey }),
+    // Bound to the repository it serves: one process answers for several trees, and a page token
+    // minted in one must not address a page in another (`#shared/cursor` compares the stamp after
+    // the MAC proved it genuine, so the refusal is `cursor_mismatch`, never a wrong page).
+    cursor: createCursors({ key: config.cursorKey, repoId: canonicalRoot(config.repoRoot) }),
     log,
     now: () => new Date(),
     config,
@@ -614,19 +628,84 @@ function answer(envelope: Envelope<unknown>): CallToolResult {
   };
 }
 
+/**
+ * What one protocol call needs from the process it runs in: the surface it publishes, the registry
+ * a `repo` argument is resolved against, the configuration the process started on (which owns the
+ * pin and the machine-level home), and the two seams that keep the pool and the recorders out of
+ * {@link callTool}.
+ *
+ * The seams are what make the selection order testable without a server: `openFor` hands back a
+ * store *and* the context bound to that repository, and `recorderFor` hands back the one recorder
+ * that repository's calls belong to.
+ */
+export interface CallSurface {
+  readonly tools: ReadonlyMap<string, RegisteredTool>;
+  readonly registry: Registry;
+  /** `loadConfig()`'s answer: the root this process resolved, its data dir and its cursor key. */
+  readonly startup: AppConfig;
+  /** `--repo-root`: the default for a call that names no repository, never a barrier. */
+  readonly pinnedRoot: string | null;
+  openFor(repoRoot: string): { readonly store: Store; readonly context: ToolContext };
+  recorderFor(repoRoot: string): Telemetry;
+}
+
+/**
+ * One repository's settings. Any other tree is served from `withRepo`'s own `.sangkar`, but the tree
+ * this process started on keeps the config it started with: an explicit `--data-dir` was said about
+ * *that* tree, so rebuilding it from the root would send the process looking for a graph the caller
+ * explicitly placed somewhere else.
+ */
+function repoConfigIn(startup: AppConfig, repoRoot: string): AppConfig {
+  return canonicalRoot(startup.repoRoot) === canonicalRoot(repoRoot)
+    ? startup
+    : withRepo(startup, repoRoot);
+}
+
+/**
+ * The context of a store that is not `ready`. An absent or refused graph has no reader, and no
+ * branch reaches for one: {@link callTool} answers `bootstrapping` or the refusal before a handler
+ * exists. The reader is therefore a property read that throws rather than a fake that would answer
+ * — a future branch that consulted it fails loudly instead of reading nothing.
+ */
+function unreadableReader(): GraphReader {
+  const refuse = (): never => {
+    throw new AppError("internal", "no graph is open for this repository");
+  };
+  return new Proxy({} as GraphReader, { get: () => refuse });
+}
+
+/**
+ * The store a pre-selection answer reads its counts from: the tree this process started on. A call
+ * that named no repository — or one this installation does not serve — has no other candidate, and
+ * a refusal still owes the client a `read_status`, so the startup handle is the only honest one.
+ */
+function startupStoreOf(surface: CallSurface): Store {
+  return surface.openFor(surface.startup.repoRoot).store;
+}
+
+/**
+ * One `tools/call`, in the order the contract fixes: find the tool, parse against its manifest,
+ * resolve the repository the call is about, then answer from that repository's own reader.
+ *
+ * The order is load-bearing. `parseArgs` runs first because the selector reads the *parsed* `repo`
+ * (so a declared string is checked before it can name anything); selection runs before a store is
+ * touched, because `not_found` and `ambiguous` are facts about the registry rather than about any
+ * graph; and `repo` is dropped from the record the handler receives, because it chose the store and
+ * is not an argument of the tool.
+ */
 async function callTool(
-  store: Store,
-  tools: ReadonlyMap<string, RegisteredTool>,
+  surface: CallSurface,
   params: { readonly name: string; readonly arguments?: Record<string, unknown> | undefined },
-  telemetry: Telemetry,
 ): Promise<CallToolResult> {
   const started = Date.now();
   let envelope: Envelope<unknown> | null = null;
   let parsed: ToolArgs = {};
   let supplied: readonly string[] = [];
   let errorCode: string | null = null;
+  // What the record is filed under when nothing was selected: the only tree the call could mean.
+  let recordedRoot = surface.startup.repoRoot;
   try {
-    const tool = tools.get(params.name);
+    const tool = surface.tools.get(params.name);
     if (tool !== undefined) {
       // The intersection with the manifest is what keeps `arg_names_set` (the one field allowed to
       // be dynamic) from carrying a client-supplied key name: `parseArgs` drops an undeclared key,
@@ -637,12 +716,12 @@ async function callTool(
     }
     if (tool === undefined) {
       const error = new AppError("not_found", `no tool named "${params.name}" in this surface`, {
-        hint: `this server registers: ${[...tools.keys()].join(", ")}`,
+        hint: `this server registers: ${[...surface.tools.keys()].join(", ")}`,
       });
       envelope = fail(
         error,
         boundarySpec(
-          store,
+          startupStoreOf(surface),
           params.name,
           `${params.name} is not registered`,
           "the tool does not exist in this surface",
@@ -651,6 +730,55 @@ async function callTool(
       errorCode = envelope.error?.code ?? null;
       return answer(envelope);
     }
+
+    try {
+      parsed = parseArgs(tool.name, tool.input, params.arguments);
+    } catch (error) {
+      // The arguments were refused before a repository could be chosen, so the counts come from the
+      // tree this process started on. Same wording as a handler that threw: the call never reached
+      // a graph, and nothing here may claim it did.
+      scopedLog(tool.name).error("tool.failed", {
+        code: isAppError(error) ? error.code : "internal",
+        reason: messageOf(error),
+      });
+      envelope = fail(
+        error,
+        boundarySpec(
+          startupStoreOf(surface),
+          tool.name,
+          `${tool.name} could not answer`,
+          "the call failed before the graph answered",
+        ),
+      );
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
+
+    const selection = selectRepo({
+      registry: surface.registry,
+      requested: typeof parsed.repo === "string" ? parsed.repo : undefined,
+      cwd: process.cwd(),
+      pinnedRoot: surface.pinnedRoot,
+    });
+    if (!selection.ok) {
+      // A refusal still carries the registry as its hint, so the caller can act without guessing.
+      envelope = fail(
+        selection.error,
+        boundarySpec(
+          startupStoreOf(surface),
+          tool.name,
+          selection.error.message,
+          "no repository could be selected for this call",
+        ),
+      );
+      errorCode = envelope.error?.code ?? null;
+      return answer(envelope);
+    }
+    recordedRoot = selection.repoRoot;
+
+    // `repo` picked the store above; the handler gets the arguments that describe the question.
+    const { repo: _selector, ...rest } = parsed;
+    const { store, context } = surface.openFor(selection.repoRoot);
     if (store.kind === "refused") {
       envelope = fail(
         store.error,
@@ -669,17 +797,16 @@ async function callTool(
       return answer(envelope);
     }
 
-    const context: ToolContext = { ...store.context, log: scopedLog(tool.name) };
+    const scoped: ToolContext = { ...context, log: scopedLog(tool.name) };
     try {
-      parsed = parseArgs(tool.name, tool.input, params.arguments);
-      envelope = route(await tool.handle(context, parsed), tool.name, store.staleReason);
+      envelope = route(await tool.handle(scoped, rest), tool.name, store.staleReason);
       errorCode = envelope.error?.code ?? null;
       return answer(envelope);
     } catch (error) {
       // A handler returns its errors; reaching this point means a bug or a boundary refusal, and
       // `fail` keeps an `AppError`'s code (`budget_too_large`, `index_locked`) while collapsing
       // anything else to `internal`.
-      context.log.error("tool.failed", {
+      scoped.log.error("tool.failed", {
         code: isAppError(error) ? error.code : "internal",
         reason: messageOf(error),
       });
@@ -698,8 +825,8 @@ async function callTool(
   } finally {
     // `params.name` is whatever the client sent, and on the unknown-tool branch there is no tool to
     // take a name from, so the record's `tool` is always one of the seven or the literal "unknown".
-    const recordedTool = tools.has(params.name) ? params.name : "unknown";
-    telemetry.recordCall({
+    const recordedTool = surface.tools.has(params.name) ? params.name : "unknown";
+    surface.recorderFor(recordedRoot).recordCall({
       tool: recordedTool,
       args: parsed,
       suppliedNames: supplied,
@@ -713,13 +840,16 @@ async function callTool(
 
 /** The exit path's inventory: what a signal has to unwind, and whether it already ran. */
 interface Lifecycle {
-  watcher: WatchHandle | null;
-  conn: Conn | null;
   /**
-   * The process's one recorder, closed last: a record is only useful once the answer it describes
-   * was written, and closing flushes the buffer once on whichever exit path won.
+   * Every reader this process opened, keyed by repository. The pool is the only closer: a handle a
+   * call swapped out is closed by the refresh itself, so nothing here can close one twice.
    */
-  telemetry: Telemetry | null;
+  readonly pool: StorePool<Store>;
+  /**
+   * One recorder per served repository, closed last: a record is only useful once the answer it
+   * describes was written, and closing flushes each buffer once on whichever exit path won.
+   */
+  readonly recorders: ReadonlyMap<string, Telemetry>;
   /**
    * Always `null` today, and kept anyway: the server process never takes the write lock, because
    * `DATABASE.md` §5 makes the worker the single writer and `runWorker` releases its own lock in a
@@ -731,9 +861,11 @@ interface Lifecycle {
 }
 
 /**
- * Stop the watcher, release the lock, close the database — in that order, because the watcher may
- * have a child mid-run and the handle must outlive the last thing that reads from it. Idempotent:
- * a signal and an EOF on stdin can race, and the second call must not close a closed handle.
+ * Release the lock, then close every reader, then every recorder: a record describes an answer the
+ * reader produced, so nothing may be flushed after the handle behind it is gone. The pool is the
+ * only closer of a reader, so a superseded generation closed by its refresh cannot be closed again
+ * here. Idempotent: a signal and an EOF on stdin can race, and the second call must not close a
+ * closed handle.
  */
 async function shutdown(lifecycle: Lifecycle, reason: string): Promise<void> {
   if (lifecycle.closed) {
@@ -741,23 +873,15 @@ async function shutdown(lifecycle: Lifecycle, reason: string): Promise<void> {
   }
   lifecycle.closed = true;
   log.info("mcp.shutdown", { reason });
-  if (lifecycle.watcher !== null) {
-    const watcher = lifecycle.watcher;
-    lifecycle.watcher = null;
-    await watcher.stop();
-  }
   if (lifecycle.lock !== null) {
     const lock = lifecycle.lock;
     lifecycle.lock = null;
     await release(lock);
   }
-  if (lifecycle.conn !== null) {
-    lifecycle.conn.close();
-    lifecycle.conn = null;
-  }
-  if (lifecycle.telemetry !== null) {
-    const telemetry = lifecycle.telemetry;
-    lifecycle.telemetry = null;
+  // The only closer of a reader: no handle is remembered anywhere else, so a call that swapped in a
+  // newer generation cannot leave the live one open or close a superseded one twice.
+  lifecycle.pool.closeAll();
+  for (const telemetry of lifecycle.recorders.values()) {
     telemetry.close();
   }
 }
@@ -812,36 +936,87 @@ function pendingCalls(): { begin(): void; end(): void; settled(): Promise<void> 
   };
 }
 
-/**
- * `SANGKAR_NO_WATCH` is read here rather than in `#shared/config` because it is not a tool setting:
- * it decides whether *this process* owns a poller, which is the root's business alone. Unset (or
- * empty) means watch; any other value disables the watcher, so a test harness and a supervised
- * deployment both have a switch that cannot be mistaken for a preference.
- */
-function watcherDisabled(env: Record<string, string | undefined>): boolean {
-  const raw = env.SANGKAR_NO_WATCH;
-  return raw !== undefined && raw !== "";
-}
-
-async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> {
-  let store = openStore(config);
-  if (store.kind === "refused") {
-    // Refused once, logged once, and every call answers with that refusal: the session stays usable
-    // so the agent can read the reason instead of losing the whole server to one path mismatch.
-    log.error("mcp.refused", { code: store.error.code, reason: store.error.message });
-  }
-
+async function runMcp(
+  config: AppConfig,
+  registry: Registry,
+  pinnedRoot: string | null,
+): Promise<number> {
   const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
-  // Built before the request handler so a refresh can move `conn` to the generation the next call
-  // will answer from, and `shutdown` closes whichever handle is live rather than the startup one.
-  const lifecycle: Lifecycle = {
-    watcher: null,
-    conn: store.kind === "ready" ? store.conn : null,
-    telemetry,
-    lock: null,
-    closed: false,
+  // One handle per repository, opened on first use. `close` is the only thing that ever closes a
+  // reader, so a call that swapped in a newer generation cannot be closed twice — the refreshed
+  // store is what the pool holds and what `shutdown` closes.
+  const pool = createStorePool<Store>({
+    open: (root) => openStore(repoConfigIn(config, root)),
+    close: (store) => {
+      if (store.kind === "ready") {
+        store.conn.close();
+      }
+    },
+  });
+
+  // One recorder per repository, built the first time that repository answers: a session record
+  // belongs to the tree the session served, and `telemetryForRepo` owns the
+  // consent/registration/repo-file precedence rather than this file re-deriving it.
+  const recorders = new Map<string, Telemetry>();
+
+  /**
+   * One repository's reader and the context bound to it.
+   *
+   * `refreshStore` runs on every call because another process publishes by renaming a new file over
+   * `graph.db`; the pool holds the handle in between so a session that names two trees does not pay
+   * two cold opens per call. The context is rebuilt for *this* root — `config.repoRoot` and
+   * `dataDir` name the tree being answered from, and the cursor is bound to it — rather than reused
+   * from the store, which was built from this root but carries no repository identity of its own.
+   */
+  const openFor = (repoRoot: string): { readonly store: Store; readonly context: ToolContext } => {
+    const root = canonicalRoot(repoRoot);
+    const repoConfig = repoConfigIn(config, root);
+    const store = refreshStore(pool.acquire(root), repoConfig);
+    pool.replace(root, store);
+    const reader = store.kind === "ready" ? store.context.reader : unreadableReader();
+    return { store, context: buildContext(repoConfig, reader) };
   };
+
+  const recorderFor = (repoRoot: string): Telemetry => {
+    const root = canonicalRoot(repoRoot);
+    const known = recorders.get(root);
+    if (known !== undefined) {
+      return known;
+    }
+    const telemetry = telemetryForRepo({
+      config,
+      repo: readRepoConfig(root, { dataDir: repoConfigIn(config, root).dataDir }),
+      registered: registry.repos.includes(root),
+      sessionMode: "mcp",
+      serverVersion: SERVER_VERSION,
+      graphSchemaVersion: schemaVersion(),
+    });
+    recorders.set(root, telemetry);
+    return telemetry;
+  };
+
+  const surface: CallSurface = {
+    tools: byName,
+    registry,
+    startup: config,
+    pinnedRoot,
+    openFor,
+    recorderFor,
+  };
+
+  // The tree this process started on: what `mcp.ready` reports, and the store a call that selected
+  // no repository reads its counts from. A refusal here is logged once — every call that selects
+  // that tree answers with it, so the agent can read the reason instead of losing the server.
+  const atStartup = openFor(config.repoRoot);
+  if (atStartup.store.kind === "refused") {
+    log.error("mcp.refused", {
+      code: atStartup.store.error.code,
+      reason: atStartup.store.error.message,
+    });
+  }
+
+  const lifecycle: Lifecycle = { pool, recorders, lock: null, closed: false };
 
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -854,13 +1029,10 @@ async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     pending.begin();
     try {
-      // The handle was opened for the generation that was on disk when this process started, and a
-      // publish renames a new file over the live path. Refreshing here — ahead of the
-      // absent/refused short-circuits — is what lets a server that answered `bootstrapping` answer
-      // from the first generation on its next call.
-      store = refreshStore(store, config);
-      lifecycle.conn = store.kind === "ready" ? store.conn : null;
-      return await callTool(store, byName, request.params, telemetry);
+      // Eviction happens here rather than on a timer: the process is already awake, no handle is
+      // mid-read, and an idle one gives its file descriptors back before this call opens another.
+      pool.releaseIdle();
+      return await callTool(surface, request.params);
     } finally {
       pending.end();
     }
@@ -873,19 +1045,11 @@ async function runMcp(config: AppConfig, telemetry: Telemetry): Promise<number> 
   process.once("SIGINT", onSignal);
   process.once("SIGTERM", onSignal);
 
-  // A refused store is not watched: the graph belongs to a tree this process may not serve, and an
-  // index run here would rewrite another project's database.
-  if (!watcherDisabled(process.env) && store.kind !== "refused") {
-    lifecycle.watcher = startWatch({ repoRoot: config.repoRoot, dataDir: config.dataDir });
-  }
-
   await server.connect(new StdioServerTransport());
   log.info("mcp.ready", {
-    repoRoot: config.repoRoot,
-    dataDir: config.dataDir,
+    repos: registry.repos.length,
+    store: atStartup.store.kind,
     tools: [...byName.keys()],
-    watching: lifecycle.watcher !== null,
-    store: store.kind,
   });
 
   await clientGone();
@@ -932,6 +1096,8 @@ async function runTool(
   name: string,
   argv: readonly string[],
   config: AppConfig,
+  registry: Registry,
+  pinnedRoot: string | null,
   telemetry: Telemetry,
 ): Promise<number> {
   const tool = TOOLS.find((candidate) => candidate.name === name);
@@ -979,7 +1145,29 @@ async function runTool(
       throw error;
     }
 
-    const store = openStore(config);
+    const selection = selectRepo({
+      registry,
+      requested: typeof parsed.repo === "string" ? parsed.repo : undefined,
+      cwd: process.cwd(),
+      pinnedRoot,
+    });
+    if (!selection.ok) {
+      // No repository this installation can answer for: the argv is what is wrong, so this is the
+      // usage exit — the same code `main` gives every refusal that happens before work starts.
+      errorCode = selection.error.code;
+      process.stderr.write(`${selection.error.message}\n`);
+      if (selection.error.hint !== undefined) {
+        process.stderr.write(`${selection.error.hint}\n`);
+      }
+      return finish(EXIT_USAGE);
+    }
+
+    // The selected tree, not the startup one: `--repo-root` is a default and an explicit `repo`
+    // outranks it, so the store must be the one the call named.
+    const repoConfig = repoConfigIn(config, selection.repoRoot);
+    // `repo` picked the tree above; the handler gets the arguments that describe the question.
+    const { repo: _selector, ...rest } = parsed;
+    const store = openStore(repoConfig);
     if (store.kind === "refused") {
       // No envelope is built here, so the refusal's own code is the only error code there is.
       errorCode = store.error.code;
@@ -1009,7 +1197,7 @@ async function runTool(
     // and rendered exactly as `callTool` renders it.
     const context: ToolContext = { ...store.context, log: scopedLog(name) };
     try {
-      envelope = route(await tool.handle(context, parsed), name, store.staleReason);
+      envelope = route(await tool.handle(context, rest), name, store.staleReason);
     } catch (error) {
       context.log.error("tool.failed", {
         code: isAppError(error) ? error.code : "internal",
@@ -1065,41 +1253,47 @@ export async function main(mode: string, argv: string[]): Promise<number> {
   try {
     // `flagValue` scans the whole argv, so a global flag may sit on either side of the tool token.
     const config = loadConfig({ argv });
-    // The one recorder of the process, built here because the root is the only place that knows the
-    // mode and owns the exit path. Its construction is what emits the session record.
     const sessionMode: SessionMode =
       mode === "mcp" ? "mcp" : mode === "worker" || mode === "index" ? "worker" : "cli";
-    const telemetry = config.telemetry.enabled
-      ? createTelemetry({
-          dir: config.telemetry.dir,
-          repoRoot: config.repoRoot,
-          dataDir: config.dataDir,
-          sessionMode,
-          serverVersion: SERVER_VERSION,
-          graphSchemaVersion: schemaVersion(),
-        })
-      : nullTelemetry();
+    // Read once per process: every call of this process resolves its `repo` against this snapshot
+    // (`selectRepo`), and `--repo-root` is only the *default* a call that names none falls back to.
+    const registry = readRegistry(config.registryPath);
+    const pinnedRoot = flagValue(argv, "repo-root") ?? null;
+
+    if (mode === "mcp") {
+      // The server builds one recorder per repository it serves and closes them in `shutdown`.
+      return await runMcp(config, registry, pinnedRoot);
+    }
+
+    // The one recorder of a one-shot process, built here because the root is the only place that
+    // knows the mode and owns the exit path; `telemetryForRepo` owns the precedence. Its
+    // construction is what emits the session record.
+    const telemetry = telemetryForRepo({
+      config,
+      repo: readRepoConfig(config.repoRoot, { dataDir: config.dataDir }),
+      registered: registry.repos.includes(canonicalRoot(config.repoRoot)),
+      sessionMode,
+      serverVersion: SERVER_VERSION,
+      graphSchemaVersion: schemaVersion(),
+    });
     try {
-      switch (mode) {
-        case "mcp":
-          // The server closes the recorder on the way out of `shutdown`, not here.
-          return await runMcp(config, telemetry);
-        case "index":
-        case "worker":
-          return await runWorker(workerOptions(argv, config, telemetry));
+      if (mode === "index" || mode === "worker") {
+        const code = await runWorker(workerOptions(argv, config, telemetry));
+        if (mode === "index") {
+          registerIfAsked(config, argv, code);
+        }
+        return code;
       }
       const tool = TOOLS.find((candidate) => candidate.name === mode);
       if (tool === undefined) {
         process.stderr.write(`sangkar: unknown tool "${mode}"\n`);
         return EXIT_USAGE;
       }
-      return await runTool(tool.name, argv.slice(1), config, telemetry);
+      return await runTool(tool.name, argv.slice(1), config, registry, pinnedRoot, telemetry);
     } finally {
-      // A one-shot process flushes its own buffer; `mcp` owns its close through `shutdown`. Both
+      // A one-shot process flushes its own buffer; `mcp` owns its closes through `shutdown`. Both
       // closes are idempotent, so a refusal that returned early still writes its session record.
-      if (sessionMode !== "mcp") {
-        telemetry.close();
-      }
+      telemetry.close();
     }
   } catch (error) {
     log.error("startup failed", {
@@ -1108,5 +1302,25 @@ export async function main(mode: string, argv: string[]): Promise<number> {
       reason: messageOf(error),
     });
     return EXIT_USAGE;
+  }
+}
+
+/**
+ * The `index` verb's second duty: a tree that just indexed successfully is one the next session can
+ * serve, so it joins the machine registry. `--no-register` is the operator's opt-out, and a
+ * registration failure is one warning — the run's own exit code is the outcome this process reports.
+ *
+ * Only the verb registers. `worker` is spawned by a server for a tree it already knows, and a
+ * watcher run must never resurrect a repository an operator removed from the registry.
+ */
+function registerIfAsked(config: AppConfig, argv: readonly string[], code: number): void {
+  if ((code !== 0 && code !== 2) || argv.includes("--no-register")) {
+    return;
+  }
+  try {
+    const result = registerRepo(config.registryPath, config.repoRoot, { log });
+    log.info("index.registered", { repoRoot: config.repoRoot, added: result.added });
+  } catch (error) {
+    log.warn("index.register_failed", { reason: messageOf(error) });
   }
 }

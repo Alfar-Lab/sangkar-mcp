@@ -373,7 +373,9 @@ beforeAll(async () => {
   const reader = makeReader(conn);
   const config: AppConfig = loadConfig({
     argv: ["--repo-root", CORPUS, "--data-dir", dataDir],
-    env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
+    // `SANGKAR_HOME` is part of the fixture now: the index tool registers the tree it indexed, and
+    // without a temp home that write lands in the developer's real `~/.config/sangkar/sangkar.json`.
+    env: { SANGKAR_CURSOR_KEY: CURSOR_KEY, SANGKAR_HOME: join(root, "home") },
   });
   const ctx: ToolContext = {
     reader,

@@ -964,7 +964,7 @@ describe("status: budget", () => {
 });
 
 describe("status: manifest", () => {
-  test("describes the tool verbatim and declares exactly two optional arguments", () => {
+  test("describes the tool verbatim and declares exactly three optional arguments", () => {
     expect(manifest.name).toBe("status");
     expect("profile" in manifest).toBe(false);
     expect(manifest.description).toBe(
@@ -973,7 +973,7 @@ describe("status: manifest", () => {
         "the index generation, how stale the working tree is, per-path coverage, and the language " +
         "census. Cheap — call it freely.",
     );
-    expect(Object.keys(input).sort()).toEqual(["budget", "paths"]);
+    expect(Object.keys(input).sort()).toEqual(["budget", "paths", "repo"]);
     expect(input.budget.default).toBe(800);
     expect(input.paths.default).toEqual([]);
   });
