@@ -362,6 +362,9 @@ interface Scoped {
   readonly read_status: ReadStatus;
   readonly coverage: Coverage;
   readonly relation: TotalRelation;
+  /** The graph's own skipped-path count for this generation, from `assemble`: the one number
+   * `totals.not_indexed_total` publishes, so no tool derives it from a list it holds. */
+  readonly notIndexedTotal: number;
 }
 
 function isExpandWhat(value: unknown): value is ExpandWhat {
@@ -419,6 +422,7 @@ function scopeOf(
     read_status: readStatusOf(generation, indexedAt, freshness, now),
     coverage: assembly.coverage,
     relation: assembly.relation,
+    notIndexedTotal: assembly.notIndexedTotal,
   };
 }
 
@@ -630,10 +634,16 @@ function edgesSummary(payload: EdgesPayload, totals: Totals, truncated: boolean)
   return truncated ? `${head}, showing ${shown} of ${total}.` : `${head}: ${total}.`;
 }
 
-function coverageSummary(payload: CoveragePayload, totals: Totals, truncated: boolean): string {
+/** The number is the scope's, not the graph's: the sentence prints beside the list this answer
+ * holds. The graph's own total is `totals.not_indexed_total`. */
+function coverageSummary(
+  payload: CoveragePayload,
+  totals: Totals,
+  truncated: boolean,
+  skipped: number,
+): string {
   const shown = payload.files.length;
   const total = totals.files_total ?? shown;
-  const skipped = totals.not_indexed_total ?? payload.not_indexed.length;
   const head = `coverage for ${payload.prefix}`;
   const body = truncated
     ? `showing ${shown} of ${total} files, ${skipped} not indexed`
@@ -1114,7 +1124,7 @@ function coverageAnswer(
   };
   const totals: Totals = {
     files_total: payload.files.length,
-    not_indexed_total: payload.not_indexed.length,
+    not_indexed_total: scope.notIndexedTotal,
     total_relation: scope.relation,
   };
   return sized(
@@ -1123,13 +1133,13 @@ function coverageAnswer(
     { target, what: "coverage" },
     budget,
     ok(payload, {
-      summary: coverageSummary(payload, totals, false),
+      summary: coverageSummary(payload, totals, false, scope.coverage.skipped),
       read_status: scope.read_status,
       coverage: scope.coverage,
       next_tools: NEXT_TOOLS,
       totals,
     }),
-    (env) => coverageSummary(env.payload, env.totals, env.truncated),
+    (env) => coverageSummary(env.payload, env.totals, env.truncated, env.coverage.skipped),
   );
 }
 

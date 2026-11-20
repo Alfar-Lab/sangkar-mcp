@@ -94,7 +94,7 @@ each answering a different question:
 |---|---|---|
 | `coverage.skipped` | integer | the count of `not_indexed` rows in the scope this answer assembled — the rows the list beside it holds, so `coverage.skipped` is `coverage.not_indexed.length` in every answer that assembles coverage from the graph (`status`, `summary`, `impact`, `trace`, `expand`); what the *repository* never read is `totals.not_indexed_total`'s job. `index` is the one answer this does not describe: it reports a run's accounting, so its `skipped` is the run's count of non-indexable paths and its list is empty by construction (§8) |
 | `coverage.tests` | object | `{ nodes, languages: [{ language, nodes }] }` — the test corpus this graph indexed. `nodes: 0` means no test symbols were indexed, a different fact from "nothing covers this change"; `status` and `summary` always carry it, and the other tools do not pay for the query |
-| `totals.not_indexed_total` | integer | the repo-wide count of paths the index never read, read from the graph rather than from this answer's list; `status` and `summary` report the same number for one generation, so a narrow scope cannot understate what the repository never read |
+| `totals.not_indexed_total` | integer | the repo-wide count of paths the index never read, read from the graph rather than from this answer's list; `status`, `summary` and `expand` report the same number for one generation, so a narrow scope cannot understate what the repository never read |
 
 `emit()` is the one thing that can leave the list shorter than the count beside it: a tight budget
 trims `coverage.not_indexed` from the low-path end (`DESIGN.md` §7.1), `coverage.skipped` stays
@@ -791,11 +791,12 @@ A target nothing answers for is `not_found` with `{ target, why, hint }`: the re
 resolved, and the address forms that would have been accepted. A folder prefix is answered only by
 `what: "coverage"`, and the hint says so instead of returning an empty expansion.
 
-A `what: "coverage"` answer is scoped to the prefix it was asked about, and its
-`totals.not_indexed_total` is that scope's count — `payload.not_indexed.length`, the rows the answer
-itself holds — not the repo-wide `totals.not_indexed_total` that `status` and `summary` publish (§1.1).
-Read a folder's coverage as "what this prefix never read", and `status` as "what the repository never
-read".
+A `what: "coverage"` answer scopes its payload to the prefix it was asked about, and not its
+`totals.not_indexed_total`: that key is the repo-wide count read from the graph, the same number
+`status` and `summary` publish for that generation (§1.1). The prefix's own count is
+`coverage.skipped`, which is `coverage.not_indexed.length` and is what the answer's summary sentence
+prints — never `totals.not_indexed_total`. Read a folder's coverage as "what this prefix never read",
+and `status` as "what the repository never read".
 
 ### Example output
 

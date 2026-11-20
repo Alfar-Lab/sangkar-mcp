@@ -30,6 +30,8 @@ import {
   TOOL_NAME,
 } from "../src/tools/expand/handler";
 import { DEFAULT_BUDGET_TOKENS, input, manifest } from "../src/tools/expand/manifest";
+import { handle as statusHandle } from "../src/tools/status/handler";
+import { handle as summaryHandle } from "../src/tools/summary/handler";
 
 /**
  * `expand` against a hand-written `GraphReader` and one real directory (`TOOLS-SPEC.md` §7).
@@ -41,7 +43,9 @@ import { DEFAULT_BUDGET_TOKENS, input, manifest } from "../src/tools/expand/mani
  *
  * The fixture is one TypeScript file (a class with two methods, a free function, two same-named
  * symbols for the tie) plus a folder whose coverage is half indexed and half skipped, because
- * those are the four inference answers the task's acceptance criteria name.
+ * those are the four inference answers the task's acceptance criteria name. The same fake reader
+ * also pins that all three tools publish the graph's skip total while each prints its own scope's
+ * count.
  */
 
 const ROOT_GENERATION = "g-2";
@@ -141,6 +145,36 @@ function fileRow(id: number, path: string, sha256: string, lineCount: number): I
     indexedGeneration: ROOT_GENERATION,
   };
 }
+
+/** Six skipped paths no requested prefix covers, plus the folder's own: this fixture's graph
+ * count (7) deliberately exceeds what `rowsForPaths` can reach (1), because a fixture whose two
+ * counts coincide cannot tell the repo-wide total from the scope's count. */
+const OUTSIDE_SKIPS: readonly SkippedPathRow[] = [
+  {
+    id: 30,
+    path: "docs/legacy.xslt",
+    reason: "grammar_unavailable",
+    detail: null,
+    language: null,
+  },
+  {
+    id: 31,
+    path: "docs/notes.markdown",
+    reason: "grammar_unavailable",
+    detail: null,
+    language: null,
+  },
+  { id: 32, path: "scripts/build.sh", reason: "unsupported_ext", detail: null, language: null },
+  { id: 33, path: "vendor/min.js", reason: "size_cap", detail: null, language: null },
+  { id: 34, path: "assets/logo.svg", reason: "unsupported_ext", detail: null, language: null },
+  {
+    id: 35,
+    path: "config/settings.yaml",
+    reason: "unsupported_ext",
+    detail: null,
+    language: null,
+  },
+];
 
 function makeFixture(): {
   reader: GraphReader;
@@ -298,8 +332,8 @@ function makeFixture(): {
     unresolvedForFiles: () => [],
     fileByPath: (path) => files.get(path) ?? null,
     allFiles: () => [...files.values()],
-    notIndexedAll: () => [],
-    notIndexedCount: () => 0,
+    notIndexedAll: () => [...OUTSIDE_SKIPS, skipped],
+    notIndexedCount: () => OUTSIDE_SKIPS.length + 1,
     testsCensus: () => ({ nodes: 0, languages: [] }),
     censusByLanguage: () => [{ language: "typescript", files: 3, parsed: 3, failed: 0 }],
     metaFor: () => ({
@@ -613,7 +647,10 @@ describe("expand: inference", () => {
     ]);
     expect(env.coverage.complete).toBe(false);
     expect(env.totals.files_total).toBe(1);
-    expect(env.totals.not_indexed_total).toBe(1);
+    // The total is the graph's, so it exceeds this prefix's own count instead of echoing it.
+    expect(env.totals.not_indexed_total).toBe(OUTSIDE_SKIPS.length + 1);
+    expect(env.coverage.skipped).toBe(1);
+    expect(env.summary).toContain("1 not indexed");
   });
 
   test("an explicit what wins and is echoed as requested, not inferred", async () => {
@@ -636,6 +673,50 @@ describe("expand: inference", () => {
     expect(payload.prefix).toBe(A_PATH);
     expect(payload.target.kind).toBe("class");
     expect(payload.files.map((file) => file.path)).toEqual([A_PATH]);
+  });
+});
+
+describe("expand: the graph's skip total versus the scope's count", () => {
+  let ctx: ToolContext;
+
+  beforeAll(() => {
+    repoRoot = mkdtempSync(join(tmpdir(), "sangkar-expand-total-"));
+    dirs.push(repoRoot);
+    mkdirSync(join(repoRoot, "src", "widgets"), { recursive: true });
+    writeFileSync(join(repoRoot, A_PATH), "export function a(): void {}\n", "utf8");
+    writeFileSync(join(repoRoot, FOLDER_PREFIX, "x.ts"), "export function x(): void {}\n", "utf8");
+    ctx = makeContext(makeFixture().reader, repoRoot);
+  });
+
+  afterAll(() => {
+    for (const dir of dirs) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  // One generation, three tools, one number: `coverage.skipped` stays the scope's, and the
+  // summary sentences keep printing that smaller count.
+  test("status, summary and expand agree on totals.not_indexed_total for one generation", async () => {
+    const expanded = await handle(ctx, { target: FOLDER_PREFIX });
+    const statusEnv = statusHandle(ctx, { paths: [FOLDER_PREFIX] });
+    const summaryEnv = await summaryHandle(ctx, { scope: "area", target: FOLDER_PREFIX });
+
+    const expectedTotal = OUTSIDE_SKIPS.length + 1;
+    const published = [
+      expanded.totals.not_indexed_total,
+      statusEnv.totals.not_indexed_total,
+      summaryEnv.totals.not_indexed_total,
+    ];
+    expect(published).toEqual([expectedTotal, expectedTotal, expectedTotal]);
+    expect(expanded.status).toBe("ok");
+    expect(statusEnv.status).toBe("ok");
+    expect(summaryEnv.status).toBe("ok");
+    // The scope still prints its own one skip, and says so in words as well as in `coverage`.
+    expect(expanded.coverage.skipped).toBe(1);
+    expect(coverageOf(expanded).not_indexed.length).toBe(1);
+    expect(expanded.summary).toContain("1 not indexed");
+    expect(expanded.summary).not.toContain(`${expectedTotal} not indexed`);
+    expect(statusEnv.coverage.skipped).toBe(1);
   });
 });
 
