@@ -1,6 +1,6 @@
 import { Database } from "bun:sqlite";
 import { afterAll, describe, expect, test } from "bun:test";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -8,8 +8,10 @@ import { type AppConfig, loadConfig } from "#shared/config";
 import { openReader } from "#shared/store/db";
 import { migrate, schemaVersion } from "#shared/store/migrate";
 import { beginWrite, withStage } from "#shared/store/publish";
+import type { ToolContext } from "#shared/store/read/context";
 import { makeReader } from "#shared/store/read/reader";
 import { fingerprintOf, openStore, refreshStore, type Store } from "../src/index";
+import { handle } from "../src/tools/status/handler";
 
 /**
  * The store is re-opened on a newer generation instead of answering from the one it started with.
@@ -20,6 +22,13 @@ import { fingerprintOf, openStore, refreshStore, type Store } from "../src/index
  * re-open), a published second generation (a swap, and the old handle closed), a newer schema (a
  * refusal that keeps the previous reader), a cursor that outlived its generation (refused), and the
  * absent → ready flow a server started before the first index goes through.
+ *
+ * Two more cases drive `status` over those same published files, because `graph.size_bytes` is the
+ * one payload field that can be read from the wrong file: it has to be the size of the file the
+ * reader opened, not of whatever is at `graph.db` when the answer is built. One swaps in a padded
+ * generation and then publishes a third that nobody refreshed into the handle; the other is refused
+ * a newer-schema copy and keeps serving the size it opened while the file on disk has grown. A live
+ * `stat` would print the larger number in both.
  *
  * The last case is the one only an end-to-end run can show: a spawned `sangkar mcp` answering
  * `status`, a *different* process publishing over its data dir, and the same session reporting the
@@ -103,12 +112,28 @@ function configFor(f: Fixture): AppConfig {
   });
 }
 
+interface PublishOptions {
+  /** Bytes of one padding `meta` value, so the published file is provably a different size. */
+  readonly paddingBytes?: number;
+  /** `1` models a graph written by a build that ships one more migration than this one. */
+  readonly schemaVersionOffset?: number;
+}
+
 /**
  * Publishes one generation the way the worker does: `migrate()` on the stage (the only schema
  * author a fresh data dir has), one transaction writing the `generation` row plus the `meta` keys
  * the reader reads back, then `withStage`'s seal and rename.
+ *
+ * `options` is for the cases that need the file to differ in a way the graph does not: padding a
+ * value makes the publish demonstrably larger, and a schema offset makes it unservable. Both land
+ * inside the transaction that already writes `meta`, so a stage is never half of either.
  */
-async function publish(f: Fixture, generation: string, seq: number): Promise<void> {
+async function publish(
+  f: Fixture,
+  generation: string,
+  seq: number,
+  options: PublishOptions = {},
+): Promise<void> {
   await withStage(f.dbPath, (staged) => {
     const scope = beginWrite(staged.path);
     try {
@@ -128,6 +153,12 @@ async function publish(f: Fixture, generation: string, seq: number): Promise<voi
         // The root the guard compares: the fixture tree itself, so a refresh is not refused.
         upsertMeta.run("project_root", f.repoRoot);
         upsertMeta.run("project_name", "refresh-fixture");
+        if (options.paddingBytes !== undefined) {
+          upsertMeta.run("test.padding", "x".repeat(options.paddingBytes));
+        }
+        if (options.schemaVersionOffset !== undefined) {
+          upsertMeta.run("schema_version", String(schemaVersion() + options.schemaVersionOffset));
+        }
       });
     } finally {
       scope.close();
@@ -282,6 +313,77 @@ describe("refreshStore: the file on disk decides, never the store variant", () =
     expect(refreshStore(ready, config)).toBe(ready);
     expect(ready.context.reader.metaFor().generation).toBe("g-f00001");
     ready.conn.close();
+  });
+});
+
+/** Enough padding that a published generation cannot share the previous file's size by accident. */
+const PAD = 64 * 1024;
+
+/**
+ * The size `status` publishes for the graph file. Narrowed through the payload so a bootstrapping
+ * or error answer fails here instead of comparing `undefined` against a byte count.
+ */
+function graphSize(ctx: ToolContext): number | undefined {
+  const env = handle(ctx);
+  return env.payload === null ? undefined : env.payload.graph.size_bytes;
+}
+
+describe("status graph.size_bytes: the file the reader opened", () => {
+  test("an accepted swap reports the size it opened, not the third file at the same path", async () => {
+    const f = await fixture("size-swap");
+    const config = configFor(f);
+    await publish(f, "g-e00001", 1);
+
+    const first = readyOf(openStore(config));
+    const size1 = statSync(f.dbPath).size;
+    expect(first.context.dbSizeBytes).toBe(size1);
+    expect(graphSize(first.context)).toBe(size1);
+
+    await publish(f, "g-e00002", 2, { paddingBytes: PAD });
+    const size2 = statSync(f.dbPath).size;
+    // The guard against a vacuous case: a publish that did not grow the file would make every
+    // equality below true for the wrong reason.
+    expect(size2).not.toBe(size1);
+
+    const second = readyOf(refreshStore(first, config));
+    expect(second.context.dbSizeBytes).toBe(size2);
+    expect(graphSize(second.context)).toBe(size2);
+
+    // A third generation, published and deliberately not refreshed into this handle: a live `stat`
+    // while building the answer would print `size3`, which is a file this reader never opened.
+    await publish(f, "g-e00003", 3, { paddingBytes: 2 * PAD });
+    const size3 = statSync(f.dbPath).size;
+    expect(size3).not.toBe(size2);
+    expect(second.context.reader.metaFor().generation).toBe("g-e00002");
+    expect(graphSize(second.context)).toBe(size2);
+    expect(graphSize(second.context)).not.toBe(size3);
+    second.conn.close();
+  });
+
+  test("a refused newer-schema publish keeps reporting the size the previous reader opened", async () => {
+    const f = await fixture("size-refused");
+    const config = configFor(f);
+    await publish(f, "g-f00001", 1);
+
+    const before = readyOf(openStore(config));
+    const served = statSync(f.dbPath).size;
+    expect(before.context.dbSizeBytes).toBe(served);
+
+    // A copy that is both larger and unservable: the refusal is what leaves the old reader serving
+    // a generation whose size no longer matches the file at that path.
+    await publish(f, "g-f00002", 2, { paddingBytes: 8 * PAD, schemaVersionOffset: 1 });
+    const unserved = statSync(f.dbPath).size;
+    expect(unserved).toBeGreaterThan(served);
+
+    const refused = readyOf(refreshStore(before, config));
+    expect(refused.conn).toBe(before.conn);
+    expect(refused.staleReason).toBe("a newer generation could not be opened");
+    expect(refused.context.reader.metaFor().generation).toBe("g-f00001");
+    // The persistent divergence of issue #13, stated as a number: the answer is the served size,
+    // while the file on disk — and any `stat` taken while answering — is `unserved`.
+    expect(graphSize(refused.context)).toBe(served);
+    expect(graphSize(refused.context)).not.toBe(unserved);
+    refused.conn.close();
   });
 });
 

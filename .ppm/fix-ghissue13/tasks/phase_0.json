@@ -128,7 +128,7 @@
         ],
         "verify": "Done when `bun run typecheck` exits 0, `bun run lint` exits 0, `bun test tests/read-files.test.ts tests/store-refresh.test.ts tests/tools-status.test.ts` reports `54 pass / 0 fail` (22 + 7 + 25, the measured baseline — no test file is edited in this phase), `git status --porcelain` lists exactly the four modified plan files of this phase plus the two untracked plan directories `?? .ppm/fix-ghissue13/` and `?? .ppm/fix-ghissue14/` and nothing else (`.ppm/fix-ghissue14/` is pre-existing and out of scope; a mismatch is reported, never repaired), and `stat -c '%s %Y' .sangkar/graph.db` still prints `4677632 1795158731`. Record every command's output tail in `progress`."
       },
-      "status": "in_progress",
+      "status": "completed",
       "progress": [
         {
           "time": "2026-11-20T08:11:55Z",

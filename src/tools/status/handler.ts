@@ -18,7 +18,9 @@
  *   the reason it is handed; it does not decide whether the answer is stale.
  * - `graph.db_path` and `graph.size_bytes`: `GraphReader` deliberately exposes no database path, so
  *   the path is derived from the injected `ctx.config.dataDir` — never from the environment — and
- *   the size is a `stat` of that file.
+ *   the size is the one recorded when the reader opened that file (`ctx.dbSizeBytes`); a `stat` of
+ *   the derived path is only the fallback for a context that carries no record, because a publish
+ *   can rename a new file over the path.
  *
  * The arithmetic behind `coverage` is the one place this handler has to be careful. A scope answers
  * about itself: `coverage.skipped` counts exactly the rows `coverage.not_indexed` lists, so the two
@@ -229,7 +231,7 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
     graph: {
       nodes: generationRow.nodes,
       edges: generationRow.edges,
-      size_bytes: dbSizeBytes(ctx, dbPath),
+      size_bytes: sizeBytesOf(ctx, dbPath),
       db_path: dbPath,
     },
     unresolved: {
@@ -479,9 +481,11 @@ function entryForFile(file: IndexedFileRow, symbols?: number): StatusPath {
 }
 
 /**
- * The graph file's size, or `0` when it cannot be read. `0` is not a fallback for "unknown size" —
- * it is reported next to `nodes`/`edges`, so a zero with a non-zero node count reads as "the file
- * was not statable" and the reason goes to the log instead of into the payload.
+ * The graph file's size as a `stat` of `dbPath`, or `0` when it cannot be read — the fallback for a
+ * context that carries no recorded size (a hand-written one), and the only answer available there.
+ * `0` is not a fallback for "unknown size" — it is reported next to `nodes`/`edges`, so a zero with
+ * a non-zero node count reads as "the file was not statable" and the reason goes to the log instead
+ * of into the payload.
  */
 function dbSizeBytes(ctx: ToolContext, dbPath: string): number {
   try {
@@ -493,6 +497,17 @@ function dbSizeBytes(ctx: ToolContext, dbPath: string): number {
     });
     return 0;
   }
+}
+
+/**
+ * The graph file's size in bytes, preferring what was recorded when the reader opened it
+ * (`ToolContext.dbSizeBytes`): a publish renames a new file over `graph.db`, so a `stat` taken here
+ * can describe a generation this handle is not serving. The stat below is the fallback for a
+ * hand-written context that carries no record, where it is still the only answer available.
+ */
+function sizeBytesOf(ctx: ToolContext, dbPath: string): number {
+  const recorded = ctx.dbSizeBytes;
+  return typeof recorded === "number" ? recorded : dbSizeBytes(ctx, dbPath);
 }
 
 /**
