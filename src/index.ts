@@ -138,7 +138,7 @@ const DB_FILE = "graph.db";
  * indexer and the tool modules — and a second copy of the version is cheaper than a boundary hole.
  */
 const SERVER_NAME = "sangkar";
-const SERVER_VERSION = "0.2.0-beta.1";
+const SERVER_VERSION = "0.2.0-beta.2";
 
 /**
  * The coverage a response claims when no handler assembled one: nothing is indexed *by this answer*,
