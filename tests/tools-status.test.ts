@@ -18,7 +18,12 @@ import type {
   NodeRow,
 } from "#shared/store/read/reader";
 import { handle, type StatusEnvelope, type StatusPayload } from "../src/tools/status/handler";
-import { input, manifest, STATUS_RETRY_AFTER_MS } from "../src/tools/status/manifest";
+import {
+  input,
+  manifest,
+  STATUS_DEFAULT_TOKENS,
+  STATUS_RETRY_AFTER_MS,
+} from "../src/tools/status/manifest";
 
 /**
  * `status` against a fake reader (TOOLS-SPEC.md §2).
@@ -838,6 +843,46 @@ describe("status: skipped count and the repo-wide total", () => {
     // Truncation cuts the list, never the arithmetic: the counts stay the numbers that were counted.
     expect(env.coverage.skipped).toBe(60);
     expect(totalOf(env, "not_indexed_total")).toBe(60);
+  });
+
+  test("the default budget is serviceable with a repository-stamped cursor", () => {
+    // The composition root binds the cursor to the repository's canonical path, which puts that
+    // path in every minted token — and `emit` fills against a reserved placeholder, so a token
+    // longer than the reserve spends the difference after the cut is decided. With the placeholder
+    // short of the real 298-byte token, this call answered `budget_too_large` at its own default on
+    // a repository with 127 skipped paths; the reserve in `budget.ts` is what fixes that, and this
+    // test is the tool-level guard on it.
+    const skippedRows = Array.from({ length: 120 }, (_unused, index) =>
+      skippedRow(
+        200 + index,
+        `assets/generated/binary_${String(index).padStart(3, "0")}.png`,
+        "binary",
+        null,
+      ),
+    );
+    const fixture: Fixture = {
+      files: [fileRow(1, "src/a.ts", "typescript")],
+      notIndexed: skippedRows,
+    };
+    const ctx: ToolContext = {
+      ...contextFor(fixture),
+      cursor: createCursors({
+        key: CURSOR_KEY,
+        repoId: "/home/ljosalfar-server/Documents/researchs/codegraph-mcp",
+      }),
+    };
+
+    const env = handle(ctx);
+
+    expect(env.status).toBe("ok");
+    expect(env.truncated).toBe(true);
+    expect(env.next).not.toBeNull();
+    expect(Buffer.byteLength(JSON.stringify(env), "utf8")).toBeLessThanOrEqual(
+      STATUS_DEFAULT_TOKENS * BYTES_PER_TOKEN,
+    );
+    // The cut still reports what it left out.
+    expect(env.coverage.not_indexed.length).toBeLessThan(120);
+    expect(env.coverage.skipped).toBe(120);
   });
 });
 

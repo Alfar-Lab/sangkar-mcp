@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { BYTES_PER_TOKEN, emit, MAX_BUDGET_TOKENS } from "#shared/budget";
+import { createCursors } from "#shared/cursor";
 import { type Coverage, type EnvelopeSpec, ok, type ReadStatus } from "#shared/envelope";
 import { AppError } from "#shared/errors";
 
@@ -605,5 +606,73 @@ describe("emit: trimming the envelope-level coverage list", () => {
     expect(bytes(cut)).toBeLessThanOrEqual((smallestHonoured - 2) * BYTES_PER_TOKEN);
     expect(cut.truncated).toBe(true);
     expect(spy.positions).toHaveLength(1);
+  });
+});
+
+describe("emit: the reserve charged for the continuation token", () => {
+  /**
+   * The composition root binds the cursor to the repository's canonical path (`src/index.ts`), so
+   * the token carries that path and grows with it: 210 characters unbound, 298 with this repo's
+   * 53-character root. The reserve in `budget.ts` has to cover the real token, because `emit` fills
+   * against the placeholder and the difference is spent afterwards — when the reserve was 256 and
+   * the stamp arrived, `status` refused its own default budget on a repository with 127 skipped
+   * paths. The path below is deliberately longer than the one that broke it.
+   */
+  const REPO_ROOT = `/home/${"s".repeat(40)}/Documents/researchs/${"nested/".repeat(6)}repo`;
+  const CURSOR_KEY = "budget-test-cursor-key-0123456789abcdef";
+
+  function mintedBy(cursor: ReturnType<typeof createCursors>) {
+    return (position: number): string =>
+      cursor.sign({
+        generation: FRESH.generation,
+        tool: "trace",
+        argsHash: `sha256:${"0".repeat(64)}`,
+        position,
+      });
+  }
+
+  test("a repository-stamped cursor keeps a filled envelope inside its budget", () => {
+    const cursor = createCursors({ key: CURSOR_KEY, repoId: REPO_ROOT });
+    expect(REPO_ROOT.length).toBeGreaterThan(60);
+
+    const env = ok({ calls: items(400, "app") }, baseSpec());
+    let cutRuns = 0;
+    for (const budget of [700, 800, 900, 1000, 1200, 2000]) {
+      const out = emit(env, budget, { mint: mintedBy(cursor) });
+      if (!out.truncated) {
+        continue;
+      }
+      cutRuns += 1;
+      // Byte-exact: not budget + 10 %, the ceiling itself.
+      expect(bytes(out)).toBeLessThanOrEqual(budget * BYTES_PER_TOKEN);
+      // The token in the envelope is the caller's own, signed over this call and this position.
+      expect(
+        cursor.verify(out.next ?? "", {
+          generation: FRESH.generation,
+          tool: "trace",
+          argsHash: `sha256:${"0".repeat(64)}`,
+        }),
+      ).toEqual({
+        ok: true,
+        position: out.payload.calls.length === 400 ? 0 : 400 - out.payload.calls.length,
+      });
+    }
+    expect(cutRuns).toBeGreaterThan(0);
+  });
+
+  test("a cursor bound to a second repository cannot resume this one's page", () => {
+    const alpha = createCursors({ key: CURSOR_KEY, repoId: `${REPO_ROOT}/alpha` });
+    const beta = createCursors({ key: CURSOR_KEY, repoId: `${REPO_ROOT}/beta` });
+    const env = ok({ calls: items(400, "app") }, baseSpec());
+    const out = emit(env, 800, { mint: mintedBy(alpha) });
+
+    expect(out.truncated).toBe(true);
+    expect(
+      beta.verify(out.next ?? "", {
+        generation: FRESH.generation,
+        tool: "trace",
+        argsHash: `sha256:${"0".repeat(64)}`,
+      }),
+    ).toEqual({ ok: false, code: "cursor_mismatch", hint: expect.any(String) });
   });
 });

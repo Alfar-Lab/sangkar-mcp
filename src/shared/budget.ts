@@ -12,9 +12,16 @@ export const MAX_BUDGET_TOKENS = 32_000;
  * drop count is final, so the measurement has to charge for a token it has not seen yet — and a
  * short charge is spent by the real token afterwards: a signed cursor for this app measures 211
  * bytes (base64 JSON envelope, a dot, then the HMAC), so a 128-byte reserve left budget-filling
- * replies up to 83 bytes over their own ceiling. 256 covers it with room for a longer cursor.
+ * replies up to 83 bytes over their own ceiling.
+ *
+ * 384, not the 256 that covered the 211-byte cursor: `cursor.ts` now stamps the repository into the
+ * wire, and this repo's canonical path (53 characters) took the token to 298 bytes — 42 bytes past
+ * the old reserve, so every filled envelope landed over its own ceiling and `status` refused its
+ * default 800 tokens on a repository with 127 skipped paths. The 86 bytes left over pay for a
+ * canonical path of about 139 characters; `tests/budget.test.ts` pins the ceiling at 384 so a
+ * longer one fails there rather than in a client.
  */
-const NEXT_TOKEN_RESERVE_CHARS = 256;
+const NEXT_TOKEN_RESERVE_CHARS = 384;
 
 /** Bytes a drained array serialises to (`[]`): the floor a list can be cut to, never below. */
 const EMPTY_LIST_BYTES = 2;
