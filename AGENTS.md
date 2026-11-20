@@ -269,6 +269,12 @@ the shared corpus) because the edge taxonomies differ. If you add edge kinds, de
   `INDEXING-PIPELINE.md`, `STORAGE-ARCHITECTURE.md`.
 - `docs/research/` — the two reference implementations' analysis and the real MCP payloads captured from them
   (`tool-outputs/`). Those numbers are the oracles the parity tests use.
+- `docs/maintainers.md` — for whoever builds the artifact or cuts a release: distribution, the npm
+  traps, the checks. It does not ship in the npm tarball; the procedure itself is the project skill
+  `.agents/skills/build-n-deploy/SKILL.md`.
+- `README.md` — for users, in a fixed shape: `## sangkar-mcp`, `## Installation & Requirements`,
+  `## Usage` (`### MCP & Skill`, `### CLI`), `## License`, `## Future Works`. Maintainer material
+  belongs in `docs/maintainers.md`, not in a new top-level README section.
 - `docs/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`.
 - `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/`, `.ppm/sangkar-telemetry/` — completed plans;
   `.ppm/sangkar-daemon/` — in progress; task JSON is the execution record for each. Do not edit
