@@ -68,7 +68,7 @@ or a granular access token with 2FA bypass in `~/.npmrc`. Without one the regist
 `E403 ... Two-factor authentication or granular access token with bypass 2fa enabled is required`,
 and nothing is published.
 
-State on 2026-11-23: `beta` serves `0.4.0-beta.1`, published that day. `v0.5.0-beta.1` is tagged and
+State on 2026-11-23: `beta` serves `0.5.0-beta.1`, published that day. `v0.6.0-beta.1` is tagged and
 released on GitHub and reaches the registry on the next publish, which needs the OTP. `v0.3.0-beta.1`
 was tagged without the #13 fix and stays as published — a released number is never moved onto
 different code — so the fix shipped as the next iteration, and `v0.3.0-beta.2` is the first tag
