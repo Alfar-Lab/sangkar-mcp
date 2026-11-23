@@ -160,7 +160,7 @@ for exactly that reason.
 | `duration_ms` | number | the call site's clock around the call (`Date.now()` before and after in `src/index.ts`) |
 | `arg_names_set` | string[] | the names the **request** supplied, deduplicated and sorted (§4.4) |
 | `budget_tokens` | number | the **effective** budget after the manifest default; `0` when the tool declares no `budget` argument (§4.4) |
-| `payload_tokens` | number | `ceil(byteLength(JSON.stringify(envelope)) / BYTES_PER_TOKEN)`, `BYTES_PER_TOKEN = 4`; `0` when there is no envelope |
+| `payload_tokens` | number | `ceil(byteLength(JSON.stringify(envelope)) / BYTES_PER_TOKEN)`, `BYTES_PER_TOKEN = 4`; `0` when there is no envelope. Measured on the JSON envelope, so it is the size of the answer's data rather than of the delivered TOON text |
 | `budget_used_ratio` | number \| null | `payload_tokens / budget_tokens`, rounded to 4 decimals; `null` when `budget_tokens` is `0` |
 | `truncated` | boolean | `envelope.truncated`; `false` when there is no envelope |
 | `truncation_reason` | `TruncationReason \| null` | `envelope.truncation_reason` |

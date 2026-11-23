@@ -34,7 +34,7 @@ verbs
   repo    add, remove, list or configure the repositories this installation serves
 
 tools
-  status   report index status: five human lines, or the envelope with --json
+  status   report index status as a TOON envelope (JSON with --json)
   summary  summarize the current situation in a few hundred tokens
   trace    follow a call chain from one symbol
   search   find symbols or text in the indexed code
@@ -42,10 +42,10 @@ tools
   expand   fetch more detail for one item from a previous result
   index    index the repository (the verb above)
 
-global flags (on either side of the name)
+global flags (either side of the name: the name is the first token that is not one of them)
   --repo-root <path>  the tree to index and serve
   --data-dir <path>   where the graph is stored
-  --json              print the envelope instead of human lines
+  --json              print JSON instead of the default TOON envelope
 
 examples
   sangkar trace 'handleRequest' --depth 1
@@ -61,7 +61,7 @@ const WORKER_FLAGS = "[--mode full|fast] [--force] [--repo-root <path>] [--data-
 
 /** One verb's own flags; `--help` on a verb prints this and exits without running anything. */
 const VERB_USAGE: Readonly<Record<Reserved, string>> = {
-  mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>]",
+  mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>] [--json]",
   worker: `usage: sangkar worker ${WORKER_FLAGS}`,
   index: `usage: sangkar index ${WORKER_FLAGS}`,
   // The three flags `--serve` added to the telemetry verb; the block a refusal prints lives in
@@ -79,6 +79,7 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   status  one header line, then one line per registered repository
   --port <n>     the report server's port (default: config.json's daemon.port, else 7317; 0 picks a free port)
   --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
+  --repo-root, --data-dir and --json are accepted by every subcommand and change nothing here
   --port and --host belong to "run"; start passes neither, so it binds the same defaults`,
   repo: `usage: sangkar repo [add|remove|list|config] <path>
   add <path>                register a tree and print its canonical path
@@ -89,6 +90,7 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   --watch <true|false>      whether the daemon watches this tree (config only)
   --watch-interval <n>      poll period in milliseconds, 1000..300000 (config only)
   --telemetry <true|false>  whether this tree's usage may be recorded (config only)
+  --repo-root, --data-dir and --json are accepted by every subcommand; only list changes with --json
   a relative <path> resolves against the current directory; a leading ~/ is expanded`,
 };
 
@@ -97,15 +99,28 @@ function isReserved(value: string): value is Reserved {
 }
 
 const argv = process.argv.slice(2);
-const requested = argv[0] ?? "mcp";
+// The token that names the verb, found with the global flags already set aside: `sangkar --json
+// status` and `sangkar status --json` must name the same command. Imported here rather than at the
+// top so the runtime preflight above stays the first thing this process does.
+const { resolveCommand } = await import("../src/shared/cli/args");
+const { name, rest, help } = resolveCommand(argv);
+const requested = name ?? "mcp";
 
-if (requested === "--help" || requested === "-h" || requested === "help") {
+// The whole line minus the command's own name. `rest` is always a suffix of `argv`, so the name sits
+// at `argv.length - rest.length - 1`; handing the verbs this line rather than the tail is what makes
+// a global's position irrelevant to every command, not only to the tools.
+const verbArgv: readonly string[] =
+  name === null ? rest : [...argv.slice(0, argv.length - rest.length - 1), ...rest];
+
+// `sangkar --help` names no command, so the whole surface is the answer; `sangkar help` is the same
+// request spelled with a word.
+if ((help && name === null) || requested === "help") {
   process.stdout.write(USAGE);
   process.exit(0);
 }
 
 // Answered before anything runs: `sangkar index --help` must not start an index run.
-if (isReserved(requested) && (argv.includes("--help") || argv.includes("-h"))) {
+if (isReserved(requested) && help) {
   process.stdout.write(`${VERB_USAGE[requested]}\n`);
   process.exit(0);
 }
@@ -121,22 +136,24 @@ const { ensureGlobalConfig } = await import("../src/shared/global-config");
 ensureGlobalConfig(resolveHome(process.env));
 
 // The report needs the telemetry directory and nothing else — no graph, no store, no kernel — so it
-// dispatches here rather than through `main`, which is the only other place a verb could go.
+// dispatches here rather than through `main`, which is the only other place a verb could go. Each
+// verb below receives the line without its own name, global flags still in it: `telemetry` reads
+// `--repo-root`/`--data-dir` itself, and the daemon and repo verbs re-split the rest.
 if (requested === "telemetry") {
   const { runTelemetry } = await import("../src/shared/telemetry/cli");
-  process.exit(await runTelemetry(argv.slice(1)));
+  process.exit(await runTelemetry(verbArgv));
 }
 
 // Same reason, one layer out: the registry is a JSON file and the daemon owns its own process, so
 // neither verb has a graph to load. Both dispatch here, before the kernel below.
 if (requested === "daemon") {
   const { runDaemonCli } = await import("../src/daemon/cli");
-  process.exit(await runDaemonCli(argv.slice(1)));
+  process.exit(await runDaemonCli(verbArgv));
 }
 
 if (requested === "repo") {
   const { runRepoCli } = await import("../src/shared/cli/repo");
-  process.exit(await runRepoCli(argv.slice(1)));
+  process.exit(await runRepoCli(verbArgv));
 }
 
 // Imported lazily: `--help` and an unknown name must exit without loading the kernel.

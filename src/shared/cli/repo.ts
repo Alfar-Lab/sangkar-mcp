@@ -14,8 +14,13 @@
  *
  * stdout carries the answer, one line per result, which is why this module writes there at all;
  * a refusal writes the usage block, and every diagnostic goes through `#shared/log` on stderr.
+ *
+ * The four global flags are accepted next to every subcommand. `--json` changes only `list`'s
+ * answer; every one of them is otherwise inert here, because the registry lives in the machine home
+ * rather than in a tree — a flag that would mean nothing is accepted and ignored, never refused.
  */
 import { resolve } from "node:path";
+import { CliUsageError, splitGlobals } from "#shared/cli/args";
 import { EXIT_FAILURE, EXIT_USAGE } from "#shared/cli/render";
 import { flagValue, loadConfig } from "#shared/config";
 import { log } from "#shared/log";
@@ -46,6 +51,7 @@ const USAGE = `usage: sangkar repo [add|remove|list|config] <path>
   --watch <true|false>      whether the daemon watches this tree (config only)
   --watch-interval <n>      poll period in milliseconds, ${WATCH_INTERVAL_MIN_MS}..${WATCH_INTERVAL_MAX_MS} (config only)
   --telemetry <true|false>  whether this tree's usage may be recorded (config only)
+  --repo-root, --data-dir and --json are accepted by every subcommand; only list changes with --json
   a relative <path> resolves against the current directory; a leading ~/ is expanded`;
 
 /** One flag's value: the boolean or interval it spells, `undefined` when absent, or the refusal. */
@@ -59,10 +65,25 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
+  // The global flags leave the argv before any subcommand reads it, which is what makes `repo add .
+  // --json` an acceptance rather than a stray flag. A value flag with nothing to consume is refused
+  // here with this verb's own block, not the tool one `splitGlobals` was written for; `loadConfig`
+  // below still receives the raw argv, so the two value flags keep whatever effect they had.
+  let globals: ReturnType<typeof splitGlobals>;
+  try {
+    globals = splitGlobals(argv);
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n${USAGE}\n`);
+      return EXIT_USAGE;
+    }
+    throw error;
+  }
+
   // `home` and `registryPath` come from `#shared/config.ts`, the only reader of the environment, so
   // the machine home decides the file here exactly as it does for the daemon.
   const config = loadConfig({ argv });
-  const [verb, ...rest] = argv;
+  const [verb, ...rest] = globals.rest;
 
   switch (verb) {
     case "add": {
@@ -113,12 +134,13 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
     }
 
     case "list": {
-      const stray = unknownFlag(rest, ["json"]);
+      const stray = unknownFlag(rest, []);
       if (stray !== null) {
         return refuse(`"repo list" takes no ${stray}`);
       }
       const registry = readRegistry(config.registryPath, { log });
-      if (rest.includes("--json")) {
+      // `--json` is stripped from `rest` by `splitGlobals`, so the switch is the only record of it.
+      if (globals.json) {
         const document = { version: REGISTRY_VERSION, repos: registry.repos };
         process.stdout.write(`${JSON.stringify(document)}\n`);
         return 0;
@@ -137,15 +159,15 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       if (raw === undefined || raw === "") {
         return refuse("repo config needs a path");
       }
-      const watch = boolFlag(argv, "watch");
+      const watch = boolFlag(rest, "watch");
       if (!watch.ok) {
         return refuse(watch.reason);
       }
-      const telemetry = boolFlag(argv, "telemetry");
+      const telemetry = boolFlag(rest, "telemetry");
       if (!telemetry.ok) {
         return refuse(telemetry.reason);
       }
-      const interval = intervalFlag(argv);
+      const interval = intervalFlag(rest);
       if (!interval.ok) {
         return refuse(interval.reason);
       }

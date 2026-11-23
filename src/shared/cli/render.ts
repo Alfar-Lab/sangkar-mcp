@@ -1,4 +1,12 @@
+import { encode } from "@toon-format/toon";
 import type { Envelope } from "#shared/envelope";
+
+/**
+ * The default TOON rendering, the `--json` JSON rendering, and the exit-code mapping: everything the
+ * two surfaces say about an envelope once a handler has produced it, in one place so the CLI and the
+ * MCP answer cannot disagree about the bytes. TOON is the default because an agent pays for the tokens
+ * of every answer; `--json` stays one-line JSON for a caller that parses stdout.
+ */
 
 /**
  * The two codes a caller returns itself. Everything an envelope describes maps through
@@ -9,49 +17,41 @@ export const EXIT_FAILURE = 1;
 export const EXIT_USAGE = 2;
 
 /**
- * The one line the CLI writes to stdout: the envelope as compact JSON plus a terminating newline,
- * so a caller that captures stdout gets JSON and nothing else.
+ * The envelope as one line of compact JSON plus a terminating newline: the `--json` rendering, and
+ * the shape a caller that captures stdout can parse without knowing TOON.
  */
-export function renderEnvelope(envelope: Envelope<unknown>): string {
+export function renderJson(envelope: Envelope<unknown>): string {
   return `${JSON.stringify(envelope)}\n`;
 }
 
-/** A payload section read structurally; the renderer sees `unknown`, so nothing is assumed. */
-type Fields = Record<string, unknown>;
-
-function fields(value: unknown): Fields | null {
-  return typeof value === "object" && value !== null ? (value as Fields) : null;
+/**
+ * The default rendering: the envelope as TOON (`Token-Oriented Object Notation`) plus a terminating
+ * newline. TOON spells the same JSON data model in fewer tokens, which is what an agent pays for on
+ * every answer; `decode` turns it back into the identical value, so nothing is lost by not being
+ * JSON.
+ */
+export function renderToon(envelope: Envelope<unknown>): string {
+  return `${encode(envelope)}\n`;
 }
 
 /**
- * A field as text. `null` and `undefined` take the fallback, because that is what `??` did in the
- * human output; anything else is stringified so a number still reaches the line.
+ * One envelope, in whichever of the two forms the caller asked for. The only place a CLI rendering
+ * is chosen, so `--json` cannot mean one thing for the tool commands and another for `mcp`.
  */
-function text(source: Fields | null, key: string, fallback: string): string {
-  const value = source?.[key];
-  return value === undefined || value === null ? fallback : String(value);
+export function renderOutput(
+  envelope: Envelope<unknown>,
+  opts: { readonly json: boolean },
+): string {
+  return opts.json ? renderJson(envelope) : renderToon(envelope);
 }
 
 /**
- * The human `status` output: the status line, then, when the envelope carries a payload, the four
- * detail lines an operator reads. Wording is the `runStatus` wording in `src/index.ts`; this is the
- * same text derived from any envelope instead of the status tool's payload type.
+ * The MCP `tools/call` text: the same choice without the trailing newline, because a protocol result
+ * is a string field rather than a line stream and the JSON it replaces never ended in one. Encoding
+ * lives here so this file holds the only `encode` call in the app.
  */
-export function statusLines(envelope: Envelope<unknown>): string {
-  const lines: string[] = [`${envelope.status}: ${envelope.summary}`];
-  const payload = fields(envelope.payload);
-  if (payload !== null) {
-    const project = fields(payload.project);
-    const graph = fields(payload.graph);
-    const health = fields(payload.health);
-    lines.push(
-      `project  ${text(project, "name", "unknown")} (${text(project, "root", "unrecorded")})`,
-      `database ${text(project, "db_path", "unknown")}`,
-      `graph    ${text(graph, "nodes", "unknown")} nodes, ${text(graph, "edges", "unknown")} edges, ${text(graph, "size_bytes", "unknown")} bytes`,
-      `health   ${text(health, "indexer", "unknown")}, ${text(health, "consecutive_failures", "unknown")} consecutive failures`,
-    );
-  }
-  return `${lines.join("\n")}\n`;
+export function mcpText(envelope: Envelope<unknown>, outputJson: boolean): string {
+  return outputJson ? JSON.stringify(envelope) : encode(envelope);
 }
 
 /** The process code an envelope earns: a positive or negative answer is 0, the two failures are not. */

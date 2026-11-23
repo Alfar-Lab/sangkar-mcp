@@ -22,7 +22,7 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
 | Naming | bare verbs, no `_tool` suffix | 174 invalid-name attempts / 166 errors in the measured runs, largely suffix and CLI-name confusion |
 | Required args | **at most one** per tool | CRG's 2-arg `query_graph` carried an 11.2 % error rate; argument *count* is a bigger error source than argument *type* |
 | Repo identity | **no `project` argument anywhere**; the only repository argument is `repo` (§1.3), which *selects* among trees the operator already registered | CBM spent 12.4 % of its calls on `list_projects` re-discovering a path slug |
-| Output | always the same JSON envelope; never a rendered table | the agent parses it; rendering is the client's job |
+| Output | always the same envelope, and the same field names; **encoded as TOON by default on both surfaces**, one line of JSON under `--json` (CLI) or `sangkar mcp --json` (protocol) | the agent parses it; rendering is the client's job — and a TOON tabular row (`key[N]{f1,f2}:`) is still structure the agent parses, not a table rendered for a human |
 | Detail on demand | `cursor` on list tools, `expand(target)` for one item | replaces `detail_level`, `max_*`, `include_source`, `include_neighbors` — the flag explosion both parents grew |
 | Budget | every tool takes `budget` (tokens), always optional, always small by default | CRG's hand-tuned per-tool ceilings were breached 3× on a 530-file repo |
 | Ambiguity | never guess; return candidates | a confident answer about the wrong node is worse than "ambiguous" |
@@ -61,6 +61,13 @@ shapes and magnitudes are plausible rather than invented from nothing. Two rules
 ```
 
 `status` ∈ `ok | ambiguous | not_found | error | bootstrapping`.
+
+The block above is the *shape*, written as JSON because that is what a reader can check field by
+field. What is delivered is TOON — the same keys, the same values, the same nesting, spelled in fewer
+tokens (`encode`/`decode` in `@toon-format/toon` round-trip it losslessly) — unless the caller asked
+for JSON with `--json`, or with `sangkar mcp --json` on the protocol surface. Neither rendering
+alters a field name or a value: a TOON `not_indexed[N]{path,reason}:` block is a header plus N pairs,
+not a table rendered for a human.
 
 **`totals`.** Every list a payload carries gets one `<list>_total` key, and a total is
 `number | null`:
@@ -1036,7 +1043,7 @@ CBM's `detect_changes` alone takes 9 optional arguments.
 | Refused | Measured cost |
 |---|---|
 | A tool per output size (`detail_level`, `verbose`, `diagnostics`) | 13 of 30 CRG tools carry a `detail_level`; none is validated, so an unknown value silently means `standard` |
-| `format: tree|json` | every CBM payload is a rendered table by default, so agents parse text that was meant for humans |
+| `format: tree|json` | every CBM payload is a rendered table by default, so agents parse text that was meant for humans — the opposite failure from this spec's TOON default, which is the JSON data model in a cheaper spelling, not a drawing of it |
 | `project` on every tool | 12.4 % of CBM calls were `list_projects` |
 | Free-form query language | 0 calls vs 884 for a constrained enum |
 | Source snippets in query payloads | `get_code_snippet` + `get_file_outline` ≈ 0 calls |

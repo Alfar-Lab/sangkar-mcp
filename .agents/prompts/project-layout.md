@@ -7,7 +7,7 @@ make this shape mandatory are in [`rules.md`](rules.md).
 
 ```
 bin/sangkar.ts              entry point: mcp (default) | worker | index | telemetry | daemon | repo,
-                            then a tool name
+                            then a tool name — the name is the first token that is not a global flag
 src/index.ts                composition root: builds ToolContext, registers tools, serves the repository
                             each call selects from the reader pool, registers the repo a successful
                             `index` run touched, installs SIGINT/SIGTERM, maps handler throws to
@@ -33,7 +33,11 @@ src/shared/                 kernel + engine — the only cross-module import tar
                             telemetry, each narrowing the machine default; a bad file or field falls
                             back to that default, recordingEnabled()
   pidlock.ts                the daemon's pid file: acquire, heartbeat, release, stale reclaim
-  cli/args.ts, cli/render.ts  shared CLI parsing and the human-line renderer
+  cli/args.ts               the one parser, driven by the manifests: `splitGlobals` for the four global
+                            flags, `resolveCommand` for the name with globals on either side of it,
+                            `parseArgs`/`parseCliArgs` for the call itself
+  cli/render.ts             the only place a rendering is chosen: `renderToon` by default, `renderJson`
+                            under `--json`, `mcpText` for the protocol result, `exitCodeOf`
   cli/repo.ts               the `repo` verb: add, remove, list, config
   store/schema.ts           Drizzle table definitions (eleven tables)
   store/migrations/         0000_init.sql + meta/ (drizzle-kit) and raw/0001_fts.sql (FTS5)

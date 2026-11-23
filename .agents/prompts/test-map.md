@@ -15,7 +15,8 @@ Which tests guard which change. Entry point: [`AGENTS.md`](../../AGENTS.md).
 | the index pipeline end to end | `worker.test.ts`, `index-integration.test.ts`, `watch.test.ts`, `parser-parity.test.ts` |
 | one tool's payload or defaults | `tools-<name>.test.ts` |
 | registration, profiles, stdio discipline | `mcp-surface.test.ts`, `tools-smoke.test.ts` |
-| the CLI surface | `cli.test.ts`, `cli-args.test.ts`, `cli-render.test.ts` |
+| the CLI surface | `cli.test.ts`, `cli-args.test.ts` (the parser, `splitGlobals`, and `resolveCommand` finding the name with a global flag before it) |
+| the envelope's two renderings and the exit codes | `cli-render.test.ts` (TOON by default, one-line JSON under `--json`, the same value in both, and `exitCodeOf`) |
 | the registry file, and how a call selects a repository | `registry.test.ts` |
 | the per-repo settings file, its defaults and its clamp | `repo-config.test.ts` |
 | the machine-level `config.json`, its creation and its precedence | `global-config.test.ts` |

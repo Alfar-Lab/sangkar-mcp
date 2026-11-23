@@ -14,7 +14,7 @@ export is part of the command: `PATH="$HOME/.bun/bin:$PATH"`.
 ```sh
 bun install
 bun run bin/sangkar.ts index          # first index; until then every tool answers bootstrapping
-bun run bin/sangkar.ts status         # five human lines; add --json for the envelope
+bun run bin/sangkar.ts status         # the envelope as TOON; add --json for one line of JSON
 bun run bin/sangkar.ts trace 'handleRequest' --depth 1
 bun run mcp                           # MCP server on stdio
 ```

@@ -5,6 +5,7 @@ import {
   type InputLiteral,
   parseArgs,
   parseCliArgs,
+  resolveCommand,
   splitGlobals,
   usageOf,
 } from "#shared/cli/args";
@@ -132,6 +133,76 @@ describe("cli args: globals", () => {
       expect(refusal.message).toBe(`${flag} needs a value`);
       expect(refusal.usage).toContain("--repo-root");
     }
+  });
+});
+
+describe("cli args: where the command name sits", () => {
+  test("a global flag before the name does not hide it", () => {
+    // The entry point needs the name before any config exists, so `sangkar --json status` and
+    // `sangkar status --json` have to name the same command.
+    const cases: readonly (readonly [readonly string[], string])[] = [
+      [["--json", "status"], "status"],
+      [["--repo-root", "/x", "status"], "status"],
+      [["--repo-root=/x", "status"], "status"],
+      [["--data-dir", "/d", "--json", "trace", "q"], "trace"],
+    ];
+    for (const [argv, name] of cases) {
+      expect({ argv, name: resolveCommand(argv).name }).toEqual({ argv, name });
+    }
+    // The tail is every token after the name: the globals before it are the entry point's, the
+    // ones after it are the command's own to strip.
+    expect(resolveCommand(["--data-dir", "/d", "--json", "trace", "q"]).rest).toEqual(["q"]);
+  });
+
+  test("globals after the name are kept for the command to consume", () => {
+    expect(resolveCommand(["status", "--json"])).toEqual({
+      name: "status",
+      rest: ["--json"],
+      help: false,
+    });
+    expect(resolveCommand(["status", "--repo-root", "/x"])).toEqual({
+      name: "status",
+      rest: ["--repo-root", "/x"],
+      help: false,
+    });
+    // Including a value flag whose value is the last token: nothing is consumed before the name, so
+    // the command sees exactly what the user typed and refuses the missing value itself.
+    expect(resolveCommand(["trace", "--data-dir"]).rest).toEqual(["--data-dir"]);
+  });
+
+  test("no name at all resolves to null, and nothing is left over", () => {
+    for (const argv of [[], ["--json"], ["--repo-root"], ["--repo-root="], ["--help"], ["-h"]]) {
+      const resolution = resolveCommand(argv);
+      expect({ argv, name: resolution.name }).toEqual({ argv, name: null });
+      expect(resolution.rest).toEqual([]);
+    }
+  });
+
+  test("--help anywhere sets help, and the name is still found", () => {
+    for (const argv of [
+      ["trace", "--help"],
+      ["--help"],
+      ["-h", "trace"],
+      ["--data-dir", "/d", "--help", "status"],
+    ]) {
+      expect({ argv, help: resolveCommand(argv).help }).toEqual({ argv, help: true });
+    }
+    expect(resolveCommand(["trace", "--help"]).name).toBe("trace");
+    expect(resolveCommand(["--help"]).name).toBeNull();
+  });
+
+  test("a value flag with nothing to consume is skipped rather than refused", () => {
+    // This scan runs before a usage block exists, so it may not throw: the spaced form reads the
+    // next token as its value when that token is not a flag, and otherwise consumes nothing and
+    // lets the following token name the command.
+    expect(resolveCommand(["--repo-root", "--json", "status"])).toEqual({
+      name: "status",
+      rest: [],
+      help: false,
+    });
+    expect(resolveCommand(["--repo-root"])).toEqual({ name: null, rest: [], help: false });
+    // A value written inline is its own token, so the name follows immediately.
+    expect(resolveCommand(["--repo-root=", "status"]).name).toBe("status");
   });
 });
 
@@ -293,7 +364,9 @@ describe("cli args: usage", () => {
       const lines = usage.split("\n");
       expect(lines[0]?.startsWith(`sangkar ${tool}`)).toBe(true);
       expect(lines.length).toBe(Object.keys(input).length + 2);
-      expect(lines.at(-1)).toBe("global options: --repo-root <path>, --data-dir <path>, --json");
+      expect(lines.at(-1)).toBe(
+        "global options: --repo-root <path>, --data-dir <path>, --json (JSON instead of TOON)",
+      );
       for (const name of Object.keys(input)) {
         expect(usage).toContain(`--${name} <`);
       }

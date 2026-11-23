@@ -124,6 +124,54 @@ export function splitGlobals(argv: readonly string[]): {
 }
 
 /**
+ * Where the command name sits in argv, and what is left for the command once it is removed. The
+ * entry point needs this before any config is loaded, because the token that names the verb is also
+ * the token that decides whether a verb or a tool answers.
+ */
+export interface CommandResolution {
+  /** The first token that is neither a global switch nor a global value flag's value. */
+  readonly name: string | null;
+  /** Every token after `name`, unchanged, globals retained. */
+  readonly rest: readonly string[];
+  /** `--help` or `-h` anywhere in argv. */
+  readonly help: boolean;
+}
+
+/**
+ * The command name and its tail, found without validating anything: the global flags are known here,
+ * so `sangkar --json status` and `sangkar status --json` name the same command. A value flag with
+ * nothing to consume is skipped on its own rather than refused — this scan runs before a usage block
+ * exists to refuse with, so the verb or the tool reads the dangling token later and says so.
+ */
+export function resolveCommand(argv: readonly string[]): CommandResolution {
+  // Read across the whole line, not just the tokens ahead of the name: `sangkar trace --help` must
+  // refuse to run anything, and the name is only known after the globals are skipped.
+  const help = argv.some((token) => token === "--help" || token === "-h");
+
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i] ?? "";
+    if (token === "--json") {
+      continue;
+    }
+    if (token === "--help" || token === "-h") {
+      continue;
+    }
+    if (token.startsWith("--") && isGlobalValueFlag(nameOf(token))) {
+      // The `=value` form carries its value in the token; the spaced form consumes the next one
+      // only when there is one that is not another flag.
+      const next = argv[i + 1];
+      if (inlineValueOf(token) === undefined && next !== undefined && !next.startsWith("--")) {
+        i += 1;
+      }
+      continue;
+    }
+    return { name: token, rest: argv.slice(i + 1), help };
+  }
+
+  return { name: null, rest: [], help };
+}
+
+/**
  * The one field a bare token may bind: the single required string argument of the tool. `trace`,
  * `search` and `expand` each declare exactly one, which is what makes `sangkar search pom.xml` the
  * obvious spelling; a literal whose required field is an enum, or which has two required fields,
@@ -417,7 +465,9 @@ export function usageOf(tool: string, input: InputLiteral): string {
     const description = field.description === undefined ? "" : `  ${field.description}`;
     return `  --${name} <${field.type}>${marks}${description}`;
   });
-  return [header, ...fields, "global options: --repo-root <path>, --data-dir <path>, --json"].join(
-    "\n",
-  );
+  return [
+    header,
+    ...fields,
+    "global options: --repo-root <path>, --data-dir <path>, --json (JSON instead of TOON)",
+  ].join("\n");
 }

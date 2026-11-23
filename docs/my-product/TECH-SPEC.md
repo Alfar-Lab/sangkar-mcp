@@ -30,6 +30,7 @@ Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
 | `new Bun.Transpiler().scan()` | yes — returns `{imports:[{kind,path}], exports}` without executing | dependency-free, AST-accurate boundary test |
 | npm registry reachable | yes | deps installable |
 | `@modelcontextprotocol/sdk` | 1.32.2 | official TS SDK |
+| `@toon-format/toon` | 4.4.0, `encode`/`decode` round-trip the same value | the envelope's default rendering on both surfaces; `--json` keeps one-line JSON |
 | `web-tree-sitter` / `tree-sitter-wasms` / `@vscode/tree-sitter-wasm` | 0.27.2 / 0.1.13 / 0.3.1 | parser options, §9 |
 | `tree-sitter-language-pack` (CRG's parser source) | npm `latest` unresolvable — it is a **PyPI** package | CRG's exact parser stack cannot be reused; a WASM stack replaces it |
 
@@ -540,7 +541,8 @@ Usage telemetry is the second write path, and it is local-only: records go to
 gated by the consent chain — `SANGKAR_TELEMETRY`, else `<home>/config.json`'s `telemetry`
 (`shared/config.ts`, §5.1; `TELEMETRY.md` §2). It changes none of the rules above — a record
 is written from a `finally` after the answer, a throwing sink is logged once and disabled instead of
-propagating, and `sangkar telemetry` prints one human line, exactly like a tool call. The record
+propagating, and `sangkar telemetry` answers with one human line about the file or the page it wrote,
+never with an envelope. The record
 schemas and the privacy prohibition are specified in [TELEMETRY.md](TELEMETRY.md) and are not repeated
 here, because a second copy is the thing that drifts.
 

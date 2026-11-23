@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { type AppConfig, loadConfig } from "#shared/config";
 import { openReader } from "#shared/store/db";
 import { migrate, schemaVersion } from "#shared/store/migrate";
@@ -558,7 +559,9 @@ async function openServer(f: Fixture): Promise<ServerSession> {
       if (typeof text !== "string") {
         throw new Error(`${name}: the tool result carried no text`);
       }
-      return JSON.parse(text) as Answer;
+      // TOON by default: this server is not started with `--json`, so `decode` is how a client reads
+      // the answer.
+      return decode(text) as unknown as Answer;
     },
     async finish() {
       if (finished) {

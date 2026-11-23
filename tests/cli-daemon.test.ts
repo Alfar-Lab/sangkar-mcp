@@ -1,6 +1,6 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { existsSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { canonicalRoot } from "#shared/registry";
@@ -170,6 +170,29 @@ describe("sangkar repo: the registry", () => {
       const machine = await spawnCli(["repo", "list", "--json"], f.root, f.home);
       expect(machine.code).toBe(0);
       expect(JSON.parse(machine.stdout)).toEqual({ version: 1, repos: [canonical] });
+      // The document is the whole of stdout: one compact object and one newline, no banner and no
+      // "version" spelled any other way.
+      expect(machine.stdout).toBe(`${JSON.stringify({ version: 1, repos: [canonical] })}\n`);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a global flag before the verb reaches it too",
+    async () => {
+      const f = await fixture();
+      const canonical = canonicalRoot(f.repo);
+      await spawnCli(["repo", "add", "work"], f.root, f.home);
+
+      // The position of a global is not the command's business: `--json` before the name and after
+      // it must be the same document, or the flag means one thing for a tool and another for a verb.
+      const before = await spawnCli(["--json", "repo", "list"], f.root, f.home);
+      expect(before.code).toBe(0);
+      expect(before.stdout).toBe(`${JSON.stringify({ version: 1, repos: [canonical] })}\n`);
+
+      const dangling = await spawnCli(["repo", "add", "work", "--data-dir"], f.root, f.home);
+      expect(dangling.code).toBe(2);
+      expect(dangling.stderr).toContain("--data-dir needs a value");
     },
     RUN_TIMEOUT_MS,
   );
@@ -205,6 +228,50 @@ describe("sangkar repo: the registry", () => {
       const second = await spawnCli(["repo", "remove", "work"], f.root, f.home);
       expect(second.code).toBe(1);
       expect(second.stdout).toBe(`not registered ${canonical}\n`);
+    },
+    RUN_TIMEOUT_MS,
+  );
+});
+
+describe("sangkar repo: the global flags beside a subcommand", () => {
+  test(
+    "--json and --repo-root are accepted by add and change nothing",
+    async () => {
+      const f = await fixture();
+      const canonical = canonicalRoot(f.repo);
+
+      // A global flag next to a subcommand is an acceptance, not a stray one: this verb's answer is
+      // one line per result, so `--json` is inert here and only `list` changes with it.
+      const withJson = await spawnCli(["repo", "add", "work", "--json"], f.root, f.home);
+      expect(withJson.code).toBe(0);
+      expect(withJson.stdout).toBe(`registered ${canonical}\n`);
+      expect(withJson.stderr).not.toContain("takes no");
+
+      const withRoot = await spawnCli(
+        ["repo", "add", "work", "--repo-root", "/tmp"],
+        f.root,
+        f.home,
+      );
+      expect(withRoot.code).toBe(0);
+      expect(withRoot.stdout).toBe(`already registered ${canonical}\n`);
+      expect(withRoot.stderr).not.toContain("takes no");
+      expect(await registryOnDisk(f.home)).toEqual({ version: 1, repos: [canonical] });
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a value flag with no value is refused with the repo block and registers nothing",
+    async () => {
+      const f = await fixture();
+
+      const run = await spawnCli(["repo", "add", "work", "--repo-root"], f.root, f.home);
+
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--repo-root needs a value");
+      expect(run.stderr).toContain("usage: sangkar repo");
+      expect(existsSync(join(f.home, "sangkar.json"))).toBe(false);
     },
     RUN_TIMEOUT_MS,
   );
@@ -375,6 +442,42 @@ describe("sangkar daemon", () => {
       expect(run.stdout).toBe(
         `not running\n  ${canonical}  watch=off interval=5000ms telemetry=off\n`,
       );
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "status accepts --json, and a live pid file is what makes it exit 0",
+    async () => {
+      const f = await fixture();
+      // No daemon is started: the pid file *is* the state `status` reads, and a fresh one naming a
+      // live process is exactly the record a running daemon leaves behind (`pidlock.ts`).
+      await writeFile(
+        join(f.home, "daemon.pid"),
+        JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }),
+      );
+
+      const run = await spawnCli(["daemon", "status", "--json"], f.root, f.home);
+
+      expect(run.code).toBe(0);
+      expect(run.stdout).toBe(`running, pid ${process.pid}\n`);
+      expect(run.stderr).not.toContain("takes no");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a value flag with no value is refused with the daemon block and takes no lock",
+    async () => {
+      const f = await fixture();
+
+      const run = await spawnCli(["daemon", "status", "--data-dir"], f.root, f.home);
+
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("--data-dir needs a value");
+      expect(run.stderr).toContain("usage: sangkar daemon");
+      expect(existsSync(join(f.home, "daemon.pid"))).toBe(false);
     },
     RUN_TIMEOUT_MS,
   );

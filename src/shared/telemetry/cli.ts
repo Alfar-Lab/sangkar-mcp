@@ -9,10 +9,14 @@
  * Synchronous IO on the file path on purpose. The file is one document written once, so a partial
  * write is the only failure that matters and a promise buys nothing; the `async` signature exists
  * because the serve path really does await a listener and a signal.
+ *
+ * The four global flags are accepted here: `--repo-root` and `--data-dir` are what `loadConfig`
+ * turns into the tree and the directory this report describes, and `--json` is accepted and inert
+ * because the answer of this verb is a file or a page, never a machine document.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-import { CliUsageError } from "#shared/cli/args";
+import { CliUsageError, splitGlobals } from "#shared/cli/args";
 import { EXIT_FAILURE, EXIT_USAGE } from "#shared/cli/render";
 import { flagValue, loadConfig } from "#shared/config";
 import { renderHtml } from "./html";
@@ -20,9 +24,9 @@ import { aggregate, isSinceLiteral, parseSince, readRecords } from "./report";
 import { type ReportServer, serveReport } from "./serve";
 
 /**
- * Printed on `--help` and after every refusal. There is no `--json`: the answer of this verb is a
- * file (or a page a browser reads), and a machine-readable copy of it would be a second report with
- * its own contract.
+ * Printed on `--help` and after every refusal. `--json` is accepted and inert: the answer of this
+ * verb is a file (or a page a browser reads), and a machine-readable copy of it would be a second
+ * report with its own contract.
  */
 const USAGE = `usage: sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD | Nd>] [--repo-root <path>] [--data-dir <path>]
   --out <path>        where the HTML report is written (default: <data-dir>/telemetry/report.html)
@@ -41,42 +45,58 @@ export async function runTelemetry(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
+  // The global flags leave the argv before any of this verb's own flags are read, so `telemetry
+  // --json` is an acceptance rather than a stray flag. A value flag with nothing to consume is
+  // refused here with this verb's own block; `loadConfig` below still receives the raw argv, which
+  // is where `--repo-root` and `--data-dir` become the tree and the directory.
+  let globals: ReturnType<typeof splitGlobals>;
+  try {
+    globals = splitGlobals(argv);
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n${USAGE}\n`);
+      return EXIT_USAGE;
+    }
+    throw error;
+  }
+  const rest = globals.rest;
+
   // `flagValue` cannot tell a trailing `--since` (no value) from an absent one, so the bare token
   // is checked separately; `--since=` hands over an empty string, which the shape test rejects.
-  const rawSince = flagValue(argv, "since");
+  const rawSince = flagValue(rest, "since");
   if (rawSince === undefined) {
-    if (argv.includes("--since")) {
+    if (rest.includes("--since")) {
       return refuse("--since needs a value");
     }
   } else if (!isSinceLiteral(rawSince)) {
     return refuse(`--since must be YYYY-MM-DD or <n>d, not "${rawSince}"`);
   }
 
-  const rawOut = flagValue(argv, "out");
-  if (rawOut === undefined ? argv.includes("--out") : rawOut === "") {
+  const rawOut = flagValue(rest, "out");
+  if (rawOut === undefined ? rest.includes("--out") : rawOut === "") {
     return refuse("--out needs a path");
   }
 
   // The two answers are exclusive: one run either writes a file or answers on a socket, and a
   // caller that named both has not decided which one it wants.
-  const serving = argv.includes("--serve");
+  const serving = rest.includes("--serve");
   if (serving && rawOut !== undefined) {
     return refuse("--serve answers over http, so it takes no --out; drop one of the two");
   }
 
   // `flagValue` hands back the next token whatever it is, so the bare form and the shape are both
   // checked here; an empty `--port=` fails the shape test the same way a trailing flag does.
-  const rawPort = flagValue(argv, "port");
+  const rawPort = flagValue(rest, "port");
   if (rawPort === undefined) {
-    if (argv.includes("--port")) {
+    if (rest.includes("--port")) {
       return refuse("--port needs a value");
     }
   } else if (!isPortLiteral(rawPort)) {
     return refuse(`--port must be an integer in 0..65535, not "${rawPort}"`);
   }
 
-  const rawHost = flagValue(argv, "host");
-  if (rawHost === undefined ? argv.includes("--host") : rawHost === "") {
+  const rawHost = flagValue(rest, "host");
+  if (rawHost === undefined ? rest.includes("--host") : rawHost === "") {
     return refuse("--host needs a value");
   }
 

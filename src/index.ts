@@ -8,9 +8,9 @@
  * Two rules shape the file:
  *
  * - **stdout is the MCP protocol, or one CLI rendering.** No `console.log`, and no
- *   `process.stdout.write` outside {@link runTool} — one envelope, or the human `status` lines, or
- *   the usage block a refusal asked for; every diagnostic goes through `#shared/log`, which owns
- *   stderr. A stray line here corrupts the session rather than merely looking untidy.
+ *   `process.stdout.write` outside {@link runTool} — one envelope in the requested rendering, or the
+ *   usage block a refusal asked for; every diagnostic goes through `#shared/log`, which owns stderr.
+ *   A stray line here corrupts the session rather than merely looking untidy.
  * - **the manifest is the only schema.** Each tool's `input` literal is turned into the JSON Schema
  *   `tools/list` publishes and the arguments `tools/call` accepts, so the advertised surface and the
  *   parsed one cannot drift.
@@ -47,13 +47,7 @@ import {
   type ToolArgs,
   usageOf,
 } from "#shared/cli/args";
-import {
-  EXIT_FAILURE,
-  EXIT_USAGE,
-  exitCodeOf,
-  renderEnvelope,
-  statusLines,
-} from "#shared/cli/render";
+import { EXIT_FAILURE, EXIT_USAGE, exitCodeOf, mcpText, renderOutput } from "#shared/cli/render";
 import { type AppConfig, flagValue, loadConfig, withRepo } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import {
@@ -625,14 +619,15 @@ function route(
 }
 
 /**
- * The MCP result: the envelope as one JSON text part. It is not also sent as `structuredContent`
- * because the envelope already *is* the documented shape (`TOOLS-SPEC.md` §1.1) and doubling it
- * would double the tokens of every answer. `isError` is true exactly when the envelope carries an
- * `error` object, so a client that reads only the flag and one that reads only the body agree.
+ * The MCP result: the envelope as one text part, TOON by default and JSON when the process was
+ * started with `--json`. It is not also sent as `structuredContent` because the envelope already
+ * *is* the documented shape (`TOOLS-SPEC.md` §1.1) and doubling it would double the tokens of every
+ * answer. `isError` is true exactly when the envelope carries an `error` object, so a client that
+ * reads only the flag and one that reads only the body agree.
  */
-function answer(envelope: Envelope<unknown>): CallToolResult {
+function answer(envelope: Envelope<unknown>, outputJson: boolean): CallToolResult {
   return {
-    content: [{ type: "text", text: JSON.stringify(envelope) }],
+    content: [{ type: "text", text: mcpText(envelope, outputJson) }],
     isError: envelope.status === "error" || envelope.status === "bootstrapping",
   };
 }
@@ -654,6 +649,8 @@ export interface CallSurface {
   readonly startup: AppConfig;
   /** `--repo-root`: the default for a call that names no repository, never a barrier. */
   readonly pinnedRoot: string | null;
+  /** `--json` on the command line: the answer text is JSON instead of the default TOON. */
+  readonly outputJson: boolean;
   openFor(repoRoot: string): { readonly store: Store; readonly context: ToolContext };
   recorderFor(repoRoot: string): Telemetry;
 }
@@ -737,7 +734,7 @@ async function callTool(
         ),
       );
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
 
     try {
@@ -760,7 +757,7 @@ async function callTool(
         ),
       );
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
 
     const selection = selectRepo({
@@ -781,7 +778,7 @@ async function callTool(
         ),
       );
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
     recordedRoot = selection.repoRoot;
 
@@ -794,7 +791,7 @@ async function callTool(
         boundarySpec(store, tool.name, store.error.message, "the graph was refused at startup"),
       );
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
     if (store.kind === "absent") {
       envelope = bootstrapping({
@@ -803,14 +800,14 @@ async function callTool(
         hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
       });
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
 
     const scoped: ToolContext = { ...context, log: scopedLog(tool.name) };
     try {
       envelope = route(await tool.handle(scoped, rest), tool.name, store.staleReason);
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     } catch (error) {
       // A handler returns its errors; reaching this point means a bug or a boundary refusal, and
       // `fail` keeps an `AppError`'s code (`budget_too_large`, `index_locked`) while collapsing
@@ -829,7 +826,7 @@ async function callTool(
         ),
       );
       errorCode = envelope.error?.code ?? null;
-      return answer(envelope);
+      return answer(envelope, surface.outputJson);
     }
   } finally {
     // `params.name` is whatever the client sent, and on the unknown-tool branch there is no tool to
@@ -949,6 +946,7 @@ async function runMcp(
   config: AppConfig,
   registry: Registry,
   pinnedRoot: string | null,
+  outputJson: boolean,
 ): Promise<number> {
   const byName = new Map(TOOLS.map((tool) => [tool.name, tool]));
 
@@ -1016,6 +1014,7 @@ async function runMcp(
     registry,
     startup: config,
     pinnedRoot,
+    outputJson,
     openFor,
     recorderFor,
   };
@@ -1103,6 +1102,10 @@ function workerOptions(argv: readonly string[], config: AppConfig, telemetry: Te
  * `parseCliArgsAndNames` share one refusal path because both refuse the argv rather than the call, and
  * both carry the usage block printed here.
  *
+ * `argv` is the whole command line, global flags included: the entry point resolves the command name
+ * from the same tokens, so this function re-splits them rather than trusting a slice. The tool's own
+ * arguments are what is left once the globals and the leading name token are gone.
+ *
  * The whole body sits inside one `try`/`finally` so every outcome — including a usage refusal that
  * never reached a handler — leaves exactly one `call` record. `--help` is the exception: it asks for
  * the usage block, not for a call.
@@ -1151,7 +1154,8 @@ async function runTool(
       }
       // The supplied names come from the argv reader, never from the parsed record: `parseArgs`
       // fills every declared default, and a defaulted name is not a fact about this caller.
-      ({ args: parsed, supplied } = parseCliArgsAndNames(name, tool.input, globals.rest));
+      const toolArgv = globals.rest[0] === name ? globals.rest.slice(1) : globals.rest;
+      ({ args: parsed, supplied } = parseCliArgsAndNames(name, tool.input, toolArgv));
     } catch (error) {
       if (error instanceof CliUsageError) {
         process.stderr.write(`${error.message}\n${error.usage}\n`);
@@ -1194,7 +1198,9 @@ async function runTool(
     }
     if (store.kind === "absent") {
       // `status` is the one tool that answers an empty tree instead of failing: "no index yet" is its
-      // whole job, and the line an operator reads before the first index run.
+      // whole job, and the line an operator reads before the first index run. That is the deliberate
+      // exception to "every tool answers with an envelope" — it writes `store.reason` (one bare line,
+      // no TOON and no JSON, `--json` included) and exits 0, because there is no envelope to render.
       if (name === "status") {
         process.stdout.write(`${store.reason}\n`);
         return finish(0);
@@ -1204,7 +1210,7 @@ async function runTool(
         retry_after_ms: STATUS_RETRY_AFTER_MS,
         hint: "the watcher starts a run when the tree changes; call status to see whether one is in flight",
       });
-      process.stdout.write(renderEnvelope(envelope));
+      process.stdout.write(renderOutput(envelope, { json }));
       return finish(EXIT_FAILURE);
     }
 
@@ -1227,12 +1233,10 @@ async function runTool(
           "the call failed before the graph answered",
         ),
       );
-      process.stdout.write(renderEnvelope(envelope));
+      process.stdout.write(renderOutput(envelope, { json }));
       return finish(EXIT_FAILURE);
     }
-    process.stdout.write(
-      name === "status" && !json ? statusLines(envelope) : renderEnvelope(envelope),
-    );
+    process.stdout.write(renderOutput(envelope, { json }));
     return finish(exitCodeOf(envelope));
   } finally {
     if (!helpRequested) {
@@ -1277,7 +1281,7 @@ export async function main(mode: string, argv: string[]): Promise<number> {
 
     if (mode === "mcp") {
       // The server builds one recorder per repository it serves and closes them in `shutdown`.
-      return await runMcp(config, registry, pinnedRoot);
+      return await runMcp(config, registry, pinnedRoot, argv.includes("--json"));
     }
 
     // The one recorder of a one-shot process, built here because the root is the only place that
@@ -1307,7 +1311,7 @@ export async function main(mode: string, argv: string[]): Promise<number> {
         process.stderr.write(`sangkar: unknown tool "${mode}"\n`);
         return EXIT_USAGE;
       }
-      return await runTool(tool.name, argv.slice(1), config, registry, pinnedRoot, telemetry);
+      return await runTool(tool.name, argv, config, registry, pinnedRoot, telemetry);
     } finally {
       // A one-shot process flushes its own buffer; `mcp` owns its closes through `shutdown`. Both
       // closes are idempotent, so a refusal that returned early still writes its session record.

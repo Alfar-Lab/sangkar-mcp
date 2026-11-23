@@ -3,6 +3,7 @@ import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { TOOL_NAMES } from "#shared/instructions";
 import { runWorker, WORKER_EXIT } from "../src/indexer/worker";
 
@@ -200,9 +201,11 @@ function messageOf(error: unknown): string {
 function envelopeOf(tool: string, text: string): EnvelopeBody {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(text);
+    // A tool's text part is TOON by default and JSON only when the server was started with
+    // `--json`; this server is not, so the default rendering is what a client reads.
+    parsed = decode(text);
   } catch {
-    throw new Error(`${tool}: the tool result text is not JSON: ${text.slice(0, 200)}`);
+    throw new Error(`${tool}: the tool result text is not TOON: ${text.slice(0, 200)}`);
   }
   const record = asRecord(parsed);
   for (const field of ENVELOPE_FIELDS) {
@@ -250,6 +253,9 @@ async function openSession(options: {
     env: {
       ...process.env,
       SANGKAR_CURSOR_KEY: CURSOR_KEY,
+      // `tools/call index` registers the tree it indexed, so this fixture needs a home of its own:
+      // without it the suite writes the temporary repo into the operator's real registry.
+      SANGKAR_HOME: join(workspaceRoot(), "home"),
       // The tree and the data dir are this process's own flags; these two are stated, not
       // inherited, so no harness setting can decide what this test proves.
       SANGKAR_NO_WATCH: "1",
@@ -491,6 +497,14 @@ function publishedGeneration(): string {
     throw new Error("the fixture was not published; read the beforeAll failure first");
   }
   return generation;
+}
+
+/** The one temporary directory this file owns; a session opened before it exists has no home. */
+function workspaceRoot(): string {
+  if (workspace === null) {
+    throw new Error("the workspace was not created; read the beforeAll failure first");
+  }
+  return workspace;
 }
 
 beforeAll(async () => {

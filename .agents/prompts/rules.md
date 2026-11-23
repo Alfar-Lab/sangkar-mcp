@@ -20,7 +20,9 @@ Other invariants that break the product when violated:
 
 - **stdout is the MCP protocol.** Every log line goes to stderr through `src/shared/log.ts`. `console.log` is
   banned by biome's `suspicious/noConsole` rule (only `error` and `warn` are allowed) and the protocol is
-  asserted end-to-end by `tests/mcp-surface.test.ts`.
+  asserted end-to-end by `tests/mcp-surface.test.ts`. The `tools/call` result text is opaque inside the
+  frame — TOON by default, JSON under `sangkar mcp --json` — so the invariant is about the bytes around
+  it, never about its encoding.
 - **Tools never touch a connection.** A handler receives `ToolContext` from `#shared/store/read/context.ts`
   (`reader`, `cursor`, `log`, `now`, `config`, and the size recorded for the file the reader opened,
   `dbSizeBytes`). It does not open a database, does not import `drizzle-orm`,
@@ -43,9 +45,9 @@ Other invariants that break the product when violated:
 - **Eleven tables, one ledger.** `src/shared/store/schema.ts` (Drizzle) is the typed source of truth;
   `migrations/0000_init.sql` is generated from it; FTS5 lives in `migrations/raw/0001_fts.sql`. One runner
   (`migrate.ts`), forward-only, never `drizzle-orm/bun-sqlite/migrator` in a production path.
-- Keep the dependency pins: `@modelcontextprotocol/sdk` 1.32.2, `drizzle-orm` 0.45.4, `web-tree-sitter`
-  0.27.2, `tree-sitter-wasms` 0.1.13. Run on Bun (1.4.4+); Node cannot run this (`bun:sqlite`, `Bun.spawn`,
-  `bun build`).
+- Keep the dependency pins: `@modelcontextprotocol/sdk` 1.32.2, `@toon-format/toon` 4.4.0,
+  `drizzle-orm` 0.45.4, `tree-sitter-wasms` 0.1.13, `web-tree-sitter` 0.27.2. Run on Bun (1.4.4+); Node
+  cannot run this (`bun:sqlite`, `Bun.spawn`, `bun build`).
 
 ## Keeping this guidance true
 

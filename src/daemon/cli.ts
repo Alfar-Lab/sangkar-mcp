@@ -10,8 +10,12 @@
  * `run` is the process `start` spawns, so it must never print anything on stdout that `start`'s
  * detached child would then write into the log: everything the running daemon says goes through
  * `#shared/log` on stderr, and the only stdout here belongs to the command that returns.
+ *
+ * The four global flags are accepted next to every subcommand and each is inert here: the pid file
+ * lives in the machine home, so `--repo-root` and `--data-dir` describe no file this verb reads, and
+ * `--json` only removes a refusal — the answer stays one line per result.
  */
-import { CliUsageError } from "#shared/cli/args";
+import { CliUsageError, splitGlobals } from "#shared/cli/args";
 import { EXIT_FAILURE, EXIT_USAGE } from "#shared/cli/render";
 import { flagValue, loadConfig } from "#shared/config";
 import { isAppError } from "#shared/errors";
@@ -31,6 +35,7 @@ const USAGE = `usage: sangkar daemon [run|start|stop|status] [--port <n>] [--hos
   status  one header line, then one line per registered repository
   --port <n>     the report server's port (default: config.json's daemon.port, else 7317; 0 picks a free port)
   --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
+  --repo-root, --data-dir and --json are accepted by every subcommand and change nothing here
   --port and --host belong to "run"; start passes neither, so it binds the same defaults`;
 
 export async function runDaemonCli(argv: readonly string[]): Promise<number> {
@@ -40,7 +45,22 @@ export async function runDaemonCli(argv: readonly string[]): Promise<number> {
     return 0;
   }
 
-  const [verb, ...rest] = argv;
+  // The global flags leave the argv before the subcommand is resolved, so `daemon status --json` is
+  // an acceptance rather than a stray flag. A value flag with nothing to consume is refused here with
+  // this verb's own block rather than the tool one `splitGlobals` was written for; every subcommand
+  // below still hands the raw argv to `loadConfig`.
+  let globals: ReturnType<typeof splitGlobals>;
+  try {
+    globals = splitGlobals(argv);
+  } catch (error) {
+    if (error instanceof CliUsageError) {
+      process.stderr.write(`${error.message}\n${USAGE}\n`);
+      return EXIT_USAGE;
+    }
+    throw error;
+  }
+
+  const [verb, ...rest] = globals.rest;
 
   switch (verb) {
     case "run":
@@ -78,16 +98,16 @@ async function run(rest: readonly string[], argv: readonly string[]): Promise<nu
     return refuse(`"daemon run" takes no ${stray}`);
   }
 
-  const rawPort = flagValue(argv, "port");
+  const rawPort = flagValue(rest, "port");
   if (rawPort === undefined) {
-    if (argv.includes("--port")) {
+    if (rest.includes("--port")) {
       return refuse("--port needs a value");
     }
   } else if (!/^[0-9]+$/.test(rawPort) || Number(rawPort) > 65535) {
     return refuse(`--port must be an integer in 0..65535, not "${rawPort}"`);
   }
-  const rawHost = flagValue(argv, "host");
-  if (rawHost === undefined ? argv.includes("--host") : rawHost === "") {
+  const rawHost = flagValue(rest, "host");
+  if (rawHost === undefined ? rest.includes("--host") : rawHost === "") {
     return refuse("--host needs a value");
   }
 

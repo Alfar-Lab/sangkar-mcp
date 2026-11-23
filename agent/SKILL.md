@@ -35,8 +35,10 @@ carries risk, blast radius, and missing tests at once, which is usually the whol
 
 ## Read the envelope before the payload
 
-Every answer has the same nine fields. Read them in this order, because each one can invalidate a
-conclusion drawn from `payload`:
+Every answer has the same nine fields, delivered as TOON: a bare key and its value per line, nested
+objects indented under their key instead of wrapped in braces, and a list as `key[N]{field,field}:`
+followed by one row per item. The order below is the order they arrive in. Read them in this order,
+because each one can invalidate a conclusion drawn from `payload`:
 
 1. `status`: `ok` | `ambiguous` | `not_found` | `error` | `bootstrapping`. `error` and
    `bootstrapping` carry `error{code, message, hint, retryable, retry_after_ms}`.
@@ -143,10 +145,12 @@ degree, which is what decides between two same-named functions.
 
 ## Without an MCP client
 
-The same seven tools are shell verbs, and every tool except `status` prints one JSON envelope:
+The same seven tools are shell verbs. The six query tools print the envelope as TOON, so the answer
+you parse has bare keys — `status: ok` on one line, `read_status:` indented under it — rather than
+braces and quotes:
 
 ```sh
-sangkar status                       # five human lines; --json for the envelope
+sangkar status                       # the envelope as TOON; --json for the same envelope as JSON
 sangkar summary --scope area --target src/tools
 sangkar search 'publish' --kind function
 sangkar trace 'db.write' --depth 1 --direction out
@@ -154,6 +158,13 @@ sangkar impact                       # working-tree diff
 sangkar expand src/indexer/resolve.ts --what outline
 sangkar index --mode fast            # repair only
 ```
+
+Add `--json` to any of the six when a shell pipeline needs JSON: the field names and values are
+identical, so nothing you learned from one rendering is wrong in the other. `--json` may sit before
+or after the tool name. `sangkar index` is the exception on this surface: it is the worker, so it
+writes progress to stderr and nothing at all to stdout, and `--json` changes nothing there. The other
+exception is `sangkar status` on a tree with no index: it is the single bare line `no index at
+<dataDir>/graph.db yet`, exits `0`, and `--json` does not change it — there is no envelope to encode.
 
 Exit codes come from `status`: `0` for `ok`/`ambiguous`/`not_found` (a negative answer is still an
 answer), `1` for `error`/`bootstrapping`, `2` for a usage refusal. `sangkar index` exits `2` when

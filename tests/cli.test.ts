@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { ENVELOPE_STATUSES, type Envelope } from "#shared/envelope";
 import { TOOL_NAMES } from "#shared/instructions";
 
@@ -22,9 +23,10 @@ import { TOOL_NAMES } from "#shared/instructions";
  *   one, and nothing — an index run registers its repository — can write the developer's real
  *   `~/.config/sangkar/sangkar.json`: the tree is found by autodetect, the data dir by the
  *   `.sangkar` convention, and the machine-level home is a temp directory deleted in `afterAll`.
- * - **stdout belongs to the payload.** A tool answer is exactly one JSON document closed by one
- *   newline, or the five human `status` lines, or the one `serving …` line; a usage refusal writes
- *   nothing to stdout at all. Diagnostics are stderr.
+ * - **stdout belongs to the payload.** A tool answer is exactly one envelope — TOON by default,
+ *   JSON with `--json` — closed by one newline, or the one `serving …` line, or the bare `no index
+ *   at … yet` line an unindexed tree answers `status` with; a usage refusal writes nothing to stdout
+ *   at all. Diagnostics are stderr.
  * - **The fixture is a temp tree with no `.git`.** Autodetect therefore has to fall back to the
  *   `.sangkar` directory the index creates — the property the nested-directory case exists for.
  *
@@ -155,21 +157,31 @@ function expectExit(run: Run, code: number, what: string): void {
   expect(run.code).toBe(code);
 }
 
-/** One compact JSON document: an object, one trailing newline, no line after it. */
-function documentOf(stdout: string): string {
+/**
+ * The body of one tool answer, with its rendering's byte shape proven first: TOON is the default,
+ * so the value a consumer gets is whatever `decode` makes of the line the tool wrote. One trailing
+ * newline and no other, because the answer is one line either way and a second newline would hand
+ * a line reader a blank answer.
+ */
+function envelopeOf<T = unknown>(stdout: string): Envelope<T> {
+  expect(stdout.endsWith("\n")).toBe(true);
+  expect(stdout.slice(0, -1).endsWith("\n")).toBe(false);
+  return decode(stdout.slice(0, -1)) as unknown as Envelope<T>;
+}
+
+/** The `--json` form of the same answer: one compact JSON document closed by one newline. */
+function jsonEnvelopeOf<T = unknown>(stdout: string): Envelope<T> {
   expect(stdout.startsWith("{")).toBe(true);
   expect(stdout.endsWith("\n")).toBe(true);
   expect(stdout.slice(0, -1)).not.toContain("\n");
-  return stdout;
+  return JSON.parse(stdout) as Envelope<T>;
 }
 
 /**
- * The envelope a tool answer must be: exit 0, one JSON document, the ten members, and an `error`
- * object exactly when the status is `error` or `bootstrapping` (`src/shared/envelope.ts`).
+ * The ten members every envelope carries, whichever rendering carried them, and an `error` object
+ * exactly when the status is `error` or `bootstrapping` (`src/shared/envelope.ts`).
  */
-function answered<T = unknown>(run: Run): Envelope<T> {
-  expectExit(run, 0, "the tool");
-  const envelope = JSON.parse(documentOf(run.stdout)) as Envelope<T>;
+function contractOf<T>(envelope: Envelope<T>): Envelope<T> {
   for (const member of ENVELOPE_MEMBERS) {
     expect(envelope).toHaveProperty(member);
   }
@@ -177,6 +189,28 @@ function answered<T = unknown>(run: Run): Envelope<T> {
   const carriesError = envelope.status === "error" || envelope.status === "bootstrapping";
   expect("error" in envelope).toBe(carriesError);
   return envelope;
+}
+
+/** The envelope a default (`TOON`) tool answer must be: exit 0 and the contract above. */
+function answered<T = unknown>(run: Run): Envelope<T> {
+  expectExit(run, 0, "the tool");
+  return contractOf(envelopeOf<T>(run.stdout));
+}
+
+/** The same, for a `--json` answer: the two renderings are the same value in different bytes. */
+function answeredJson<T = unknown>(run: Run): Envelope<T> {
+  expectExit(run, 0, "the tool");
+  return contractOf(jsonEnvelopeOf<T>(run.stdout));
+}
+
+/**
+ * The envelope minus the one field two invocations cannot share: `read_status.stale_checked_at` is
+ * stamped when *this call* looked at the bytes on disk, so comparing it across two processes would
+ * assert the clock rather than the rendering.
+ */
+function withoutCheckStamp(envelope: Envelope<unknown>): unknown {
+  const { stale_checked_at: _stamp, ...readStatus } = envelope.read_status;
+  return { ...envelope, read_status: readStatus };
 }
 
 /**
@@ -276,7 +310,7 @@ describe("sangkar CLI", () => {
   test(
     "status --json prints one envelope",
     async () => {
-      const envelope = answered(await spawnCli(["status", "--json"], repo));
+      const envelope = answeredJson(await spawnCli(["status", "--json"], repo));
       expect(envelope.status).toBe("ok");
       expect(envelope.read_status.generation.length).toBeGreaterThan(0);
     },
@@ -284,17 +318,63 @@ describe("sangkar CLI", () => {
   );
 
   test(
-    "status prints the five human lines and no JSON",
+    "status prints the TOON envelope by default, and it is not JSON",
     async () => {
       const run = await spawnCli(["status"], repo);
-      expectExit(run, 0, "sangkar status");
-      const lines = run.stdout.replace(/\n+$/, "").split("\n");
-      expect(lines).toHaveLength(5);
-      expect(lines[0]).toMatch(/^(ok|ambiguous|not_found|error|bootstrapping): /);
+      const envelope = answered<{ project: { db_path: string } }>(run);
+      expect(envelope.status).toBe("ok");
+      expect(envelope.payload.project.db_path).toBe(dbPath());
+      // The point of the change: the default answer is not the machine document `--json` writes, so
+      // a caller that parses stdout as JSON must ask for that form.
+      expect(run.stdout.startsWith("{")).toBe(false);
       expect(() => JSON.parse(run.stdout)).toThrow();
-      expect(lines.filter((line) => line.startsWith("database "))).toEqual([
-        `database ${dbPath()}`,
-      ]);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "status and status --json are one envelope in two renderings",
+    async () => {
+      const toon = await spawnCli(["status"], repo);
+      const json = await spawnCli(["status", "--json"], repo);
+
+      // Same invocation, two renderings: the exit code and the bytes' shape agree...
+      expect(toon.code).toBe(json.code);
+      expect(toon.code).toBe(0);
+      const decoded = envelopeOf(toon.stdout);
+      const parsed = jsonEnvelopeOf(json.stdout);
+
+      // ...and every field agrees except `read_status.stale_checked_at`, which records when *this
+      // invocation* looked at the bytes on disk. Two processes cannot share that clock, so it is
+      // the one field compared as a shape rather than as a value.
+      expect(decoded.read_status.stale_checked_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(parsed.read_status.stale_checked_at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+      expect(withoutCheckStamp(decoded)).toEqual(withoutCheckStamp(parsed));
+      expect(decoded.status).toBe("ok");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "status on an unindexed tree prints the one bare line and exits 0, --json included",
+    async () => {
+      const tree = join(root, "unindexed");
+      const dataDir = join(root, "unindexed-data");
+      await mkdir(tree, { recursive: true });
+
+      // The documented exception to "every tool answers with an envelope": there is no envelope to
+      // render before the first index, so the line is the answer in both forms.
+      for (const extra of [[], ["--json"]] as const) {
+        const run = await spawnCli(
+          ["status", "--repo-root", tree, "--data-dir", dataDir, ...extra],
+          elsewhere,
+        );
+        expectExit(run, 0, `sangkar status ${extra.join(" ")}`.trim());
+        expect(run.stdout).toMatch(/^no index at .* yet\n$/);
+        // Exactly one line: no envelope, no banner, and no blank line where one would start.
+        expect(run.stdout.trimEnd().split("\n")).toHaveLength(1);
+        expect(() => JSON.parse(run.stdout)).toThrow();
+      }
     },
     RUN_TIMEOUT_MS,
   );
@@ -338,11 +418,11 @@ describe("sangkar CLI", () => {
   test(
     "--repo-root answers from an unrelated directory in both forms",
     async () => {
-      const reference = answered(await spawnCli(["status", "--json"], repo));
-      const separated = answered(
+      const reference = answeredJson(await spawnCli(["status", "--json"], repo));
+      const separated = answeredJson(
         await spawnCli(["status", "--repo-root", repo, "--json"], elsewhere),
       );
-      const inline = answered(
+      const inline = answeredJson(
         await spawnCli(["status", `--repo-root=${repo}`, "--json"], elsewhere),
       );
       expect(reference.read_status.generation.length).toBeGreaterThan(0);
@@ -353,12 +433,94 @@ describe("sangkar CLI", () => {
   );
 
   test(
-    "a global flag before the tool name is a usage error",
+    "every tool command answers in TOON by default and in JSON with --json",
     async () => {
+      // One invocation per tool per form, against the index `beforeAll` published — no case here
+      // starts an index run of its own. The arguments are the cheapest answer each tool can give
+      // from this fixture: the one symbol it declares, and the one file it declares it in.
+      const invocations: readonly (readonly [string, readonly string[]])[] = [
+        ["status", []],
+        ["summary", []],
+        ["trace", ["handleThing", "--depth", "1"]],
+        ["search", ["handleThing"]],
+        ["impact", []],
+        ["expand", ["src/a.ts", "--what", "outline"]],
+      ];
+
+      for (const [tool, args] of invocations) {
+        const toon = await spawnCli([tool, ...args], repo);
+        expectExit(toon, 0, `sangkar ${tool}`);
+        // The default: a value `decode` hands back, and bytes that are not the JSON document.
+        expect({ tool, starts: toon.stdout.startsWith("{") }).toEqual({ tool, starts: false });
+        expect({ tool, status: envelopeOf(toon.stdout).status }).toEqual({ tool, status: "ok" });
+
+        const json = await spawnCli([tool, ...args, "--json"], repo);
+        expectExit(json, 0, `sangkar ${tool} --json`);
+        expect({ tool, starts: json.stdout.startsWith("{") }).toEqual({ tool, starts: true });
+        expect({ tool, status: jsonEnvelopeOf(json.stdout).status }).toEqual({
+          tool,
+          status: "ok",
+        });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  // The seventh name, `index`, is not a tool command on this surface: `bin/sangkar.ts` resolves the
+  // token as the bootstrap verb and answers with the worker's own exit code, so there is no envelope
+  // for TOON and `--json` to choose between. What must hold either way is that a verb writes nothing
+  // to stdout — the property `tests/cli.test.ts` opens with. Its tool answer — the same rendering
+  // every other tool uses — is asserted over MCP, where `tools/call index` is reachable
+  // (`mcp-surface.test.ts`).
+  test(
+    "index: the CLI's seventh name is the bootstrap verb, and its stdout stays empty",
+    async () => {
+      // A warm tree has nothing to publish, so the run ends on the worker's own `nothing to do` code
+      // rather than an envelope; a cold one publishes. Neither may write to stdout.
+      for (const argv of [
+        ["index", "--mode", "fast", "--json"],
+        ["--json", "index", "--mode", "fast"],
+      ]) {
+        const run = await spawnCli(argv, repo);
+        expect({ argv, code: [0, 2].includes(run.code) }).toEqual({ argv, code: true });
+        expect({ argv, stdout: run.stdout }).toEqual({ argv, stdout: "" });
+      }
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a global flag before the tool name names the same command",
+    async () => {
+      // The name is the first token that is not a global flag, so the proximity of the flag decides
+      // nothing: the same answer comes back with the flag, the flag and its value, or `--json` read
+      // from before the name.
       const run = await spawnCli(["--repo-root", repo, "status"], elsewhere);
-      expectExit(run, 2, "sangkar --repo-root X status");
+      expectExit(run, 0, "sangkar --repo-root X status");
+      expect(answered(run).status).toBe("ok");
+
+      const json = await spawnCli(["--json", "status"], join(repo, "src"));
+      expectExit(json, 0, "sangkar --json status");
+      // `--json` before the name is still a request for the JSON rendering, not a stray flag.
+      expect(jsonEnvelopeOf(json.stdout).status).toBe("ok");
+      expect(json.stdout.startsWith("{")).toBe(true);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a value flag before the name without a value is still a usage refusal",
+    async () => {
+      // The dangling flag is skipped by the name scan (the switch after it is not a value), so
+      // `status` is the name and the tool's own reader refuses the flag it was handed. Which name
+      // was resolved is `cli-args.test.ts`'s subject; here the proof is that a tool answered the
+      // argv rather than `mcp` starting on it.
+      const run = await spawnCli(["--repo-root", "--json", "status"], elsewhere);
+      expectExit(run, 2, "sangkar --repo-root --json status");
       expect(run.stdout).toBe("");
-      expect(run.stderr.length).toBeGreaterThan(0);
+      expect(run.stderr).toContain("--repo-root needs a value");
+      // The tool surface's banner, which only a non-reserved name earns.
+      expect(run.stderr).toContain("report index status as a TOON envelope");
     },
     RUN_TIMEOUT_MS,
   );
@@ -441,6 +603,21 @@ describe("sangkar CLI", () => {
       // Not a tool: no envelope on stdout, and no name in the tool surface's own list.
       expect(run.stdout).not.toContain('"status":');
       expect(TOOL_NAMES as readonly string[]).not.toContain("telemetry");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "telemetry --json is accepted and changes nothing",
+    async () => {
+      // `--json` is inert here: this verb's answer is a file or a page, not a machine document. What
+      // the case proves is that the global switch is an acceptance rather than a stray flag.
+      const out = join(root, "telemetry-json", "report.html");
+      const run = await spawnCli(["telemetry", "--json", "--out", out], elsewhere);
+      expectExit(run, 0, "sangkar telemetry --json");
+      expect(run.stdout).toMatch(/^wrote .*report\.html \(\d+ records, \d+ unparsed lines\)\n$/);
+      expect(run.stderr).not.toContain("takes no");
+      expect(existsSync(out)).toBe(true);
     },
     RUN_TIMEOUT_MS,
   );

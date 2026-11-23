@@ -4,6 +4,7 @@ import { existsSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { runWorker } from "../src/indexer/worker";
 
 /**
@@ -275,7 +276,7 @@ async function session(fixture: Fixture): Promise<Session> {
   }
 }
 
-/** The `status` envelope, unwrapped from the MCP `content[0].text` JSON string. */
+/** The `status` envelope, unwrapped from the MCP `content[0].text` TOON string. */
 interface StatusEnvelope {
   readonly status: string;
   readonly read_status: {
@@ -309,7 +310,7 @@ function statusOf(response: JsonRpcResponse | undefined): {
   if (typeof text !== "string") {
     throw new Error(`tools/call returned no text content: ${JSON.stringify(response)}`);
   }
-  return { envelope: JSON.parse(text) as StatusEnvelope, isError: result?.isError === true };
+  return { envelope: decode(text) as unknown as StatusEnvelope, isError: result?.isError === true };
 }
 
 if (build.timedOut) {

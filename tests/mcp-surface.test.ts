@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { TOOL_NAMES } from "#shared/instructions";
 
 /**
@@ -46,6 +47,9 @@ const REQUESTS = [
   { jsonrpc: "2.0", method: "notifications/initialized" },
   { jsonrpc: "2.0", id: 2, method: "tools/list", params: {} },
 ] as const;
+
+/** The id a `tools/call` takes in the sessions below, so `[1, 2, 3]` is the whole answer order. */
+const CALL_ID = 3;
 
 interface JsonRpcError {
   readonly code: number;
@@ -100,13 +104,31 @@ function parseLines(stream: string): { json: unknown[]; nonJson: string[] } {
 /**
  * One server session over stdio. The child is killed in `finally` whether or not it exited, and its
  * temp tree is removed there too, so a failed assertion cannot leave a process or a directory behind.
+ *
+ * `call` adds one `tools/call` after the handshake, and `outputJson` starts the child with `--json`:
+ * those two switches are exactly what the answer's rendering depends on.
  */
-async function session(): Promise<Session> {
+async function session(
+  options: { readonly call?: string; readonly outputJson?: boolean } = {},
+): Promise<Session> {
   const root = await mkdtemp(join(tmpdir(), "sangkar-mcp-surface-"));
   const repoRoot = join(root, "repo");
   const dataDir = join(root, "data");
   await mkdir(repoRoot, { recursive: true });
   await mkdir(dataDir, { recursive: true });
+
+  const requests: readonly unknown[] =
+    options.call === undefined
+      ? REQUESTS
+      : [
+          ...REQUESTS,
+          {
+            jsonrpc: "2.0",
+            id: CALL_ID,
+            method: "tools/call",
+            params: { name: options.call, arguments: {} },
+          },
+        ];
 
   const proc = Bun.spawn({
     cmd: [
@@ -118,6 +140,7 @@ async function session(): Promise<Session> {
       repoRoot,
       "--data-dir",
       dataDir,
+      ...(options.outputJson === true ? ["--json"] : []),
     ],
     cwd: APP_ROOT,
     env: {
@@ -137,7 +160,7 @@ async function session(): Promise<Session> {
 
   const timer = setTimeout(() => proc.kill("SIGKILL"), HARD_TIMEOUT_MS);
   try {
-    proc.stdin.write(REQUESTS.map((request) => `${JSON.stringify(request)}\n`).join(""));
+    proc.stdin.write(requests.map((request) => `${JSON.stringify(request)}\n`).join(""));
     await proc.stdin.flush();
     proc.stdin.end();
 
@@ -175,6 +198,79 @@ function toolsOf(session: Session): readonly ToolDescriptor[] {
   const result = session.responses[1]?.result as { tools?: readonly ToolDescriptor[] } | undefined;
   return result?.tools ?? [];
 }
+
+/**
+ * The text part of the last answer, which for a `tools/call` session is that call's result: one
+ * string field, so nothing here may look at it as a line stream.
+ */
+function toolAnswer(run: Session): { readonly text: string; readonly isError: boolean } {
+  const response = run.responses.at(-1);
+  const result = response?.result as
+    | { content?: readonly { type?: string; text?: string }[]; isError?: boolean }
+    | undefined;
+  const text = result?.content?.[0]?.text;
+  if (typeof text !== "string") {
+    throw new Error(`tools/call returned no text content: ${JSON.stringify(response)}`);
+  }
+  return { text, isError: result?.isError === true };
+}
+
+describe("MCP surface: the answer text, TOON by default", () => {
+  test(
+    "tools/call status decodes as TOON by default and parses as JSON under --json",
+    async () => {
+      const toon = await session({ call: "status" });
+      const json = await session({ call: "status", outputJson: true });
+
+      for (const run of [toon, json]) {
+        // The framing is untouched by the rendering: one JSON-RPC message per stdout line, so a
+        // TOON payload stays inside the `text` field and never reaches the protocol stream.
+        expect(run.nonJsonLines).toEqual([]);
+        expect(run.stdoutLines).toHaveLength(3);
+        expect(run.responses.map((response) => response.id)).toEqual([1, 2, CALL_ID]);
+        expect(run.exitCode).toBe(0);
+      }
+
+      // The default: TOON, which is not the JSON document it replaces, and no trailing newline
+      // because a result is a string field rather than a line.
+      const toonText = toolAnswer(toon).text;
+      expect(toonText.startsWith("{")).toBe(false);
+      expect(toonText.endsWith("\n")).toBe(false);
+      const decoded = decode(toonText) as Record<string, unknown>;
+      expect(decoded.status).toBe("bootstrapping");
+      expect(toolAnswer(toon).isError).toBe(true);
+
+      // `--json` on the server: the same shape and the same verdict, in the document a JSON client
+      // parses. Each session owns a temp tree, so the summary's path is its own; the members and the
+      // status are what two renderings of one state must agree on.
+      const jsonText = toolAnswer(json).text;
+      expect(jsonText.startsWith("{")).toBe(true);
+      expect(jsonText.endsWith("\n")).toBe(false);
+      const parsed = JSON.parse(jsonText) as Record<string, unknown>;
+      expect(Object.keys(parsed).sort()).toEqual(Object.keys(decoded).sort());
+      expect(parsed.status).toBe(decoded.status);
+      expect(parsed.summary).toMatch(/^no index at .* yet$/);
+      expect(toolAnswer(json).isError).toBe(true);
+    },
+    HARD_TIMEOUT_MS,
+  );
+
+  test(
+    "tools/call index is reachable as a tool and answers in TOON too",
+    async () => {
+      // The seventh name is not a CLI tool command — `bin/sangkar.ts` owns `index` as the bootstrap
+      // verb — so its envelope rendering is asserted where the tool is reachable. No index run
+      // happens: with no published graph the store is absent, and that is the answer.
+      const run = await session({ call: "index" });
+      expect(run.nonJsonLines).toEqual([]);
+      expect(run.exitCode).toBe(0);
+      const text = toolAnswer(run).text;
+      expect(text.startsWith("{")).toBe(false);
+      expect(decode(text)).toMatchObject({ status: "bootstrapping" });
+    },
+    HARD_TIMEOUT_MS,
+  );
+});
 
 describe("MCP surface: seven tools, one clean stdout", () => {
   test(

@@ -45,12 +45,13 @@ arguments.
 ```sh
 cd /path/to/repo
 sangkar index      # index the tree into <repo>/.sangkar/graph.db
-sangkar status     # five human lines, or the envelope with --json
+sangkar status     # the envelope as TOON; --json prints the same envelope as JSON
 ```
 
 Until it has published once there is no store to answer from, so every other command answers
-`bootstrapping` and exits 1. `status` is the exception: it prints the one line naming the missing
-database and exits 0, because "no index yet" is the fact it exists to report.
+`bootstrapping` and exits 1. `status` is the exception: it prints the one bare line naming the missing
+database — `no index at <dataDir>/graph.db yet`, the same bare line whether or not `--json` is given —
+and exits 0, because "no index yet" is the fact it exists to report and there is no envelope to render.
 
 The repository is found by walking up from the current directory: the nearest ancestor holding
 `.sangkar`, else the nearest holding `.git`, else the current directory itself. `--repo-root` states
@@ -147,7 +148,8 @@ sangkar mcp --repo-root /path/to/repo   # --data-dir /path/to/dir is the optiona
 ```
 
 stdout carries the MCP protocol and nothing else; diagnostics are JSON lines on stderr, one record per
-event.
+event. The text part of a `tools/call` result is the same envelope the CLI prints, encoded as TOON;
+`sangkar mcp --json` delivers that text as JSON instead and changes nothing else on the wire.
 
 | Tool | What it answers |
 |---|---|
@@ -158,6 +160,10 @@ event.
 | `impact` | What a change set reaches: dependents, affected entry points, the tests that cover them, and a risk score; defaults to the working-tree diff. |
 | `expand` | More detail for one item from an earlier answer — `members`, `edges`, short `source`, or `coverage`. |
 | `index` | Force a full or fast re-index, or repair a graph the daemon could not fix. Not for normal use. |
+
+Every answer has the same shape — `status`, `summary`, `read_status`, `coverage`, `totals`, `truncated`,
+`truncation_reason`, `next`, `next_tools`, then the tool's `payload` — so a client that has read one tool
+knows where every field of the next one sits, whichever encoding delivered it.
 
 Registered names are exactly these seven, in this order: no `_tool` suffix, no aliases, no eighth name.
 Six take an optional `budget` in tokens, defaulted per tool (`status` 800, `summary` 1200, `trace`
@@ -214,13 +220,13 @@ client needs before the tools exist at all.
 ### CLI
 
 ```sh
-sangkar <tool> [arguments] [global flags] — the name comes first
+sangkar <tool> [arguments] [global flags] — the name is the first token that is not a global flag
 ```
 
 | Example | What it does |
 |---|---|
-| `sangkar status` | Five human lines: the status line, then `project`, `database`, `graph`, `health`. |
-| `sangkar status --json` | The same answer as the envelope. |
+| `sangkar status` | The envelope as TOON: `status` and its `summary`, then `read_status`, `coverage`, `totals` and the payload. |
+| `sangkar status --json` | The same envelope as one line of JSON. |
 | `sangkar search 'handleRequest'` | Symbols matching a keyword. |
 | `sangkar trace 'db.write' --depth 1 --direction out` | Callees of one symbol, one hop. |
 | `sangkar impact` | What the working-tree diff reaches. |
@@ -228,12 +234,21 @@ sangkar <tool> [arguments] [global flags] — the name comes first
 | `sangkar repo add .` / `sangkar daemon start` | Register this tree, then start the daemon that watches it. |
 | `sangkar trace --help` | `trace`'s own usage, exit 0. |
 
-- Every tool prints one JSON envelope, and `--json` is accepted by all of them; it is `status` alone
-  that swaps the envelope for human lines when the flag is absent.
-- `--repo-root <path>` and `--data-dir <path>` are globals: they follow the tool name and may sit
-  anywhere among that tool's own arguments, in `--flag value` or `--flag=value` form, and `--json` and
-  `--help` are globals in the same sense. A global written before the name is read as the tool name
-  and refused with exit 2.
+- Every tool answer is one envelope — the same nine metadata fields plus `payload` — delivered as
+  [TOON](https://toonformat.dev), the token-oriented spelling of the same JSON data; `--json` prints
+  that envelope as one line of JSON instead. Field names and their meaning are identical in both
+  renderings, and `status` renders like every other tool.
+- `--repo-root <path>`, `--data-dir <path>`, `--json` and `--help` are globals: they may sit before or
+  after the command name, in `--flag value` or `--flag=value` form — the name is the first token that
+  is none of them, and no command sees its own position matter. A global a command has no use for is
+  accepted and ignored, never refused, on either side of the name (`--json status` and `repo add .
+  --json` both run); a value flag with no value is still a usage error, exit 2, answered with that
+  command's usage block. What each command does with them: a tool honours all four; `repo` changes
+  only `list`, so `--json repo list` and `repo list --json` are the same JSON document; `telemetry`,
+  `index` and `worker` honour the two path flags and ignore `--json`; `daemon` ignores all three.
+  With no command name at all, `sangkar --repo-root <path>` is the MCP server, because `mcp` is the
+  default — and `--repo-root` takes the token after it as its value, so `sangkar --repo-root status`
+  serves the tree named `status` rather than reporting a status.
 - `--help` exits 0 with that tool's usage block, or, on a verb, the verb's own usage line — `sangkar
   daemon --help`, `sangkar repo --help`, and so on — answered before any argument is checked.
 - `sangkar index` streams progress as JSON log lines on stderr and exits 0 once it publishes. Nothing
@@ -246,5 +261,5 @@ sangkar <tool> [arguments] [global flags] — the name comes first
 ## License
 
 MIT — see [LICENSE](LICENSE). The grant covers the package as published, including the migration SQL
-it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm` and the MCP SDK keep their own
-licenses.
+it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm`, `@toon-format/toon` and the MCP SDK
+keep their own licenses.

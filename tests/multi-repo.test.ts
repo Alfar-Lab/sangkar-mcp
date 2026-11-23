@@ -4,6 +4,7 @@ import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { decode } from "@toon-format/toon";
 import { createCursors } from "#shared/cursor";
 import { canonicalRoot, readRegistry } from "#shared/registry";
 import { openReader } from "#shared/store/db";
@@ -290,7 +291,8 @@ async function session(options: SessionOptions): Promise<Session> {
       if (typeof text !== "string") {
         throw new Error(`${name}: the tool result carried no text`);
       }
-      return JSON.parse(text) as Answer;
+      // A tool's text part is TOON unless the server was started with `--json`, and this one was not.
+      return decode(text) as unknown as Answer;
     },
     async finish() {
       if (finished) {
