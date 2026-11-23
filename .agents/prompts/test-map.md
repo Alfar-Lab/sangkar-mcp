@@ -11,11 +11,11 @@ Which tests guard which change. Entry point: [`AGENTS.md`](../../AGENTS.md).
 | the reader surface | `read.test.ts`, `read-files.test.ts` |
 | resolution, neighbours, absence, risk, diff, freshness | `domain.test.ts`, `diff.test.ts`, `freshness.test.ts` |
 | language tables or the parser pool | `lang.test.ts`, `parse.test.ts` |
-| discovery, extraction, binding, persistence | `discover.test.ts`, `extract.test.ts`, `resolve.test.ts`, `persist.test.ts` |
-| the index pipeline end to end | `worker.test.ts`, `index-integration.test.ts`, `watch.test.ts`, `parser-parity.test.ts` |
+| discovery, extraction, binding, persistence | `discover.test.ts`, `extract.test.ts`, `resolve.test.ts`, `persist.test.ts` || the index pipeline end to end | `worker.test.ts`, `index-integration.test.ts`, `watch.test.ts`, `parser-parity.test.ts` |
 | one tool's payload or defaults | `tools-<name>.test.ts` |
 | registration, profiles, stdio discipline | `mcp-surface.test.ts`, `tools-smoke.test.ts` |
 | the CLI surface | `cli.test.ts`, `cli-args.test.ts` (the parser, `splitGlobals`, and `resolveCommand` finding the name with a global flag before it) |
+| the tree `index` autodetects, and whether it asks before using it | `config.test.ts` (`detectTree`'s marker, depth and chain), `cli-index-gate.test.ts` (the gate matrix, the question, and the verb refusing a guessed tree without writing) |
 | the envelope's two renderings and the exit codes | `cli-render.test.ts` (TOON by default, one-line JSON under `--json`, the same value in both, and `exitCodeOf`) |
 | the registry file, and how a call selects a repository | `registry.test.ts` |
 | the per-repo settings file, its defaults and its clamp | `repo-config.test.ts` |

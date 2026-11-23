@@ -37,6 +37,32 @@ export interface DaemonPaths {
 export const HOME_DIR_NAME = "sangkar";
 
 /**
+ * How many levels above the working directory an autodetected tree may sit before a run that has no
+ * one to ask refuses it. `0` (the working directory itself) is always allowed: that is a first index
+ * in a fresh checkout, not a guess. The number is a guard against a marker that belongs to something
+ * else — a `.sangkar` in `$HOME` swallows every directory below it — and it is a budget, not a rule:
+ * `--yes` states the operator means it.
+ */
+export const MAX_AUTODETECT_LEVELS = 3;
+
+/**
+ * How the working tree was chosen. The walk this describes is the only place a tree is guessed, so
+ * the guess is carried on the config instead of being recomputed by whoever needs to report it.
+ */
+export interface RepoDetection {
+  /** The tree the walk settled on. */
+  readonly root: string;
+  /** The marker that stopped the walk, or `null` when nothing matched and the directory became the tree. */
+  readonly via: ".sangkar" | ".git" | null;
+  /** Directories between the working directory and the root; `0` means the working directory is the tree. */
+  readonly levels: number;
+  /** Absolute paths walked, from the working directory up to the root inclusive. */
+  readonly chain: readonly string[];
+  /** True when `--repo-root` named the tree, so nothing was guessed and nothing needs confirming. */
+  readonly explicit: boolean;
+}
+
+/**
  * The resolved process configuration. Resolved once at start; every module that needs a
  * setting receives it from here, because this file is the only reader of the environment.
  */
@@ -45,6 +71,8 @@ export interface AppConfig {
   dataDir: string;
   /** Absolute path of the indexed working tree. */
   repoRoot: string;
+  /** How `repoRoot` was chosen: the marker found, how far above the working directory, and the walk. */
+  readonly repoDetection: RepoDetection;
   /** Cursor HMAC key, passed to the cursor module so it never reads the environment. */
   cursorKey: string;
   budgets: Budgets;
@@ -118,21 +146,51 @@ export function flagValue(argv: readonly string[], name: string): string | undef
  * the nearest directory holding a `.git` (a directory, or a file in a linked worktree), else
  * `cwd` itself. Pure filesystem lookup — no `git` subprocess, so this works in a bare temp
  * directory and when git is not installed.
+ *
+ * The answer alone cannot tell a caller whether it stood in a tree or was swallowed by one, so this
+ * is the thin form of {@link detectTree}: the walk, its provenance and the directories it crossed
+ * are the same values, and a caller that only wants the path keeps the old contract.
  */
 export function detectRepoRoot(cwd: string): string {
+  return detectTree(cwd).root;
+}
+
+/**
+ * The same walk with its provenance: which marker stopped it, how many levels above the working
+ * directory that marker sat, and every directory crossed on the way. A tree found with no marker at
+ * all is the working directory itself, and reporting that as `levels: 0, via: null` is what lets a
+ * caller say "nothing told me this was a repository" instead of guessing silently.
+ */
+export function detectTree(cwd: string): RepoDetection {
   const start = resolve(cwd);
+  const chain = [start];
   let dir = start;
   for (;;) {
-    if (existsSync(join(dir, DATA_DIR_NAME)) || existsSync(join(dir, ".git"))) {
-      return dir;
+    const via = markerIn(dir);
+    if (via !== null) {
+      return { root: dir, via, levels: chain.length - 1, chain, explicit: false };
     }
     const parent = dirname(dir);
     if (parent === dir) {
       // Reached the filesystem root without a marker: the caller's directory is the tree.
-      return start;
+      return { root: start, via: null, levels: 0, chain: [start], explicit: false };
     }
     dir = parent;
+    chain.push(dir);
   }
+}
+
+/** The marker a directory holds, if any. `.sangkar` wins because it is the one this product writes. */
+function markerIn(dir: string): ".sangkar" | ".git" | null {
+  if (existsSync(join(dir, DATA_DIR_NAME))) {
+    return ".sangkar";
+  }
+  return existsSync(join(dir, ".git")) ? ".git" : null;
+}
+
+/** The detection for a tree the caller named: nothing was walked and nothing is a guess. */
+function named(root: string): RepoDetection {
+  return { root, via: null, levels: 0, chain: [root], explicit: true };
 }
 
 /**
@@ -188,10 +246,11 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   const cwd = options.cwd ?? process.cwd();
 
   const rawRepoRoot = flagValue(argv, "repo-root");
-  const repoRoot =
+  const detection =
     rawRepoRoot === undefined || rawRepoRoot === ""
-      ? detectRepoRoot(cwd)
-      : resolve(cwd, rawRepoRoot);
+      ? detectTree(cwd)
+      : named(resolve(cwd, rawRepoRoot));
+  const repoRoot = detection.root;
 
   const rawDataDir = flagValue(argv, "data-dir");
   const dataDir =
@@ -209,6 +268,7 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
   return {
     dataDir,
     repoRoot,
+    repoDetection: detection,
     home,
     registryPath: join(home, "sangkar.json"),
     configPath: globalConfigPath(home),
@@ -260,6 +320,9 @@ export function withRepo(
   return {
     ...config,
     repoRoot: root,
+    // A caller that named the tree is speaking about that tree; the walk that produced the previous
+    // root describes nothing here.
+    repoDetection: named(root),
     dataDir,
     telemetry: { ...config.telemetry, dir: join(dataDir, "telemetry") },
   };

@@ -1,6 +1,8 @@
 import { createHash } from "node:crypto";
+import type { Dirent } from "node:fs";
 import { open, readdir, readFile, stat } from "node:fs/promises";
 import { join } from "node:path";
+import { log } from "#shared/log";
 import { detectLanguage } from "./lang/registry";
 import type { LangId } from "./lang/types";
 
@@ -35,7 +37,24 @@ const HASH_CHUNK_BYTES = 1024 * 1024;
 const CONTROL_FILES: readonly string[] = [".gitignore", ".sangkarignore"];
 
 /** Why a path the walk saw is not part of the graph. The set is closed on purpose. */
-export type SkipReason = "ignored" | "binary" | "size_cap" | "unsupported_ext";
+export type SkipReason =
+  | "ignored"
+  | "binary"
+  | "size_cap"
+  | "unsupported_ext"
+  /**
+   * A directory the process could not open. It is the one reason whose path is a directory: a hole
+   * nobody can see is worse than a hole that is reported, so an unreadable directory is a coverage
+   * row rather than the end of the walk.
+   */
+  | "unreadable";
+
+/**
+ * The errors that mean "this directory cannot be read from here" rather than "the walk is broken".
+ * `ENOENT` belongs with them: a directory that vanished between the parent's `readdir` and this call
+ * could not be read either, and the next run sees the settled tree.
+ */
+const UNREADABLE_CODES: ReadonlySet<string> = new Set(["EACCES", "EPERM", "ENOENT"]);
 
 /** One indexed file. `path` is repo-relative, forward-slashed, with no leading `./`. */
 export interface DiscoveredFile {
@@ -61,7 +80,9 @@ export interface DiscoverResult {
   /**
    * How many paths the walk refused to index. It equals `notIndexed.length`; it exists so the
    * worker can log a count without materialising the list, and so it is obvious that every drop
-   * is accounted for. Directories pruned from the walk are not paths and are not counted.
+   * is accounted for. Directories pruned from the walk are not paths and are not counted; the one
+   * exception is a directory that could not be *read*, which is a coverage row with reason
+   * `unreadable` because nothing else would report it.
    */
   skipped: number;
 }
@@ -102,7 +123,10 @@ interface WalkState {
 
 async function walk(state: WalkState, relDir: string): Promise<void> {
   const absDir = relDir === "" ? state.repoRoot : join(state.repoRoot, relDir);
-  const entries = await readdir(absDir, { withFileTypes: true });
+  const entries = await readDirectory(state, relDir, absDir);
+  if (entries === null) {
+    return;
+  }
   entries.sort((left, right) => compareStrings(left.name, right.name));
 
   for (const entry of entries) {
@@ -133,6 +157,30 @@ async function walk(state: WalkState, relDir: string): Promise<void> {
     }
 
     await classifyFile(state, rel, join(state.repoRoot, rel));
+  }
+}
+
+/**
+ * One directory's entries, or `null` when a subdirectory could not be read. A `0700` directory owned
+ * by another user is a hole in coverage, not a reason to abandon a walk that may already have hashed
+ * gigabytes: it is recorded with reason `unreadable`, one line names it, and the walk continues. The
+ * root is never skipped — `discover` has statted it already, so failing there is the caller's error.
+ */
+async function readDirectory(
+  state: WalkState,
+  relDir: string,
+  absDir: string,
+): Promise<Dirent[] | null> {
+  try {
+    return await readdir(absDir, { withFileTypes: true });
+  } catch (error) {
+    const code = (error as { code?: string }).code ?? "";
+    if (relDir === "" || !UNREADABLE_CODES.has(code)) {
+      throw error;
+    }
+    state.notIndexed.push({ path: relDir, reason: "unreadable" });
+    log.warn("discover.unreadable", { path: relDir, code });
+    return null;
   }
 }
 

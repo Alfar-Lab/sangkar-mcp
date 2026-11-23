@@ -59,11 +59,18 @@ sangkar index is how the first index is created; until then every tool answers b
 
 const WORKER_FLAGS = "[--mode full|fast] [--force] [--repo-root <path>] [--data-dir <path>]";
 
+/**
+ * `--yes` belongs to the verb, not to the worker: it answers the question the verb asks before it
+ * spawns one, when the tree was autodetected above the working directory and stdin is a terminal.
+ */
+const INDEX_EXTRA =
+  "[--yes]\n  --yes          index the autodetected tree without asking (the answer a script gives)";
+
 /** One verb's own flags; `--help` on a verb prints this and exits without running anything. */
 const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   mcp: "usage: sangkar mcp [--repo-root <path>] [--data-dir <path>] [--json]",
   worker: `usage: sangkar worker ${WORKER_FLAGS}`,
-  index: `usage: sangkar index ${WORKER_FLAGS}`,
+  index: `usage: sangkar index ${WORKER_FLAGS} ${INDEX_EXTRA}`,
   // The three flags `--serve` added to the telemetry verb; the block a refusal prints lives in
   // `src/shared/telemetry/cli.ts`, and these lines are the answer `--help` gives from here.
   telemetry: `usage: sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]

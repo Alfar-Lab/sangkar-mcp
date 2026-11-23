@@ -154,7 +154,9 @@ One database file per project, **inside the project directory**:
 
 Resolution order: `<root>/.sangkar/` → `--data-dir <path>`. A relative `--data-dir` resolves against
 the repo root, which is `--repo-root` when given and otherwise the nearest ancestor of the working
-directory holding `.sangkar/`, then the nearest holding `.git`, then the working directory itself.
+directory holding `.sangkar/`, then the nearest holding `.git`, then the working directory itself. A
+tree found above the working directory is reported and confirmed before the run, and a refusal writes
+nothing — no `.sangkar/`, no database (`INDEXING-PIPELINE.md` §1.1).
 
 Rules:
 
@@ -268,11 +270,13 @@ CREATE TABLE file (
 
 -- every path the indexer looked at and did NOT index. Absence needs this:
 -- without it, "no callers in X" cannot distinguish "empty" from "never parsed".
+-- `unreadable` is the one reason whose path is a directory: a directory the process could not
+-- open is a hole in coverage, so it is a row here instead of the end of the walk.
 CREATE TABLE not_indexed (
     id       INTEGER PRIMARY KEY,
     path     TEXT NOT NULL,
     reason   TEXT NOT NULL,     -- grammar_unavailable | binary | ignored | size_cap
-                                -- | unsupported_ext | symlink | parse_failed
+                                -- | unsupported_ext | symlink | parse_failed | unreadable
     detail   TEXT,
     language TEXT,
     UNIQUE (path, reason)

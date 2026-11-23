@@ -323,6 +323,10 @@ Node-vs-edge stays a table lookup, for the same reason both parents did it that 
 CRG silently skips a file when its grammar is unavailable (observed: `xslt`, `liquid` → `LookupError`, file gets no symbols but still appears in the language census). This design surfaces it:
 
 - a missing/unloadable grammar → `coverage.not_indexed += {path, reason: "grammar_unavailable", language}`
+- a directory the process may not open → `coverage.not_indexed += {path, reason: "unreadable"}`. The
+  walk continues: one `0700` directory belongs to somebody else and is not a reason to abandon a run
+  that may already have hashed gigabytes, but it is also not allowed to disappear from the answer.
+  The reason's path is a directory, the single such row in the table.
 - a parse with ERROR/MISSING regions → `coverage.failed += {path, ranges}` (CBM's `parse_partial` idea, which the user can act on)
 - the language census reports `{language, files, parsed, failed}` — never a bare list
 

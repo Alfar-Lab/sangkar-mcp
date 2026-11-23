@@ -17,10 +17,30 @@ in-process, and no process writes a graph except that child.
 | the per-repo watcher | `sangkar daemon run` | one watcher per registered, watchable repository; it polls `git HEAD`, the porcelain status, and the mtime and size of every parseable path that status names, debounces, and spawns one `sangkar worker` per change |
 | `sangkar index` | the operator | the first index, or a forced repair — works with no daemon running |
 | `sangkar index --no-register` | the operator | the same run, with the registry left exactly as it was |
+| `sangkar index --yes` | the operator | the same run, answering the confirmation in §1.1 without a prompt |
 | the `index` tool | a `sangkar mcp` session | the repair path; the same child, spawned by the root that owns the process |
 
 An MCP session never polls a tree. The daemon owns every watcher, which is what keeps a session's cost
 per call independent of how many repositories are registered.
+
+### 1.1 The verb confirms a guessed tree; the tool cannot
+
+The tree is guessed by the walk in `shared/config.ts` (`detectTree`), so the `index` **verb** reports
+the guess and, when it can, asks before spawning the worker. The `index` **tool** and the watcher never
+ask: MCP has no terminal, and a watcher is spawned for a tree the registry already names.
+
+| The tree was… | stdin is a terminal | otherwise |
+|---|---|---|
+| named by `--repo-root`, or `--yes` given | run | run |
+| the working directory itself (`levels: 0`) | run | run |
+| found above the working directory | print the chain and the resolution, then ask | registered **and** ≤ `MAX_AUTODETECT_LEVELS` (3) levels up: run; else refuse |
+
+The refusal is `refused: … Nothing was indexed.` on stderr with exit 2, and it happens **before the
+worker is spawned**, so a refused run creates no data dir, no database, and no registry entry — the
+reason the order in `main()` matters. Enter, an unreadable answer and a stdin that closes are all a
+no. `MAX_AUTODETECT_LEVELS` is a budget, not a rule: it exists because a `.sangkar` in `$HOME` makes
+every directory below the home directory resolve to it, and `--yes` is how an operator says the deep
+tree is the one they mean.
 
 ## 2. A successful run registers the repository
 
@@ -28,7 +48,8 @@ Registration is a convenience for the next call, so it is never allowed to fail 
 
 - **What counts as success:** exit 0 (published) or exit 2 (nothing to do). Exit 1, exit 75 (another
   index holds the lock) and a rejected spawn do not register: a repository the next call cannot read is
-  worse than one nobody added.
+  worse than one nobody added. Exit 2 is shared with the refusal in §1.1 — which returns before the
+  worker and never reaches `registerIfAsked` — so the code alone does not say whether a run wrote.
 - **The `index` verb** registers after the run, unless `--no-register` was given.
 - **The `index` tool** registers after its envelope is mapped, when the `register` argument is on (it
   defaults to `true`; `--no-register` turns it off).

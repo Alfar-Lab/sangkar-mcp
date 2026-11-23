@@ -123,6 +123,8 @@ function harness(
   const config: AppConfig = {
     repoRoot,
     dataDir,
+    // The harness names its tree through `--repo-root`, so the run is never a guess and never asks.
+    repoDetection: { root: repoRoot, via: null, levels: 0, chain: [repoRoot], explicit: true },
     home: join(dir, "home"),
     registryPath: options.registryPath?.(dir) ?? join(dir, "home", "sangkar.json"),
     configPath: join(dir, "home", "config.json"),

@@ -62,6 +62,15 @@ The repository is found by walking up from the current directory: the nearest an
 `.sangkar`, else the nearest holding `.git`, else the current directory itself. `--repo-root` states
 it explicitly, which is what a script should do.
 
+A tree found *above* the current directory is a guess, and `sangkar index` says so before it reads
+anything: it prints the directory it started in, the chain of parents it walked, and the tree it
+settled on, then asks `continue with this repo? (y/N)` — Enter means no, and a no writes nothing at
+all. Two runs never ask: one started in the tree itself (`levels: 0`, the first index of a fresh
+checkout), and one that passes `--yes`. Without a terminal the question cannot be asked, so the run
+is refused (exit 2, with the reason and the three ways forward on stderr) unless the tree is already
+registered **and** at most 3 levels above the working directory; `sangkar repo add <path>` is how a
+tree stops being asked about, and `--yes` is what a script passes.
+
 ### Where the data lives
 
 One directory per working tree, beside the code it describes, and one directory per installation
@@ -258,6 +267,8 @@ sangkar <tool> [arguments] [global flags] — the name is the first token that i
   With no command name at all, `sangkar --repo-root <path>` is the MCP server, because `mcp` is the
   default — and `--repo-root` takes the token after it as its value, so `sangkar --repo-root status`
   serves the tree named `status` rather than reporting a status.
+- `--yes` belongs to `index` alone: it answers the confirmation described in [First index](#first-index)
+  for a run that has no terminal to ask on.
 - `--help` exits 0 with that tool's usage block, or, on a verb, the verb's own usage line — `sangkar
   daemon --help`, `sangkar repo --help`, and so on — answered before any argument is checked.
 - `sangkar index` streams progress as JSON log lines on stderr and exits 0 once it publishes. Nothing

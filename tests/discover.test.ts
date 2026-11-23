@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, truncate, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { ALWAYS_EXCLUDED, discover, SIZE_CAP_BYTES } from "../src/indexer/discover";
@@ -143,4 +143,30 @@ describe("discover", () => {
       { path: "keep.ts", reason: "ignored", language: "typescript" },
     ]);
   });
+
+  // A `0700` directory owned by another user must not end the walk: it is one coverage row. Running as
+  // root bypasses the permission bits, so the case is skipped rather than asserted vacuously.
+  test.skipIf(process.getuid?.() === 0)(
+    "records an unreadable directory instead of abandoning the walk",
+    async () => {
+      const repoRoot = await tempRepo();
+      await writeFile(join(repoRoot, "keep.ts"), "export const kept = 1;\n");
+      const locked = join(repoRoot, "locked");
+      await mkdir(join(locked, "inner"), { recursive: true });
+      await writeFile(join(locked, "secret.ts"), "export const secret = 1;\n");
+      await chmod(locked, 0o000);
+
+      try {
+        const result = await discover(repoRoot);
+
+        // The readable sibling is indexed, and the directory that could not be opened is the one row.
+        expect(result.files.map((file) => file.path)).toEqual(["keep.ts"]);
+        expect(result.notIndexed).toEqual([{ path: "locked", reason: "unreadable" }]);
+        expect(result.skipped).toBe(1);
+      } finally {
+        // Restored before `afterEach` removes the tree: deleting a directory needs to read it.
+        await chmod(locked, 0o755);
+      }
+    },
+  );
 });

@@ -11,6 +11,10 @@ How to run and check the code on this machine. Entry point: [`AGENTS.md`](../../
 A stripped shell has none of that — `env -i`, a cron job, a CI image without the profile — and there the
 export is part of the command: `PATH="$HOME/.bun/bin:$PATH"`.
 
+`sangkar index` asks before it uses a tree it found *above* the working directory, so a non-interactive
+run needs `--yes` unless it starts in the tree itself or passes `--repo-root` (`INDEXING-PIPELINE.md`
+§1.1). Every command below runs from the tree, which is the case that never asks.
+
 ```sh
 bun install
 bun run bin/sangkar.ts index          # first index; until then every tool answers bootstrapping

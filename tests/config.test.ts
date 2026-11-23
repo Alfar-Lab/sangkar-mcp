@@ -2,7 +2,14 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { detectRepoRoot, flagValue, HOME_DIR_NAME, loadConfig, withRepo } from "#shared/config";
+import {
+  detectRepoRoot,
+  detectTree,
+  flagValue,
+  HOME_DIR_NAME,
+  loadConfig,
+  withRepo,
+} from "#shared/config";
 import { CURSOR_KEY_MIN_BYTES } from "#shared/cursor";
 
 /**
@@ -103,6 +110,87 @@ describe("detectRepoRoot", () => {
   test("returns the directory itself when nothing matches", () => {
     const bare = tempDir("sangkar-detect-bare-");
     expect(detectRepoRoot(bare)).toBe(resolve(bare));
+  });
+});
+
+describe("detectTree", () => {
+  test("reports the marker, the depth above the working directory, and the chain crossed", () => {
+    const root = repoWithDataDir("sangkar-tree-data-");
+    const deep = nested(root, "src", "shared");
+
+    const detected = detectTree(deep);
+
+    expect(detected.root).toBe(root);
+    expect(detected.via).toBe(".sangkar");
+    // Two directories above: `src/shared` -> `src` -> the root.
+    expect(detected.levels).toBe(2);
+    // The chain is what a warning prints, so it runs from the working directory up to the root.
+    expect(detected.chain).toEqual([deep, join(root, "src"), root]);
+    expect(detected.explicit).toBe(false);
+  });
+
+  test("a directory with no marker is its own tree at level 0, and says no marker was found", () => {
+    const bare = tempDir("sangkar-tree-bare-");
+
+    const detected = detectTree(bare);
+
+    expect(detected.root).toBe(resolve(bare));
+    expect(detected.via).toBeNull();
+    expect(detected.levels).toBe(0);
+    expect(detected.chain).toEqual([resolve(bare)]);
+  });
+
+  test("prefers .sangkar over .git and names the marker it used", () => {
+    const both = tempDir("sangkar-tree-both-");
+    mkdirSync(join(both, ".git"), { recursive: true });
+    mkdirSync(join(both, ".sangkar"), { recursive: true });
+
+    const detected = detectTree(nested(both, "src"));
+
+    expect(detected.root).toBe(both);
+    expect(detected.via).toBe(".sangkar");
+    expect(detected.levels).toBe(1);
+  });
+
+  test("a linked worktree's .git file is a marker too", () => {
+    const worktree = tempDir("sangkar-tree-worktree-");
+    writeFileSync(join(worktree, ".git"), "gitdir: /elsewhere/.git/worktrees/wt\n");
+
+    const detected = detectTree(worktree);
+
+    expect(detected.via).toBe(".git");
+    expect(detected.levels).toBe(0);
+  });
+
+  test("--repo-root names the tree: nothing was walked, so nothing is a guess", () => {
+    const autodetected = repoWithDataDir("sangkar-tree-flag-auto-");
+    const chosen = tempDir("sangkar-tree-flag-chosen-");
+
+    const config = loadConfig({
+      argv: ["index", "--repo-root", chosen],
+      cwd: nested(autodetected, "src"),
+    });
+
+    expect(config.repoDetection).toEqual({
+      root: chosen,
+      via: null,
+      levels: 0,
+      chain: [chosen],
+      explicit: true,
+    });
+  });
+
+  test("withRepo states the tree it was handed, so a served tree is never reported as a guess", () => {
+    const autodetected = repoWithDataDir("sangkar-tree-with-auto-");
+    const other = tempDir("sangkar-tree-with-other-");
+    const config = loadConfig({ argv: [], cwd: nested(autodetected, "src") });
+    expect(config.repoDetection.levels).toBe(1);
+
+    const rebound = withRepo(config, other);
+
+    expect(rebound.repoDetection.explicit).toBe(true);
+    expect(rebound.repoDetection.root).toBe(resolve(other));
+    expect(rebound.repoDetection.levels).toBe(0);
   });
 });
 

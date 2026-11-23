@@ -28,7 +28,7 @@
  * (`src/daemon/**`), so a `sangkar mcp` process only ever reads.
  */
 import { existsSync, realpathSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { isAbsolute, join, relative } from "node:path";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -47,8 +47,15 @@ import {
   type ToolArgs,
   usageOf,
 } from "#shared/cli/args";
+import { askContinue, indexGate, refusalMessage } from "#shared/cli/index-gate";
 import { EXIT_FAILURE, EXIT_USAGE, exitCodeOf, mcpText, renderOutput } from "#shared/cli/render";
-import { type AppConfig, flagValue, loadConfig, withRepo } from "#shared/config";
+import {
+  type AppConfig,
+  flagValue,
+  loadConfig,
+  MAX_AUTODETECT_LEVELS,
+  withRepo,
+} from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import {
   bootstrapping,
@@ -1288,6 +1295,15 @@ export async function main(mode: string, argv: string[]): Promise<number> {
     const registry = readRegistry(config.registryPath);
     const pinnedRoot = flagValue(argv, "repo-root") ?? null;
 
+    // Before anything is opened, recorded or migrated: a guessed tree is confirmed or refused, so a
+    // run that nobody meant leaves no database, no telemetry and no registry entry behind.
+    if (mode === "index") {
+      const stop = await confirmTree(config, registry, argv);
+      if (stop !== null) {
+        return stop;
+      }
+    }
+
     if (mode === "mcp") {
       // The server builds one recorder per repository it serves and closes them in `shutdown`.
       return await runMcp(config, registry, pinnedRoot, argv.includes("--json"));
@@ -1334,6 +1350,89 @@ export async function main(mode: string, argv: string[]): Promise<number> {
     });
     return EXIT_USAGE;
   }
+}
+
+/**
+ * The `index` verb's first duty: say which tree it is about to index, and refuse to guess when there
+ * is no one to ask. A tree the caller named is never questioned, and neither is the working directory
+ * itself — an index run that starts in the tree is the bootstrap the product exists for. What is
+ * questioned is a tree found *above* the working directory, which is how a `.sangkar` in `$HOME`
+ * quietly turns an index of one project into an index of everything under the home directory.
+ *
+ * Returns the process code to stop with, or `null` to index. Every line goes to stderr: stdout is the
+ * protocol and, on this verb, the caller's own output — never a question and never an answer.
+ */
+async function confirmTree(
+  config: AppConfig,
+  registry: Registry,
+  argv: readonly string[],
+): Promise<number | null> {
+  const detection = config.repoDetection;
+  if (detection.explicit) {
+    return null;
+  }
+
+  const cwd = process.cwd();
+  const registered = registry.repos.includes(canonicalRoot(config.repoRoot));
+  if (detection.levels > 0) {
+    // Three lines, so the operator can see the guess before the walk reads anything: the directory
+    // that is not a repository, the chain the walk crossed, and the tree it settled on.
+    if (!insideRegistered(registry, cwd)) {
+      log.warn(`${cwd} is not registered as repo root`, { cwd });
+    }
+    log.warn("index.walk", {
+      from: cwd,
+      chain: detection.chain.join(" → "),
+      marker: detection.via ?? "none",
+    });
+    log.warn("index.resolution", {
+      repoRoot: config.repoRoot,
+      detected_via: detection.via ?? "cwd",
+      levels: detection.levels,
+      max_levels: MAX_AUTODETECT_LEVELS,
+      registered,
+    });
+  }
+
+  const gate = indexGate({
+    explicit: detection.explicit,
+    yes: argv.includes("--yes"),
+    levels: detection.levels,
+    tty: process.stdin.isTTY === true,
+    registered,
+  });
+  if (gate.action === "run") {
+    return null;
+  }
+
+  const refusal = (reason: "unregistered" | "too_deep" | "declined"): number => {
+    process.stderr.write(
+      `${refusalMessage({ root: config.repoRoot, cwd, levels: detection.levels, reason })}\n`,
+    );
+    return EXIT_USAGE;
+  };
+  if (gate.action === "refuse") {
+    return refusal(gate.reason);
+  }
+  // Asked, and only a `y` proceeds: an unanswered prompt (a stdin that closes, a pty that dies) is a
+  // no, because a question nobody answered is not consent to index a whole home directory.
+  return (await askContinue()) ? null : refusal("declined");
+}
+
+/**
+ * Whether the working directory sits inside a registered tree. The registry holds canonical roots, so
+ * the directory is canonicalised before the prefix test; a subdirectory of a registered tree is not a
+ * tree of its own to complain about.
+ */
+function insideRegistered(registry: Registry, cwd: string): boolean {
+  const canonicalCwd = canonicalRoot(cwd);
+  for (const repo of registry.repos) {
+    const rel = relative(repo, canonicalCwd);
+    if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**

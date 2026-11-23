@@ -33,7 +33,7 @@ export interface IndexedFileRow {
 export interface SkippedPathRow {
   readonly id: number;
   readonly path: string;
-  /** `grammar_unavailable` | `binary` | `ignored` | `size_cap` | `unsupported_ext` | … */
+  /** `grammar_unavailable` | `binary` | `ignored` | `size_cap` | `unsupported_ext` | `unreadable` | … */
   readonly reason: string;
   readonly detail: string | null;
   readonly language: string | null;

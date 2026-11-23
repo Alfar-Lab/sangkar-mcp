@@ -13,7 +13,8 @@ src/index.ts                composition root: builds ToolContext, registers tool
                             `index` run touched, installs SIGINT/SIGTERM, maps handler throws to
                             envelopes
 src/shared/                 kernel + engine — the only cross-module import target
-  config.ts                 AppConfig, repo-root autodetection, the machine home (`SANGKAR_HOME`), the
+  config.ts                 AppConfig, repo-root autodetection (detectTree: the marker, the depth and
+                            the chain; MAX_AUTODETECT_LEVELS), the machine home (`SANGKAR_HOME`), the
                             registry, config and daemon paths, withRepo() for a second repository
   global-config.ts          `<home>/config.json`: the installation's defaults — watch, watch_interval,
                             telemetry, the report server's host and port, and the two budgets. Written
@@ -40,6 +41,8 @@ src/shared/                 kernel + engine — the only cross-module import tar
   cli/render.ts             the only place a rendering is chosen: `renderToon` by default, `renderJson`
                             under `--json`, `mcpText` for the protocol result, `exitCodeOf`
   cli/repo.ts               the `repo` verb: add, remove, list, config
+  cli/index-gate.ts         whether an `index` run may start: indexGate() over the five facts, the
+                            refusal text, and askContinue() reading one line (`y`/`yes` only)
   store/schema.ts           Drizzle table definitions (eleven tables)
   store/migrations/         0000_init.sql + meta/ (drizzle-kit) and raw/0001_fts.sql (FTS5)
   store/migrate.ts          one runner, one ledger, forward-only
@@ -71,7 +74,8 @@ src/indexer/                the writer — runs in a spawned process, never in t
   lang/types.ts, registry.ts  the language layer as DATA: extension map + class/function/import/call/
                             inheritance node-type lists for 12 languages
   parse.ts                  web-tree-sitter pool with a bounded per-language LRU
-  discover.ts               walk + exclusions; records what was skipped and why
+  discover.ts               walk + exclusions; records what was skipped and why, and records a
+                            directory it could not read as reason `unreadable` instead of aborting
   extract.ts                one cursor walk driven by the node-type tables
   resolve.ts                binding: same-file → imports → unique name → inherited method
   persist.ts                write a unit; metrics, tested_by, FTS delta, tombstones, generation
