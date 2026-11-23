@@ -39,6 +39,15 @@ function nested(root: string, ...segments: string[]): string {
   return dir;
 }
 
+/**
+ * A machine home beside a fixture. Every case that does not spell an environment gets one: the
+ * process reads `<home>/config.json`, and a test that fell back to `homedir()` would answer
+ * differently on a machine whose owner had edited their own.
+ */
+function machineHome(root: string): string {
+  return join(root, "home");
+}
+
 /** Key strength in the unit the cursor guard measures, so the assertions match its check. */
 function keyBytes(key: string): number {
   return Buffer.byteLength(key, "utf8");
@@ -145,7 +154,7 @@ describe("loadConfig", () => {
 
   test("falls back to cwd in a bare directory", () => {
     const bare = tempDir("sangkar-config-bare-");
-    const config = loadConfig({ env: {}, cwd: bare });
+    const config = loadConfig({ env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
     expect(config.repoRoot).toBe(resolve(bare));
     expect(config.dataDir).toBe(join(resolve(bare), ".sangkar"));
   });
@@ -191,7 +200,7 @@ describe("loadConfig", () => {
 
   test("keeps the fallback budgets and supplies a key when unset", () => {
     const bare = tempDir("sangkar-config-budget-");
-    const config = loadConfig({ argv: [], env: {}, cwd: bare });
+    const config = loadConfig({ argv: [], env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
     expect(config.budgets.defaultTokens).toBe(1_200);
     expect(config.budgets.maxTokens).toBe(32_000);
     expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
@@ -347,7 +356,7 @@ describe("withRepo", () => {
 describe("loadConfig telemetry", () => {
   test("an unset switch means enabled", () => {
     const bare = tempDir("sangkar-telemetry-unset-");
-    const config = loadConfig({ argv: [], env: {}, cwd: bare });
+    const config = loadConfig({ argv: [], env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
     expect(config.telemetry.enabled).toBe(true);
   });
 
@@ -372,7 +381,11 @@ describe("loadConfig telemetry", () => {
 
   test("the dir is always computed inside the data dir, including under --data-dir", () => {
     const bare = tempDir("sangkar-telemetry-dir-");
-    const autodetected = loadConfig({ argv: [], env: {}, cwd: bare });
+    const autodetected = loadConfig({
+      argv: [],
+      env: { SANGKAR_HOME: machineHome(bare) },
+      cwd: bare,
+    });
     expect(autodetected.telemetry.dir).toBe(join(autodetected.dataDir, "telemetry"));
 
     const relocated = loadConfig({
@@ -388,14 +401,14 @@ describe("loadConfig telemetry", () => {
 describe("loadConfig cursor key", () => {
   test("generates a key long enough for the cursor module when the variable is absent", () => {
     const bare = tempDir("sangkar-config-key-absent-");
-    const config = loadConfig({ argv: [], env: {}, cwd: bare });
+    const config = loadConfig({ argv: [], env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
     expect(keyBytes(config.cursorKey)).toBeGreaterThanOrEqual(CURSOR_KEY_MIN_BYTES);
   });
 
   test("generates a different key per call, so the fallback is random rather than constant", () => {
     const bare = tempDir("sangkar-config-key-random-");
-    const first = loadConfig({ argv: [], env: {}, cwd: bare });
-    const second = loadConfig({ argv: [], env: {}, cwd: bare });
+    const first = loadConfig({ argv: [], env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
+    const second = loadConfig({ argv: [], env: { SANGKAR_HOME: machineHome(bare) }, cwd: bare });
     expect(first.cursorKey).not.toBe(second.cursorKey);
   });
 

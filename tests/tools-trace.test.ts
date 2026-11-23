@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
 import { CANDIDATE_CAP } from "#shared/domain/resolve";
@@ -340,7 +342,7 @@ function makeContext(reader: GraphReader): ToolContext {
     now: () => NOW,
     config: loadConfig({
       argv: ["--repo-root", "/tmp/fixture"],
-      env: { SANGKAR_CURSOR_KEY: KEY },
+      env: { SANGKAR_HOME: join(tmpdir(), "sangkar-tools-trace-home"), SANGKAR_CURSOR_KEY: KEY },
     }),
   };
 }

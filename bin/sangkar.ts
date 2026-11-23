@@ -68,8 +68,8 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   // `src/shared/telemetry/cli.ts`, and these lines are the answer `--help` gives from here.
   telemetry: `usage: sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD|Nd>] [--repo-root <path>] [--data-dir <path>]
   --serve        serve the report for every registered repository on loopback instead of writing one file
-  --port <n>     the port to bind (default: 7317; 0 picks a free port)
-  --host <addr>  the address to bind (default: 127.0.0.1; loopback only)`,
+  --port <n>     the port to bind (default: config.json's daemon.port, else 7317; 0 picks a free port)
+  --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)`,
   // Held verbatim in `src/daemon/cli.ts` and `src/shared/cli/repo.ts`, which print it on a refusal;
   // a test compares the two so `--help` and a refusal cannot drift apart.
   daemon: `usage: sangkar daemon [run|start|stop|status] [--port <n>] [--host <addr>]
@@ -77,9 +77,9 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   start   start it as a detached child and return once it holds the pid file
   stop    stop the daemon this home's pid file names
   status  one header line, then one line per registered repository
-  --port <n>     the report server's port (default: 7317; 0 picks a free port)
-  --host <addr>  the address to bind (default: 127.0.0.1; loopback only)
-  --port and --host belong to "run"; start runs it with the defaults`,
+  --port <n>     the report server's port (default: config.json's daemon.port, else 7317; 0 picks a free port)
+  --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
+  --port and --host belong to "run"; start passes neither, so it binds the same defaults`,
   repo: `usage: sangkar repo [add|remove|list|config] <path>
   add <path>                register a tree and print its canonical path
   remove <path>             unregister a tree; the tree and its graph are left alone
@@ -110,6 +110,16 @@ if (isReserved(requested) && (argv.includes("--help") || argv.includes("-h"))) {
   process.exit(0);
 }
 
+// The machine-level settings file is created before any verb reads it: a home without one is a
+// fresh installation, not a broken one, and an operator who wants to change a default should find
+// the file already there. The `--help` answers above exit first, so asking for usage never writes
+// to the config directory, and a home this process may not write is one warning and the defaults.
+// Just the home, not a whole `AppConfig`: loading the config here would read the file again and
+// repeat its warnings once per verb, and the verb below resolves the config for its own work.
+const { resolveHome } = await import("../src/shared/config");
+const { ensureGlobalConfig } = await import("../src/shared/global-config");
+ensureGlobalConfig(resolveHome(process.env));
+
 // The report needs the telemetry directory and nothing else — no graph, no store, no kernel — so it
 // dispatches here rather than through `main`, which is the only other place a verb could go.
 if (requested === "telemetry") {
@@ -134,8 +144,11 @@ const { main } = await import("../src/index");
 
 const code = await main(requested, argv);
 
-// 2 is the usage exit code: `main` already wrote the reason, and the banner belongs beside it.
-if (code === 2) {
+// 2 is the usage exit code for a tool name that was called wrongly, and `main` already wrote the
+// reason. A reserved verb owns its own meaning of 2 — an index run with nothing to do reports
+// `WORKER_EXIT.nothingToDo` — so printing the banner for it would tell an operator their command
+// was malformed when the run actually succeeded.
+if (code === 2 && !isReserved(requested)) {
   process.stderr.write(USAGE);
 }
 

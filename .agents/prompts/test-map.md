@@ -18,6 +18,7 @@ Which tests guard which change. Entry point: [`AGENTS.md`](../../AGENTS.md).
 | the CLI surface | `cli.test.ts`, `cli-args.test.ts`, `cli-render.test.ts` |
 | the registry file, and how a call selects a repository | `registry.test.ts` |
 | the per-repo settings file, its defaults and its clamp | `repo-config.test.ts` |
+| the machine-level `config.json`, its creation and its precedence | `global-config.test.ts` |
 | the reader pool and its idle eviction | `pool.test.ts` |
 | the daemon's pid file | `pidlock.test.ts` |
 | one reconcile pass: missing, unwatched, retuned, forgotten | `daemon-reconcile.test.ts` |

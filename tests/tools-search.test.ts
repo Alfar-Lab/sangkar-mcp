@@ -1,4 +1,7 @@
 import { describe, expect, test } from "bun:test";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { BYTES_PER_TOKEN } from "#shared/budget";
 import { type AppConfig, loadConfig } from "#shared/config";
 import { createCursors } from "#shared/cursor";
@@ -243,9 +246,11 @@ function fakeReader(options: FakeOptions = {}): GraphReader {
   };
 }
 
+// A home of its own: the machine file would otherwise be whatever the developer's has.
+const fakeHome = mkdtempSync(join(tmpdir(), "sangkar-tools-search-home-"));
 const fakeConfig: AppConfig = loadConfig({
   argv: ["--repo-root", "/tmp/fake"],
-  env: { SANGKAR_CURSOR_KEY: "k".repeat(32) },
+  env: { SANGKAR_HOME: fakeHome, SANGKAR_CURSOR_KEY: "k".repeat(32) },
 });
 
 function fakeContext(options: FakeOptions = {}): ToolContext {

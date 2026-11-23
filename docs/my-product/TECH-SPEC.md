@@ -49,6 +49,7 @@ Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
 │   ├── index.ts                # composition root: builds the server, registers tools
 │   ├── shared/                 # LAYER 1 — kernel + engine (the ONLY cross-module import target)
 │   │   ├── config.ts
+│   │   ├── global-config.ts
 │   │   ├── log.ts
 │   │   ├── errors.ts
 │   │   ├── envelope.ts
@@ -186,7 +187,8 @@ shared layer that knows what `trace` means.
 
 | File | Exports (shape only) | Contract |
 |---|---|---|
-| `config.ts` | `AppConfig` — dataDir, repoRoot, budgets, limits, langOverrides; `loadConfig()` | resolved **once** at process start; no module reads `process.env` directly |
+| `config.ts` | `AppConfig` — dataDir, repoRoot, home, registry/config paths, daemon address, budgets, repoDefaults; `loadConfig()`, `withRepo()` | resolved **once** at process start; no module reads `process.env` directly |
+| `global-config.ts` | `GlobalConfig`, `DEFAULT_GLOBAL_SETTINGS`, `readGlobalConfig()`, `ensureGlobalConfig()`, `repoDefaultsOf()` | `<home>/config.json`, the installation's defaults; created by the first run, defensive read, one warning per broken field |
 | `log.ts` | `log.{debug,info,warn,error}` → **stderr** JSON lines | never writes stdout (§11) |
 | `errors.ts` | `AppError` with a closed `code` union | every thrown error crosses the boundary as one of these (§11) |
 | `envelope.ts` | `Envelope<T>`, `ok()`, `ambiguous()`, `notFound()`, `fail()`, `bootstrapping()` | the only way to build a response; guarantees the 9 fields from `TOOLS-SPEC.md` §1.1 |
@@ -535,7 +537,8 @@ Error codes used so far (from `DATABASE.md` §5 and the tool specs): `wrong_proj
 
 Usage telemetry is the second write path, and it is local-only: records go to
 `<dataDir>/telemetry/YYYY-MM-DD.jsonl`, never to stdout and never to the network, and the whole path is
-gated by `SANGKAR_TELEMETRY` (`shared/config.ts`, §5.1). It changes none of the rules above — a record
+gated by the consent chain — `SANGKAR_TELEMETRY`, else `<home>/config.json`'s `telemetry`
+(`shared/config.ts`, §5.1; `TELEMETRY.md` §2). It changes none of the rules above — a record
 is written from a `finally` after the answer, a throwing sink is logged once and disabled instead of
 propagating, and `sangkar telemetry` prints one human line, exactly like a tool call. The record
 schemas and the privacy prohibition are specified in [TELEMETRY.md](TELEMETRY.md) and are not repeated

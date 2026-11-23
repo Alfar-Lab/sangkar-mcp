@@ -148,7 +148,8 @@ One database file per project, **inside the project directory**:
 <repo-root>/.sangkar/graph.db-shm
 <repo-root>/.sangkar/write.lock      <- single-writer flock, outside the DB
 <repo-root>/.sangkar/.gitignore      <- a single `*`, written on first index
-<repo-root>/.sangkar/config.json     <- this tree's policy file: watch, watch_interval, telemetry
+<repo-root>/.sangkar/config.json     <- this tree's policy file: watch, watch_interval, telemetry,
+                                        each omitting to <home>/config.json's default
 ```
 
 Resolution order: `<root>/.sangkar/` → `--data-dir <path>`. A relative `--data-dir` resolves against
@@ -169,13 +170,18 @@ Rules:
    `status.payload.project.db_path`.
 
 **`$SANGKAR_HOME` holds no graph.** The machine-level home — `$SANGKAR_HOME`, else
-`${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` — holds exactly the three files that belong to the
-installation rather than to a tree: `sangkar.json` (the registry of registered roots), `daemon.pid`
-(the daemon's singleton lock) and `daemon.log`. No `graph.db` is ever resolved there, and the daemon
-opens no database at all (§5). `config.json` is the one file a repository gains that is neither a
-graph nor a lock: this tree's `watch`, `watch_interval` and `telemetry` settings, hand-editable,
-read by the daemon on every reconcile tick and by the server once per process, and degrading to the
-defaults with one warning when it is missing or malformed (`INDEXING-PIPELINE.md` §3).
+`${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` — holds exactly the four files that belong to the
+installation rather than to a tree: `config.json` (the installation's defaults), `sangkar.json` (the
+registry of registered roots), `daemon.pid` (the daemon's singleton lock) and `daemon.log`. No
+`graph.db` is ever resolved there, and the daemon opens no database at all (§5). The machine
+`config.json` is written with its defaults by the first real run and read once per process; it holds
+`watch`, `watch_interval`, `telemetry`, `daemon.host`, `daemon.port` and the two budgets
+(`INDEXING-PIPELINE.md` §3.0).
+
+`<repo>/.sangkar/config.json` is the one file a repository gains that is neither a graph nor a lock:
+this tree's `watch`, `watch_interval` and `telemetry` settings, hand-editable, read by the daemon on
+every reconcile tick and by the server once per process, each key omitting to the machine value and
+degrading with one warning when it is malformed (`INDEXING-PIPELINE.md` §3.1).
 
 Why in the tree rather than a shared cache dir: the database beside the code *is* the project identity, so
 no registry and no `project` argument is needed (CBM spent 12.4 % of its calls on `list_projects`

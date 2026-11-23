@@ -7,6 +7,9 @@ import { type Logger, log } from "#shared/log";
  * and whether its usage may be recorded. The file is hand-editable and outlives any one process,
  * so every read is defensive — a broken file degrades to the defaults, never to a crash in the
  * daemon or a tool call.
+ *
+ * A repository that says nothing inherits the machine-level file (`<home>/config.json`, see
+ * `./global-config.ts`): this file narrows those defaults, it does not restate them.
  */
 
 export const WATCH_INTERVAL_DEFAULT_MS = 2_000;
@@ -23,16 +26,24 @@ export interface RepoConfig {
   readonly telemetry: boolean;
 }
 
+/** The three values a repository's file can override, and what a missing field falls back to. */
+export interface RepoDefaults {
+  readonly watch: boolean;
+  readonly watchIntervalMs: number;
+  readonly telemetry: boolean;
+}
+
 /**
- * What an absent, unreadable or unparseable file means. Both switches are `true` because this
- * file only narrows what the machine allows; the machine-level switch is the one an operator
- * turns things off with, and `recordingEnabled` still requires consent and registration.
+ * The built-in fallback, used only when no machine-level file supplies one. Both switches are
+ * `true` because this file only narrows what the machine allows; the machine-level switch is the
+ * one an operator turns things off with, and `recordingEnabled` still requires consent and
+ * registration.
  */
-export const DEFAULT_REPO_SETTINGS: {
-  readonly watch: true;
-  readonly watchIntervalMs: 2000;
-  readonly telemetry: true;
-} = { watch: true, watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS, telemetry: true };
+export const DEFAULT_REPO_SETTINGS: RepoDefaults = {
+  watch: true,
+  watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS,
+  telemetry: true,
+};
 
 /** Mirrors the private `DATA_DIR_NAME` in `config.ts`, which is not exported for import. */
 const DATA_DIR_NAME = ".sangkar";
@@ -56,11 +67,14 @@ function messageOf(e: unknown): string {
  * The interval in milliseconds, clamped into the supported band. A number outside it is a
  * mistake in the file, not a reason to stop watching, so both ends are clamped rather than
  * honoured; a non-integer, a zero, a negative or a wrong type is not a slow poll but nonsense,
- * and takes the default.
+ * and takes `fallback` — the machine default when one was supplied, else the built-in period.
  */
-function intervalOf(raw: unknown): number {
+export function clampWatchInterval(
+  raw: unknown,
+  fallback: number = WATCH_INTERVAL_DEFAULT_MS,
+): number {
   if (typeof raw !== "number" || !Number.isInteger(raw) || raw <= 0) {
-    return WATCH_INTERVAL_DEFAULT_MS;
+    return fallback;
   }
   if (raw < WATCH_INTERVAL_MIN_MS) {
     return WATCH_INTERVAL_MIN_MS;
@@ -71,19 +85,25 @@ function intervalOf(raw: unknown): number {
 /**
  * The settings for `repoRoot`, read from `<dataDir>/config.json`. Each rejection logs exactly one
  * warning naming the reason and the path — a file-level failure falls back to every default, a
- * bad field falls back alone, so one typo does not silently discard the others.
+ * bad field falls back alone, so one typo does not silently discard the others. `defaults` is the
+ * machine-level fallback (`<home>/config.json`); the built-in one is used when a caller has none.
  */
 export function readRepoConfig(
   repoRoot: string,
-  options: { readonly dataDir?: string; readonly log?: Logger } = {},
+  options: {
+    readonly dataDir?: string;
+    readonly defaults?: RepoDefaults;
+    readonly log?: Logger;
+  } = {},
 ): RepoConfig {
   const dataDir = options.dataDir ?? join(repoRoot, DATA_DIR_NAME);
   const path = repoConfigPath(dataDir);
   const logger = options.log ?? log;
+  const machine = options.defaults ?? DEFAULT_REPO_SETTINGS;
 
   const defaults = (reason: string): RepoConfig => {
     logger.warn("repo config ignored, using the defaults", { path, reason });
-    return { repoRoot, dataDir, ...DEFAULT_REPO_SETTINGS };
+    return { repoRoot, dataDir, ...machine };
   };
 
   let raw: string;
@@ -106,7 +126,7 @@ export function readRepoConfig(
   }
 
   const file = parsed as RepoConfigFile;
-  const flag = (name: string, value: unknown, fallback: boolean): boolean => {
+  const flag = (name: string, value: unknown, absent: boolean): boolean => {
     if (typeof value === "boolean") {
       return value;
     }
@@ -117,15 +137,17 @@ export function readRepoConfig(
       field: name,
       reason: value === undefined ? "missing" : "not a JSON boolean",
     });
-    return fallback;
+    return absent;
   };
 
   return {
     repoRoot,
     dataDir,
-    watch: flag("watch", file.watch, DEFAULT_REPO_SETTINGS.watch),
-    watchIntervalMs: intervalOf(file.watch_interval),
-    telemetry: flag("telemetry", file.telemetry, DEFAULT_REPO_SETTINGS.telemetry),
+    watch: flag("watch", file.watch, machine.watch),
+    // An absent or nonsensical interval inherits the machine default, so a repo file that only
+    // turns watching off never silently retunes it to the built-in period.
+    watchIntervalMs: clampWatchInterval(file.watch_interval, machine.watchIntervalMs),
+    telemetry: flag("telemetry", file.telemetry, machine.telemetry),
   };
 }
 

@@ -995,8 +995,11 @@ only questions are "did it take" and "what did it still miss", and both are in t
 | `impact` | 2500 | capped dependents list |
 | `expand` | 2500 | detail is where the bytes go, on purpose |
 
-Ceiling: the server refuses `budget > 32000` with `error.code = "budget_too_large"` and a hint. An agent
-that wants 100 KB should page.
+Ceiling: the server refuses `budget > 32000` with `error.code = "budget_too_large"` and a hint. That
+ceiling is the installation's `budgets.max_tokens` in `<home>/config.json` (default 32000, and the
+file can only lower it; `INDEXING-PIPELINE.md` §3.0), and `budgets.default_tokens` is only the
+fallback for a handler that declares no default of its own — the seven per-tool defaults above are
+manifests, not settings. An agent that wants 100 KB should page.
 
 Floor: every answer has a smallest size — the nine required envelope fields, the coverage counts and a
 continuation token — and a budget below it cannot be cut to fit. The server then refuses with

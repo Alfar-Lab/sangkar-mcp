@@ -998,7 +998,10 @@ async function runMcp(
     }
     const telemetry = telemetryForRepo({
       config,
-      repo: readRepoConfig(root, { dataDir: repoConfigIn(config, root).dataDir }),
+      repo: readRepoConfig(root, {
+        dataDir: repoConfigIn(config, root).dataDir,
+        defaults: config.repoDefaults,
+      }),
       registered: registry.repos.includes(root),
       sessionMode: "mcp",
       serverVersion: SERVER_VERSION,
@@ -1282,7 +1285,10 @@ export async function main(mode: string, argv: string[]): Promise<number> {
     // construction is what emits the session record.
     const telemetry = telemetryForRepo({
       config,
-      repo: readRepoConfig(config.repoRoot, { dataDir: config.dataDir }),
+      repo: readRepoConfig(config.repoRoot, {
+        dataDir: config.dataDir,
+        defaults: config.repoDefaults,
+      }),
       registered: registry.repos.includes(canonicalRoot(config.repoRoot)),
       sessionMode,
       serverVersion: SERVER_VERSION,

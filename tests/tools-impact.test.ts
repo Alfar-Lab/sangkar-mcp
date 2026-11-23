@@ -292,7 +292,7 @@ function contextOf(reader: GraphReader, repoRoot: string): ToolContext {
     now: () => CHECKED_AT,
     config: loadConfig({
       argv: ["--repo-root", repoRoot],
-      env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
+      env: { SANGKAR_HOME: join(repoRoot, "home"), SANGKAR_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }

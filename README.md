@@ -14,8 +14,9 @@ one.
 - **Bun 1.4.4 or newer.** This is a Bun program — `bun:sqlite`, `bun build`, `Bun.spawn` — so Node
   cannot run it. The package ships TypeScript and the `sangkar` binary runs under Bun through its
   shebang, so the requirement is not optional.
-- Installing creates no database and writes nothing outside Bun's global directory. Reading a graph
-  needs no network, no server and no index step: the daemon keeps it fresh, the server only reads.
+- Installing creates no database. The first run writes one settings file, `<home>/config.json` beside
+  the registry, and nothing else outside Bun's global directory. Reading a graph needs no network, no
+  server and no index step: the daemon keeps it fresh, the server only reads.
 
 ### Install
 
@@ -62,8 +63,18 @@ it explicitly, which is what a script should do.
 
 ### Where the data lives
 
-One directory per working tree, beside the code it describes:
+One directory per working tree, beside the code it describes, and one directory per installation
+for what belongs to the machine rather than to a tree:
 
+```
+${XDG_CONFIG_HOME:-$HOME/.config}/sangkar/
+  config.json    this installation's defaults, created on the first run
+  sangkar.json   the registry of registered trees
+  daemon.pid     the daemon's singleton lock
+  daemon.log     the running daemon's log
+```
+
+And, per tree:
 ```
 <repo>/.sangkar/graph.db          the graph
 <repo>/.sangkar/config.json       watch and telemetry settings, written by sangkar repo config
@@ -89,15 +100,43 @@ exists because the checkout is not always somewhere you can write:
   FUSE mounts and synced folders do not provide that, and a half-checkpointed `graph.db-wal` is a
   corrupt graph. Keep the database on local disk and serve the tree over the mount.
 
+### Global settings
+
+The first run writes `<home>/config.json` with every default spelled out, and it is meant to be
+edited by hand afterwards:
+
+```json
+{
+  "watch": true,
+  "watch_interval": 2000,
+  "telemetry": true,
+  "daemon": { "host": "127.0.0.1", "port": 7317 },
+  "budgets": { "default_tokens": 1200, "max_tokens": 32000 }
+}
+```
+
+| Key | Effect |
+|---|---|
+| `watch` | whether the daemon watches a registered tree that has no `watch` of its own; `false` reports it `skipped` |
+| `watch_interval` | that tree's poll period in milliseconds, clamped to 1000–300000 |
+| `telemetry` | the installation's consent switch: `false` disables usage recording for every repository |
+| `daemon.host` / `daemon.port` | what `sangkar daemon run` and `sangkar telemetry --serve` bind when the flag is absent, so `daemon start` and the foreground run agree; loopback only, `0` asks the kernel for a port |
+| `budgets.default_tokens` / `budgets.max_tokens` | the fallback per-call budget and the ceiling above which a call is refused `budget_too_large`; `default_tokens` is clamped to `max_tokens`, and `max_tokens` can only lower the hard 32000 ceiling |
+
+A repository's own `<repo>/.sangkar/config.json` narrows these three repository keys for that tree —
+`watch`, `watch_interval`, `telemetry` — and `sangkar repo config <path>` writes it. A missing or
+malformed key takes the machine value, never a silently invented one. Precedence, widest override
+first: command-line flag, then environment variable, then this file, then the built-in default.
+
 ### Environment
 
-Three settings, all read from the environment rather than a flag:
+Three settings that a launcher, not the file, sets — so they outrank it:
 
 | Variable | Default | Meaning |
 |---|---|---|
 | `SANGKAR_CURSOR_KEY` | empty | HMAC key for pagination cursors, 32 bytes or more; when unset the process generates its own key, so cursors do not survive across invocations — set it to share cursors between processes |
-| `SANGKAR_HOME` | `${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` | the machine-level home, holding `sangkar.json` (the registry), `daemon.pid` and `daemon.log`; an empty value counts as unset |
-| `SANGKAR_TELEMETRY` | unset | usage records under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables them, and when off no file and no directory is created |
+| `SANGKAR_HOME` | `${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` | the machine-level home, holding `config.json` (the defaults above), `sangkar.json` (the registry), `daemon.pid` and `daemon.log`; an empty value counts as unset |
+| `SANGKAR_TELEMETRY` | the file's `telemetry` | usage records under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables them, an empty or any other value enables them, and when off no file and no directory is created |
 
 Maintainer detail — how the artifact is distributed, how a release reaches npm, and the check list to
 run before one — is in [docs/maintainers.md](docs/maintainers.md).
@@ -128,8 +167,9 @@ event.
 Registered names are exactly these seven, in this order: no `_tool` suffix, no aliases, no eighth name.
 Six take an optional `budget` in tokens, defaulted per tool (`status` 800, `summary` 1200, `trace`
 3200, `search` 2000, `impact` 2500, `expand` 2500); `index` has none, because a repair call has no
-payload worth paging. Above 32000, and below the smallest size an answer can take, the call is
-refused with `budget_too_large` and a hint naming the floor.
+payload worth paging. Above the installation's ceiling — `budgets.max_tokens`, 32000 unless the
+global config lowers it — and below the smallest size an answer can take, the call is refused with
+`budget_too_large` and a hint naming the floor.
 
 A tree is watched only once it is registered, and registration leaves the tree untouched:
 

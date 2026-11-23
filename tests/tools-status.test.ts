@@ -63,7 +63,8 @@ const BASE_COMMIT = "bbdda4b9";
 
 const CONFIG = loadConfig({
   argv: ["--repo-root", REPO_DIR, "--data-dir", DATA_DIR],
-  env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
+  // `DATA_DIR` is this file's own `mkdtemp`, so the machine file cannot be the developer's.
+  env: { SANGKAR_HOME: join(DATA_DIR, "home"), SANGKAR_CURSOR_KEY: CURSOR_KEY },
 });
 
 /** The nine fields every response carries, whatever its status (TOOLS-SPEC.md §1.1). */

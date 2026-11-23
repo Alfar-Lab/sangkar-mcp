@@ -71,7 +71,7 @@ Every tool ships a budget sized for its own job (`status` 800, `summary` 1200, `
 `expand` 2500, `impact` 2500, `trace` 3200 tokens). When an answer is cut, `next` continues it and
 `totals` keeps the untruncated counts.
 
-- Continue with `cursor`, never with a bigger `budget`. 32 000 is the hard ceiling
+- Continue with `cursor`, never with a bigger `budget`. 32 000 is the default ceiling (the installation's `budgets.max_tokens` can lower it)
   (`budget_too_large`); asking for it to avoid one follow-up is how a small question becomes a
   40 KB answer.
 - For one item from a list, reach for `expand` with the handle you were given. It infers the detail
@@ -136,7 +136,7 @@ degree, which is what decides between two same-named functions.
 | `index_locked` | Another indexer holds the writer lock. Retry after `retry_after_ms`; do not loop. |
 | `not_found` / `ambiguous` | The answer, not a failure. Check near misses, narrow with `kinds` or `path`. |
 | `cursor_invalid`, `cursor_expired`, `cursor_mismatch` | Drop the cursor and re-ask for the first page. Cursors are signed and bound to one generation, so an edit invalidates them; never reuse a cursor on a different query. |
-| `budget_too_large` | You asked outside the floor/ceiling (ceiling 32 000). Use the default and page instead. |
+| `budget_too_large` | You asked outside the floor/ceiling (ceiling 32 000 by default). Use the default and page instead. |
 | `wrong_project_db` | The server is bound to a different repository than the one you mean. Tell the user; do not retry. |
 | `schema_too_new`, `unsupported_filesystem` | Environment problem, not a query problem. Report it with the message and hint. |
 | `internal` | Retry once, then report the message. |

@@ -428,7 +428,7 @@ function contextWithRoot(reader: GraphReader, root: string): ToolContext {
     now: () => new Date("2026-01-03T00:00:05Z"),
     config: loadConfig({
       argv: ["--repo-root", root],
-      env: { SANGKAR_CURSOR_KEY: CURSOR_KEY },
+      env: { SANGKAR_HOME: join(root, "home"), SANGKAR_CURSOR_KEY: CURSOR_KEY },
     }),
   };
 }

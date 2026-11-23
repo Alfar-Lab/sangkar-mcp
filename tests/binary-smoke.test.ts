@@ -130,6 +130,8 @@ interface Fixture {
   readonly repoRoot: string;
   /** The data dir the server picks by default: `<repo>/.sangkar`. */
   readonly dataDir: string;
+  /** The child's machine home, so the config.json its first run creates stays in this fixture. */
+  readonly home: string;
   /** What the worker published; the binary has to name it back. */
   readonly generation: string;
   readonly nodes: number;
@@ -138,6 +140,8 @@ interface Fixture {
 /** Two Python files where the caller sorts before the file it calls, indexed by the real worker. */
 async function fixture(root: string): Promise<Fixture> {
   const repoRoot = join(root, "repo");
+  const home = join(root, "home");
+  await mkdir(home, { recursive: true });
   await mkdir(join(repoRoot, "src"), { recursive: true });
   await writeFile(join(repoRoot, WIDGET), WIDGET_SOURCE, "utf8");
   await writeFile(join(repoRoot, CALLER), CALLER_SOURCE, "utf8");
@@ -159,7 +163,7 @@ async function fixture(root: string): Promise<Fixture> {
     if (row?.generation === null || row === null) {
       throw new Error("the worker published no generation");
     }
-    return { repoRoot, dataDir, generation: row.generation, nodes: row.nodes ?? 0 };
+    return { repoRoot, dataDir, home, generation: row.generation, nodes: row.nodes ?? 0 };
   } finally {
     handle.close();
   }
@@ -216,6 +220,9 @@ async function session(fixture: Fixture): Promise<Session> {
     cwd: build.root,
     env: {
       ...process.env,
+      // The first run writes `<home>/config.json`; without this the binary would write it into the
+      // developer's real config directory instead of the fixture.
+      SANGKAR_HOME: fixture.home,
       SANGKAR_CURSOR_KEY: CURSOR_KEY,
       SANGKAR_NO_WATCH: "1",
     },

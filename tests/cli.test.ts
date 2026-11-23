@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
@@ -571,6 +571,49 @@ describe("sangkar CLI", () => {
       expectExit(run, 0, "sangkar index --help");
       expect(run.stdout).toContain("--mode");
       expect(existsSync(dataDir)).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "the first run creates the machine config beside sangkar.json",
+    () => {
+      // The bootstrap above was this home's first run, so the file it wrote is the proof.
+      const path = join(home, "config.json");
+      expect(existsSync(path)).toBe(true);
+      const written = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      expect(written).toEqual({
+        watch: true,
+        watch_interval: 2_000,
+        telemetry: true,
+        daemon: { host: "127.0.0.1", port: 7_317 },
+        budgets: { default_tokens: 1_200, max_tokens: 32_000 },
+      });
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "an unknown tool name is a usage exit and does print the banner",
+    async () => {
+      const run = await spawnCli(["nosuchtool"], elsewhere);
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain('sangkar: unknown tool "nosuchtool"');
+      expect(run.stderr).toContain("the name comes first");
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a second index with nothing to do exits 2 without the usage banner",
+    async () => {
+      const run = await spawnCli(["index"], repo);
+      // 2 is the worker's `nothingToDo`, not a usage error: the banner would be a false answer.
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("worker.nothing_to_do");
+      expect(run.stderr).not.toContain("the name comes first");
     },
     RUN_TIMEOUT_MS,
   );

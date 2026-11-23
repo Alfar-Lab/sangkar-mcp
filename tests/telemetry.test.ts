@@ -353,7 +353,10 @@ describe("install identity", () => {
 describe("the consent switch", () => {
   test("exactly `off` disables recording; unset, empty and OFF enable it", () => {
     const root = tempDir("sangkar-telemetry-switch-");
-    const configOf = (env: Record<string, string | undefined>) => loadConfig({ env, cwd: root });
+    // Every case gets the fixture's own home, so a machine file in the developer's `$HOME` cannot
+    // decide what "unset" means here.
+    const configOf = (env: Record<string, string | undefined>) =>
+      loadConfig({ env: { SANGKAR_HOME: join(root, "home"), ...env }, cwd: root });
 
     const off = configOf({ SANGKAR_TELEMETRY: "off" });
     expect(off.telemetry.enabled).toBe(false);

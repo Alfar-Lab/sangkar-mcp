@@ -124,6 +124,9 @@ async function session(): Promise<Session> {
       ...process.env,
       // The roots are on the command line, not in the child's environment, so the session is rooted
       // by the flags it states and nothing an inherited variable says can decide what this proves.
+      // The home is the fixture's own: the first run creates `<home>/config.json`, and an inherited
+      // `SANGKAR_HOME` would put that file in the developer's real config directory.
+      SANGKAR_HOME: join(root, "home"),
       SANGKAR_CURSOR_KEY: CURSOR_KEY,
       SANGKAR_NO_WATCH: "1",
     },

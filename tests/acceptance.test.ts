@@ -227,6 +227,8 @@ interface Fixture {
   readonly corpus: string;
   /** `mkdtemp`: the one writable place, holding `graph.db`, the lock and the staging files. */
   readonly dataDir: string;
+  /** The child's machine home, so the config.json its first run writes stays in this fixture. */
+  readonly home: string;
   readonly livePath: string;
   readonly conn: Conn;
   readonly reader: GraphReader;
@@ -406,6 +408,7 @@ beforeAll(async () => {
   fixture = {
     corpus: CORPUS,
     dataDir,
+    home: join(root, "home"),
     livePath,
     conn,
     reader,
@@ -1174,6 +1177,9 @@ async function listTools(): Promise<Surface> {
     cwd: APP_ROOT,
     env: {
       ...process.env,
+      // The first run writes `<home>/config.json`; an inherited home would put it in the
+      // developer's real config directory.
+      SANGKAR_HOME: fixture.home,
       SANGKAR_CURSOR_KEY: CURSOR_KEY,
       SANGKAR_NO_WATCH: "1",
     },

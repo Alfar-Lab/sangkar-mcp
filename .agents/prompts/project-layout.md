@@ -14,7 +14,11 @@ src/index.ts                composition root: builds ToolContext, registers tool
                             envelopes
 src/shared/                 kernel + engine — the only cross-module import target
   config.ts                 AppConfig, repo-root autodetection, the machine home (`SANGKAR_HOME`), the
-                            registry and daemon paths, withRepo() for a second repository
+                            registry, config and daemon paths, withRepo() for a second repository
+  global-config.ts          `<home>/config.json`: the installation's defaults — watch, watch_interval,
+                            telemetry, the report server's host and port, and the two budgets. Written
+                            with its defaults by the first run, read once per process; a broken field
+                            falls back to the built-in default with one warning
   log.ts                    stderr JSON lines
   errors.ts                 AppError + the closed error-code union
   envelope.ts               the response contract (nine metadata fields + payload; error only for
@@ -26,7 +30,8 @@ src/shared/                 kernel + engine — the only cross-module import tar
   registry.ts               `sangkar.json`: read, atomic write, register/remove, and selectRepo()'s order —
                             the named repo, then the pin, then cwd, then the only registered one
   repo-config.ts            `<repo>/.sangkar/config.json`: watch, watch_interval (clamped 1000..300000) and
-                            telemetry; a bad file or field falls back to the defaults, recordingEnabled()
+                            telemetry, each narrowing the machine default; a bad file or field falls
+                            back to that default, recordingEnabled()
   pidlock.ts                the daemon's pid file: acquire, heartbeat, release, stale reclaim
   cli/args.ts, cli/render.ts  shared CLI parsing and the human-line renderer
   cli/repo.ts               the `repo` verb: add, remove, list, config
@@ -69,7 +74,7 @@ src/indexer/                the writer — runs in a spawned process, never in t
   watch.ts                  debounced polling that spawns the worker
 src/prompts/                INSTRUCTIONS.md, the agent-facing guide `INSTRUCTIONS_TEXT` ships; the suite
                             pins the two byte for byte, so it is data, not a module — no .ts lives here
-tests/                      58 files, see `.agents/prompts/test-map.md`
+tests/                      59 files, see `.agents/prompts/test-map.md`
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
                             arguments, defaults or budget ceilings move here in the same commit

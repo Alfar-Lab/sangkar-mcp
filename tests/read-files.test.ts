@@ -706,9 +706,12 @@ describe("read/context", () => {
 
   const cursors = createCursors({ key: "fake-cursor-key-material-32-bytes" });
 
+  // A home of its own: the machine file would otherwise be whatever the developer's has, and a
+  // there-read budget or consent switch would change what this fake context answers.
+  const fakeHome = mkdtempSync(join(tmpdir(), "sangkar-read-files-home-"));
   const fakeConfig: AppConfig = loadConfig({
     argv: ["--repo-root", "/tmp/fake"],
-    env: { SANGKAR_CURSOR_KEY: "k".repeat(32) },
+    env: { SANGKAR_HOME: fakeHome, SANGKAR_CURSOR_KEY: "k".repeat(32) },
   });
 
   const fakeContext: ToolContext = {

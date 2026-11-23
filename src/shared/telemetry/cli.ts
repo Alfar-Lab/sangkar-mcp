@@ -27,8 +27,8 @@ import { type ReportServer, serveReport } from "./serve";
 const USAGE = `usage: sangkar telemetry [--out <path>] [--serve] [--port <n>] [--host <addr>] [--since <YYYY-MM-DD | Nd>] [--repo-root <path>] [--data-dir <path>]
   --out <path>        where the HTML report is written (default: <data-dir>/telemetry/report.html)
   --serve             serve the report for every registered repository on loopback instead of writing one file
-  --port <n>          the port to bind (default: 7317; 0 picks a free port)
-  --host <addr>       the address to bind (default: 127.0.0.1; loopback only)
+  --port <n>          the port to bind (default: config.json's daemon.port, else 7317; 0 picks a free port)
+  --host <addr>       the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
   --since <when>      include records from that day (YYYY-MM-DD) or the last N days (Nd); default: all
   --repo-root <path>  the tree the report describes (default: autodetected from cwd)
   --data-dir <path>   where the graph and the telemetry log live (default: <repo-root>/.sangkar)`;
@@ -86,8 +86,10 @@ export async function runTelemetry(argv: readonly string[]): Promise<number> {
   // offline report keeps exactly the bytes it had before there was a server.
   if (serving) {
     return await serveForeground(config.home, {
-      port: rawPort === undefined ? undefined : Number(rawPort),
-      host: rawHost,
+      // Flag, then the machine file, then `serve.ts`'s own default: this verb is what an operator
+      // runs by hand, so it must agree with what `daemon run` would bind.
+      port: rawPort === undefined ? config.daemon.port : Number(rawPort),
+      host: rawHost === undefined ? config.daemon.host : rawHost,
       since: rawSince,
     });
   }
@@ -144,17 +146,15 @@ function isPortLiteral(text: string): boolean {
  */
 async function serveForeground(
   home: string,
-  options: { port: number | undefined; host: string | undefined; since: string | undefined },
+  options: { port: number; host: string; since: string | undefined },
 ): Promise<number> {
   let server: ReportServer;
   try {
-    // The defaults live in `serve.ts` (`DEFAULT_REPORT_PORT`, loopback), so an absent flag is an
-    // absent property here rather than a second copy of the default spelled in this module.
     server = await serveReport({
       home,
       since: options.since,
-      ...(options.port === undefined ? {} : { port: options.port }),
-      ...(options.host === undefined ? {} : { host: options.host }),
+      port: options.port,
+      host: options.host,
     });
   } catch (error) {
     if (error instanceof CliUsageError) {

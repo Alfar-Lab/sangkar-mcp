@@ -29,9 +29,9 @@ const USAGE = `usage: sangkar daemon [run|start|stop|status] [--port <n>] [--hos
   start   start it as a detached child and return once it holds the pid file
   stop    stop the daemon this home's pid file names
   status  one header line, then one line per registered repository
-  --port <n>     the report server's port (default: 7317; 0 picks a free port)
-  --host <addr>  the address to bind (default: 127.0.0.1; loopback only)
-  --port and --host belong to "run"; start runs it with the defaults`;
+  --port <n>     the report server's port (default: config.json's daemon.port, else 7317; 0 picks a free port)
+  --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
+  --port and --host belong to "run"; start passes neither, so it binds the same defaults`;
 
 export async function runDaemonCli(argv: readonly string[]): Promise<number> {
   // Answered before any subcommand is resolved, so `daemon --help` never reaches a lock or a bind.
@@ -95,9 +95,10 @@ async function run(rest: readonly string[], argv: readonly string[]): Promise<nu
   try {
     return await runDaemonForeground({
       home: config.home,
-      // `exactOptionalPropertyTypes`: an absent flag is an absent property, not `undefined`.
-      ...(rawPort === undefined ? {} : { port: Number(rawPort) }),
-      ...(rawHost === undefined ? {} : { host: rawHost }),
+      // Flag, then the machine file, then `serve.ts`'s built-in loopback default. `start` passes
+      // neither flag, so the child resolves the same file and the two cannot disagree.
+      port: rawPort === undefined ? config.daemon.port : Number(rawPort),
+      host: rawHost === undefined ? config.daemon.host : rawHost,
     });
   } catch (error) {
     if (error instanceof CliUsageError) {

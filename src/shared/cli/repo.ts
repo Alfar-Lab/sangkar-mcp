@@ -151,7 +151,7 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       }
 
       const root = canonical(raw);
-      const current = readRepoConfig(root, { log });
+      const current = readRepoConfig(root, { defaults: config.repoDefaults, log });
       try {
         writeRepoConfig({
           ...current,
@@ -165,7 +165,7 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
 
       // Re-read rather than echo the arguments: the file is the contract, and a value the reader
       // clamps is reported as the daemon will use it.
-      const effective = readRepoConfig(root, { log });
+      const effective = readRepoConfig(root, { defaults: config.repoDefaults, log });
       const lines = [
         `watch=${onOff(effective.watch)}`,
         `interval=${effective.watchIntervalMs}ms`,

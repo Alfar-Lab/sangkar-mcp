@@ -467,7 +467,7 @@ function usageErrorOf(run: () => unknown): CliUsageError {
 function makeContext(reader: GraphReader, repoRootPath: string): ToolContext {
   const config: AppConfig = loadConfig({
     argv: ["--repo-root", repoRootPath],
-    env: { SANGKAR_CURSOR_KEY: KEY },
+    env: { SANGKAR_HOME: join(repoRootPath, "home"), SANGKAR_CURSOR_KEY: KEY },
   });
   const cursor: CursorFacade = createCursors({ key: KEY });
   return { reader, cursor, log, now: () => new Date("2026-01-03T00:05:00Z"), config };

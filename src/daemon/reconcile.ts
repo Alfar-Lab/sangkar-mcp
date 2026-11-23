@@ -27,6 +27,7 @@
  */
 import { statSync } from "node:fs";
 import { join } from "node:path";
+import { readGlobalConfig, repoDefaultsOf } from "#shared/global-config";
 import { type LogFields, type Logger, log } from "#shared/log";
 import { readRegistry } from "#shared/registry";
 import { readRepoConfig } from "#shared/repo-config";
@@ -48,7 +49,7 @@ export interface WatcherOptions {
   readonly repoRoot: string;
   /** `<repoRoot>/.sangkar`, forwarded so the watcher and the worker target one graph. */
   readonly dataDir: string;
-  /** The repo's own `watch_interval`, already clamped by `readRepoConfig`. */
+  /** The interval the repo resolved to: its own `watch_interval`, else the machine default. */
   readonly intervalMs: number;
   /** `startWatch`'s spawn seam, forwarded unchanged; tests stub it, the daemon does not. */
   readonly spawn?: SpawnWorker;
@@ -119,6 +120,10 @@ export function startReconcile(options: ReconcileOptions): ReconcileHandle {
   const spawnField: { readonly spawn?: SpawnWorker } =
     options.spawn === undefined ? {} : { spawn: options.spawn };
 
+  // Read once per daemon start: the machine file describes the installation, so a change to it is
+  // a restart's business, while each repo's own file is re-read on every tick below.
+  const repoDefaults = repoDefaultsOf(readGlobalConfig(options.home, { log: logger }));
+
   const watchers = new Map<string, Entry>();
 
   /** Roots whose *current* refusal has already been logged, so a steady state stays silent. */
@@ -180,7 +185,7 @@ export function startReconcile(options: ReconcileOptions): ReconcileHandle {
         continue;
       }
 
-      const config = readRepoConfig(root, { dataDir, log: logger });
+      const config = readRepoConfig(root, { dataDir, defaults: repoDefaults, log: logger });
       if (!config.watch) {
         skipped.push(root);
         noteOnce(root, "repo is configured with watch: false, not watching it", {

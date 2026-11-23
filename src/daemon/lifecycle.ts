@@ -20,6 +20,7 @@
  */
 import { closeSync, existsSync, mkdirSync, openSync } from "node:fs";
 import { join } from "node:path";
+import { readGlobalConfig, repoDefaultsOf } from "#shared/global-config";
 import type { Logger } from "#shared/log";
 import { log } from "#shared/log";
 import {
@@ -31,7 +32,7 @@ import {
   releasePidLock,
 } from "#shared/pidlock";
 import { readRegistry } from "#shared/registry";
-import { readRepoConfig } from "#shared/repo-config";
+import { type RepoDefaults, readRepoConfig } from "#shared/repo-config";
 import type { DaemonStatus, RepoRuntime } from "./types";
 
 /** The daemon's tick: five seconds is the reconcile interval the plan fixes, restated here. */
@@ -207,9 +208,12 @@ export async function runDaemon(options: DaemonRunOptions): Promise<number> {
   });
 }
 
-/** One registered repo as `status` reports it: the directory, its config, and whether it still exists. */
-function runtimeOf(root: string): RepoRuntime {
-  const config = readRepoConfig(root, { dataDir: join(root, DATA_DIR_NAME) });
+/**
+ * One registered repo as `status` reports it: the directory, its config, and whether it still
+ * exists. `defaults` is the machine file's answer, read once per call by {@link daemonStatus}.
+ */
+function runtimeOf(root: string, defaults: RepoDefaults): RepoRuntime {
+  const config = readRepoConfig(root, { dataDir: join(root, DATA_DIR_NAME), defaults });
   return {
     root,
     exists: existsSync(root),
@@ -229,12 +233,13 @@ export async function daemonStatus(home: string): Promise<DaemonStatus> {
   const state = await readPidLock(join(home, PID_FILE));
   const registryPath = join(home, REGISTRY_FILE);
   const live = state.held && !state.stale;
+  const defaults = repoDefaultsOf(readGlobalConfig(home));
   return {
     pid: live ? state.pid : null,
     startedAt: live ? state.startedAt : null,
     home,
     registryPath,
-    repos: readRegistry(registryPath).repos.map(runtimeOf),
+    repos: readRegistry(registryPath).repos.map((root) => runtimeOf(root, defaults)),
   };
 }
 

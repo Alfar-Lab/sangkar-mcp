@@ -48,7 +48,7 @@ One environment variable, read once, in `src/shared/config.ts`, and handed aroun
 
 | `SANGKAR_TELEMETRY` | Effect |
 |---|---|
-| unset | on |
+| unset | the machine file's `telemetry` (`<home>/config.json`; `true` when the file says nothing) |
 | empty string | on |
 | exactly `off` | off |
 | anything else (`0`, `false`, `OFF`, `Off `) | on |
@@ -56,7 +56,8 @@ One environment variable, read once, in `src/shared/config.ts`, and handed aroun
 One spelling, case-sensitive, and no aliases. The reason is the failure direction: an operator's typo
 must not be able to opt a machine in silently, so the only value that disables is the one that was
 written down, and everything an operator might intend as "off" while spelling it otherwise is treated
-as an unset variable — which is the documented default.
+as consent. Leaving the variable unset delegates to the machine file, so an installation can ship its
+own default without every launcher having to export one.
 
 Off means no file and no directory is created. `jsonlSink` calls `mkdirSync` on its first non-empty
 write, and `createTelemetry` is never constructed, so a disabled installation leaves no
@@ -71,14 +72,17 @@ serving several trees must decide per tree, while consent is per machine:
 | Input | Read from | What "no" means |
 |---|---|---|
 | `SANGKAR_TELEMETRY` | `src/shared/config.ts`, once per process, as `config.telemetry.enabled` | the process records nothing, for every repository it serves |
+| the machine file | `<home>/config.json` through `readGlobalConfig`, and the same resolved value | the installation records nothing; every repository inherits `false` |
 | registration | `<home>/sangkar.json` through `readRegistry` | a tree the registry does not list is not recorded, whatever its own file says |
 | the repo's settings | `<repo>/.sangkar/config.json` through `readRepoConfig` | `"telemetry": false` disables that one repository |
 
-A call is recorded only when all three say yes. The order between them is the point of the section:
-`SANGKAR_TELEMETRY=off` **outranks the repo file**, so no repository can opt itself back in past the
-operator, and the repo file's `false` **outranks the default of `true`**, so the file can only narrow
-what the machine allows — never widen it. Registration sits between the two: a tree the operator never
-registered is not a tree this installation agreed to describe. When the recorder is built, its
+A call is recorded only when all four say yes. The order between them is the point of the section:
+`SANGKAR_TELEMETRY=off` **outranks the machine file and the repo file**, so no repository can opt
+itself back in past the operator; the machine file's `false` **outranks the repo file**, so a tree
+cannot widen what the installation allowed; and the repo file's `false` **outranks its inherited
+`true`**, so the file can only narrow what the machine allows — never widen it. Registration sits
+between the two files and the tree: a tree the operator never registered is not a tree this
+installation agreed to describe. When the recorder is built, its
 directory is the selected repository's own `<dataDir>/telemetry`, not the startup tree's, because a
 daemon that swapped trees would otherwise write into the wrong one.
 
