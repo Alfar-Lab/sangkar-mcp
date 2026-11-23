@@ -12,6 +12,11 @@
  *   current file first, overrides exactly the flags it was given, and prints what a re-read returns
  *   — the effective values the daemon will act on, not the text that was typed.
  *
+ * A subcommand's path may sit anywhere among its own flags, so the path is the first token that is
+ * not a flag. Reading `rest[0]` instead made `repo config --watch false .` write the settings of a
+ * directory called `--watch`, answer the same three lines, and exit 0 — a silent wrong target, which
+ * is the one failure a settings verb cannot afford.
+ *
  * stdout carries the answer, one line per result, which is why this module writes there at all;
  * a refusal writes the usage block, and every diagnostic goes through `#shared/log` on stderr.
  *
@@ -52,6 +57,7 @@ const USAGE = `usage: sangkar repo [add|remove|list|config] <path>
   --watch-interval <n>      poll period in milliseconds, ${WATCH_INTERVAL_MIN_MS}..${WATCH_INTERVAL_MAX_MS} (config only)
   --telemetry <true|false>  whether this tree's usage may be recorded (config only)
   --repo-root, --data-dir and --json are accepted by every subcommand; only list changes with --json
+  the <path> may follow the flags, and no token starting with -- is ever read as a path
   a relative <path> resolves against the current directory; a leading ~/ is expanded`;
 
 /** One flag's value: the boolean or interval it spells, `undefined` when absent, or the refusal. */
@@ -91,7 +97,7 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       if (stray !== null) {
         return refuse(`"repo add" takes no ${stray}`);
       }
-      const raw = rest[0];
+      const raw = positional(rest, []);
       if (raw === undefined || raw === "") {
         return refuse("repo add needs a path");
       }
@@ -115,7 +121,7 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       if (stray !== null) {
         return refuse(`"repo remove" takes no ${stray}`);
       }
-      const raw = rest[0];
+      const raw = positional(rest, []);
       if (raw === undefined || raw === "") {
         return refuse("repo remove needs a path");
       }
@@ -155,10 +161,8 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       if (stray !== null) {
         return refuse(`"repo config" takes no ${stray}`);
       }
-      const raw = rest[0];
-      if (raw === undefined || raw === "") {
-        return refuse("repo config needs a path");
-      }
+      // The flags are read before the path, so a malformed flag answers for itself rather than as a
+      // missing path: `repo config --watch` is a broken flag, not a path someone forgot to type.
       const watch = boolFlag(rest, "watch");
       if (!watch.ok) {
         return refuse(watch.reason);
@@ -170,6 +174,10 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
       const interval = intervalFlag(rest);
       if (!interval.ok) {
         return refuse(interval.reason);
+      }
+      const raw = positional(rest, ["watch", "watch-interval", "telemetry"]);
+      if (raw === undefined || raw === "") {
+        return refuse("repo config needs a path");
       }
 
       const root = canonical(raw);
@@ -211,6 +219,37 @@ export async function runRepoCli(argv: readonly string[]): Promise<number> {
  */
 function canonical(path: string): string {
   return canonicalRoot(path.startsWith("~/") ? path : resolve(process.cwd(), path));
+}
+
+/**
+ * The subcommand's path: the first token that is not a flag, with each flag's value skipped so
+ * `--watch false` consumes `false` and not the path after it. A token beginning with `--` is never a
+ * path — the `--` spelling belongs to flags, and accepting one as a directory is how the settings for
+ * `--watch` were written into a directory named `--watch` while the answer looked right.
+ *
+ * Only the *first* occurrence of a value flag takes the next token: `flagValue` answers the first
+ * one, so a repeated flag's value is an ordinary token and `repo config --watch false --watch .`
+ * still names `.` instead of losing the path.
+ */
+function positional(argv: readonly string[], valueFlags: readonly string[]): string | undefined {
+  const consumed = new Set<string>();
+  for (let i = 0; i < argv.length; i += 1) {
+    const token = argv[i] ?? "";
+    if (!token.startsWith("--")) {
+      return token;
+    }
+    // `--flag=value` carries its own value; the spaced form takes the next token with it.
+    const name = token.slice(2).split("=")[0] ?? "";
+    if (!valueFlags.includes(name) || consumed.has(name)) {
+      continue;
+    }
+    consumed.add(name);
+    if (token.includes("=")) {
+      continue;
+    }
+    i += 1;
+  }
+  return undefined;
 }
 
 /**

@@ -91,6 +91,7 @@ const VERB_USAGE: Readonly<Record<Reserved, string>> = {
   --watch-interval <n>      poll period in milliseconds, 1000..300000 (config only)
   --telemetry <true|false>  whether this tree's usage may be recorded (config only)
   --repo-root, --data-dir and --json are accepted by every subcommand; only list changes with --json
+  the <path> may follow the flags, and no token starting with -- is ever read as a path
   a relative <path> resolves against the current directory; a leading ~/ is expanded`,
 };
 

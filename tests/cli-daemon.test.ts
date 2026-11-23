@@ -311,6 +311,66 @@ describe("sangkar repo: the per-repo config", () => {
   );
 
   test(
+    "a flag before the path is read as a flag, never as the directory to configure",
+    async () => {
+      const f = await fixture();
+
+      // The path is the first token that is not a flag. Reading the first token outright made this
+      // write `--watch/.sangkar/config.json`, print the same three lines and exit 0.
+      const run = await spawnCli(["repo", "config", "--watch", "false", "work"], f.root, f.home);
+
+      expect(run.code).toBe(0);
+      expect(run.stdout).toBe("watch=off\ninterval=2000ms\ntelemetry=on\n");
+      expect(await configOnDisk(f.repo)).toEqual({
+        watch: false,
+        watch_interval: 2000,
+        telemetry: true,
+      });
+      expect(existsSync(join(f.root, "--watch"))).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "flags and no path is a usage refusal, and nothing is written anywhere",
+    async () => {
+      const f = await fixture();
+
+      const run = await spawnCli(["repo", "config", "--watch", "false"], f.root, f.home);
+
+      expect(run.code).toBe(2);
+      expect(run.stdout).toBe("");
+      expect(run.stderr).toContain("repo config needs a path");
+      expect(existsSync(join(f.root, "--watch"))).toBe(false);
+      expect(existsSync(join(f.repo, ".sangkar", "config.json"))).toBe(false);
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
+    "a repeated flag does not swallow the path, because only its first value is read",
+    async () => {
+      const f = await fixture();
+
+      // `flagValue` answers the first occurrence, so the second one carries no value of its own.
+      const run = await spawnCli(
+        ["repo", "config", "--watch", "false", "--watch", "."],
+        f.repo,
+        f.home,
+      );
+
+      expect(run.code).toBe(0);
+      expect(run.stdout).toBe("watch=off\ninterval=2000ms\ntelemetry=on\n");
+      expect(await configOnDisk(f.repo)).toEqual({
+        watch: false,
+        watch_interval: 2000,
+        telemetry: true,
+      });
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
     "config with no flags writes the defaults it prints",
     async () => {
       const f = await fixture();

@@ -184,7 +184,9 @@ sangkar telemetry --serve     # that server's page: every registered repo, on 12
 
 `sangkar repo list`, `repo remove <path>` and `repo config <path>` edit the same registry; `config`
 writes `<path>/.sangkar/config.json` — the three per-repo switches (watch, watch interval 1000–300000
-ms, telemetry), which the daemon re-reads every five seconds. An unregistered tree is still usable one
+ms, telemetry), which the daemon re-reads every five seconds. Those three flags may sit before or
+after the path (`repo config --watch false .` is the same call as `repo config . --watch false`); a
+token starting with `--` is a flag, never a directory name. An unregistered tree is still usable one
 command at a time by naming it with `--repo-root`, but its graph is only as fresh as the last
 `sangkar index`.
 
