@@ -272,3 +272,6 @@ sangkar <tool> [arguments] [global flags] — the name is the first token that i
 MIT — see [LICENSE](LICENSE). The grant covers the package as published, including the migration SQL
 it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm`, `@toon-format/toon` and the MCP SDK
 keep their own licenses.
+
+### Support Me
+[![Trakteer](https://img.shields.io/badge/Trakteer-ljosalfar-BE1E2D?style=flat-square)](https://trakteer.id/ljosalfar)
