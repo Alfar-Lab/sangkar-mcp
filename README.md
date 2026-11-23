@@ -121,8 +121,10 @@ edited by hand afterwards:
 
 A repository's own `<repo>/.sangkar/config.json` narrows these three repository keys for that tree —
 `watch`, `watch_interval`, `telemetry` — and `sangkar repo config <path>` writes it. A missing or
-malformed key takes the machine value, never a silently invented one. Precedence, widest override
-first: command-line flag, then environment variable, then this file, then the built-in default.
+malformed key takes the machine value, never a silently invented one; a tree with no file at all is
+the normal state and falls back without a word, and `status` reports which file it read as
+`payload.config.source` (`project` or `global`). Precedence, widest override first: command-line
+flag, then environment variable, then this file, then the built-in default.
 
 ### Environment
 

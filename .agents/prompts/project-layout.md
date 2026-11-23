@@ -31,7 +31,8 @@ src/shared/                 kernel + engine — the only cross-module import tar
                             the named repo, then the pin, then cwd, then the only registered one
   repo-config.ts            `<repo>/.sangkar/config.json`: watch, watch_interval (clamped 1000..300000) and
                             telemetry, each narrowing the machine default; a bad file or field falls
-                            back to that default, recordingEnabled()
+                            back to that default with one warning, a missing file falls back silently
+                            and reports `source: "global"`, recordingEnabled()
   pidlock.ts                the daemon's pid file: acquire, heartbeat, release, stale reclaim
   cli/args.ts               the one parser, driven by the manifests: `splitGlobals` for the four global
                             flags, `resolveCommand` for the name with globals on either side of it,

@@ -4,7 +4,7 @@ import { homedir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { globalConfigPath, readGlobalConfig } from "#shared/global-config";
 import { type Logger, log } from "#shared/log";
-import type { RepoDefaults } from "#shared/repo-config";
+import type { RepoConfigSource, RepoDefaults } from "#shared/repo-config";
 
 export interface Budgets {
   /**
@@ -64,6 +64,12 @@ export interface AppConfig {
    * file's `watch`, `watch_interval` and `telemetry`.
    */
   readonly repoDefaults: RepoDefaults;
+  /**
+   * Which file the three repository settings were read from. `loadConfig` answers `"global"`,
+   * because it never consults a tree: the tree a call answers from is chosen later, so the
+   * composition root settles this field (`repoConfigIn`) before a handler sees it.
+   */
+  readonly repoConfigSource: RepoConfigSource;
   /** Where the daemon writes its pid and its log, both under `<home>`, and what it binds. */
   readonly daemon: DaemonPaths;
 }
@@ -211,6 +217,9 @@ export function loadConfig(options: LoadConfigOptions = {}): AppConfig {
       watchIntervalMs: global.watchIntervalMs,
       telemetry: global.telemetry,
     },
+    // No tree has been consulted yet: `repoConfigIn` reads the selected tree's file and settles
+    // this before a handler sees the config.
+    repoConfigSource: "global",
     daemon: {
       pidPath: join(home, "daemon.pid"),
       logPath: join(home, "daemon.log"),

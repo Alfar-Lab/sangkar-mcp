@@ -59,6 +59,7 @@ function repoOf(repoRoot: string, telemetry: boolean): RepoConfig {
     watch: true,
     watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS,
     telemetry,
+    source: "global",
   };
 }
 

@@ -104,7 +104,7 @@ describe("defaults and path", () => {
 });
 
 describe("readRepoConfig with an unusable file", () => {
-  test("no file yields the defaults and exactly one warning naming path and reason", () => {
+  test("no file yields the machine values silently, and says so with `source`", () => {
     const repoRoot = tempRepo();
     const { config, warnings } = readWithWarnings(repoRoot);
 
@@ -114,10 +114,11 @@ describe("readRepoConfig with an unusable file", () => {
       watch: true,
       watchIntervalMs: 2_000,
       telemetry: true,
+      source: "global",
     });
-    expect(warnings).toHaveLength(1);
-    expect(warnings[0]?.fields.path).toBe(join(repoRoot, ".sangkar", "config.json"));
-    expect(String(warnings[0]?.fields.reason)).toContain("ENOENT");
+    // The fallback is the normal state of a tree that was never configured: no log line at all,
+    // because `status.payload.config.source` is where it becomes visible.
+    expect(warnings).toEqual([]);
   });
 
   test("unparseable JSON yields the defaults and one warning, without throwing", () => {
@@ -127,7 +128,9 @@ describe("readRepoConfig with an unusable file", () => {
     expect(config.watch).toBe(true);
     expect(config.watchIntervalMs).toBe(WATCH_INTERVAL_DEFAULT_MS);
     expect(config.telemetry).toBe(true);
+    expect(config.source).toBe("global");
     expect(warnings).toHaveLength(1);
+    expect(warnings[0]?.msg).toBe("repo config invalid, using the global config");
     expect(warnings[0]?.fields.path).toBe(join(repoRoot, ".sangkar", "config.json"));
     expect(String(warnings[0]?.fields.reason)).toContain("invalid JSON");
   });
@@ -143,6 +146,7 @@ describe("readRepoConfig with an unusable file", () => {
         watch: true,
         watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS,
         telemetry: true,
+        source: "global",
       });
       expect(warnings).toHaveLength(1);
       expect(warnings[0]?.fields.reason).toBe("not a JSON object");
@@ -233,6 +237,7 @@ describe("writeRepoConfig", () => {
       watch: true,
       watchIntervalMs: 2_000,
       telemetry: true,
+      source: "project",
     };
 
     writeRepoConfig(config);
@@ -253,6 +258,7 @@ describe("writeRepoConfig", () => {
       watch: false,
       watchIntervalMs: 9_000,
       telemetry: false,
+      source: "project",
     };
 
     writeRepoConfig(config);
@@ -282,6 +288,7 @@ describe("recordingEnabled", () => {
     watch: true,
     watchIntervalMs: WATCH_INTERVAL_DEFAULT_MS,
     telemetry: true,
+    source: "global",
   };
 
   test("true only when consent, registration and the repo file all allow it", () => {

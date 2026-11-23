@@ -18,12 +18,19 @@ export const WATCH_INTERVAL_MIN_MS = 1_000;
 /** Above this the graph is stale between polls for as long as a working day. */
 export const WATCH_INTERVAL_MAX_MS = 300_000;
 
+/**
+ * Which file the values came from: this tree's own `<dataDir>/config.json`, or the machine default.
+ * Reported as `status.payload.config.source`, so "the tree says nothing" is visible without a log line.
+ */
+export type RepoConfigSource = "project" | "global";
+
 export interface RepoConfig {
   readonly repoRoot: string;
   readonly dataDir: string;
   readonly watch: boolean;
   readonly watchIntervalMs: number;
   readonly telemetry: boolean;
+  readonly source: RepoConfigSource;
 }
 
 /** The three values a repository's file can override, and what a missing field falls back to. */
@@ -83,10 +90,13 @@ export function clampWatchInterval(
 }
 
 /**
- * The settings for `repoRoot`, read from `<dataDir>/config.json`. Each rejection logs exactly one
- * warning naming the reason and the path — a file-level failure falls back to every default, a
- * bad field falls back alone, so one typo does not silently discard the others. `defaults` is the
- * machine-level fallback (`<home>/config.json`); the built-in one is used when a caller has none.
+ * The settings for `repoRoot`, read from `<dataDir>/config.json`. A missing file is silent — it is
+ * the normal state of a repo that was indexed but never configured, the values fall back to the
+ * machine file, and `source: "global"` says so in `status`. Any other rejection keeps its warning:
+ * an unreadable or malformed file is something an operator meant to have, and a file-level failure
+ * falls back to every default while a bad field falls back alone, so one typo does not silently
+ * discard the others. `defaults` is the machine-level fallback (`<home>/config.json`); the built-in
+ * one is used when a caller has none.
  */
 export function readRepoConfig(
   repoRoot: string,
@@ -101,28 +111,33 @@ export function readRepoConfig(
   const logger = options.log ?? log;
   const machine = options.defaults ?? DEFAULT_REPO_SETTINGS;
 
-  const defaults = (reason: string): RepoConfig => {
-    logger.warn("repo config ignored, using the defaults", { path, reason });
-    return { repoRoot, dataDir, ...machine };
+  // `warn` is what separates "the tree says nothing, which is normal" from "the tree says something
+  // this module cannot use": the first is reported by `source` alone, the second on stderr as well.
+  const fallback = (reason: string, warn: boolean): RepoConfig => {
+    if (warn) {
+      logger.warn("repo config invalid, using the global config", { path, reason });
+    }
+    return { repoRoot, dataDir, ...machine, source: "global" };
   };
 
   let raw: string;
   try {
     raw = readFileSync(path, "utf8");
   } catch (e) {
-    // A missing file is the normal state of a repo that was indexed but never configured, so the
-    // reason is carried in the warning rather than thrown.
-    return defaults(`unreadable: ${messageOf(e)}`);
+    // A missing file is the normal state of a repo that was indexed but never configured, so it is
+    // answered with the machine values and no log line; `error.code` is the only signal that tells
+    // it apart from a file the operator wrote and cannot now be read.
+    return fallback(`unreadable: ${messageOf(e)}`, (e as NodeJS.ErrnoException).code !== "ENOENT");
   }
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch (e) {
-    return defaults(`invalid JSON: ${messageOf(e)}`);
+    return fallback(`invalid JSON: ${messageOf(e)}`, true);
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return defaults("not a JSON object");
+    return fallback("not a JSON object", true);
   }
 
   const file = parsed as RepoConfigFile;
@@ -148,6 +163,7 @@ export function readRepoConfig(
     // turns watching off never silently retunes it to the built-in period.
     watchIntervalMs: clampWatchInterval(file.watch_interval, machine.watchIntervalMs),
     telemetry: flag("telemetry", file.telemetry, machine.telemetry),
+    source: "project",
   };
 }
 
@@ -155,7 +171,7 @@ export function readRepoConfig(
  * Writes the three settings in the on-disk shape, creating the data dir because a repo that was
  * never indexed has none yet. The caller owns the write lock elsewhere; this is one small file.
  */
-export function writeRepoConfig(config: RepoConfig): void {
+export function writeRepoConfig(config: Omit<RepoConfig, "source">): void {
   mkdirSync(config.dataDir, { recursive: true });
   writeFileSync(
     repoConfigPath(config.dataDir),

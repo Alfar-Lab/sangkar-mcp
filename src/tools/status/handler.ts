@@ -57,6 +57,7 @@ import {
 } from "#shared/envelope";
 import { AppError } from "#shared/errors";
 import { isUnderPrefix, normalizeRel } from "#shared/paths";
+import type { RepoConfigSource } from "#shared/repo-config";
 import type { ToolContext } from "#shared/store/read/context";
 import type {
   GenerationRow,
@@ -123,6 +124,15 @@ export interface StatusPayload {
     readonly remote: string | null;
     readonly commit: string | null;
     readonly db_path: string;
+  };
+  /**
+   * Which file the three repository settings were read from. `project` means this tree's own
+   * `<dataDir>/config.json` was read; `global` means it is absent (or unreadable) and the machine
+   * file supplied the values. The fallback is normal and silent, so this field is where it becomes
+   * visible.
+   */
+  readonly config: {
+    readonly source: RepoConfigSource;
   };
   readonly graph: {
     readonly nodes: number;
@@ -228,6 +238,7 @@ export function handle(ctx: ToolContext, args: StatusArgs = {}): StatusEnvelope 
       commit: generationRow.baseCommit,
       db_path: dbPath,
     },
+    config: { source: ctx.config.repoConfigSource },
     graph: {
       nodes: generationRow.nodes,
       edges: generationRow.edges,

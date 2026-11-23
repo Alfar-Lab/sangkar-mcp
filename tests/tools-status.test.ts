@@ -484,6 +484,9 @@ describe("status: complete coverage", () => {
       // Derived from `ctx.config.dataDir`: the reader deliberately exposes no database path.
       db_path: DB_PATH,
     });
+    // Which file the three repository settings were read from; this fixture's config carries the
+    // `loadConfig` default, because nothing here consults a tree.
+    expect(payload.config).toEqual({ source: "global" });
     expect(payload.graph).toEqual({
       nodes: 13_955,
       edges: 130_044,

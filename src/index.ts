@@ -662,9 +662,18 @@ export interface CallSurface {
  * explicitly placed somewhere else.
  */
 function repoConfigIn(startup: AppConfig, repoRoot: string): AppConfig {
-  return canonicalRoot(startup.repoRoot) === canonicalRoot(repoRoot)
-    ? startup
-    : withRepo(startup, repoRoot);
+  const base =
+    canonicalRoot(startup.repoRoot) === canonicalRoot(repoRoot)
+      ? startup
+      : withRepo(startup, repoRoot);
+  // The one place the source is settled: this is the first point that knows which tree the call
+  // answers from, because `--repo-root` is only a default and an explicit `repo` outranks it. One
+  // small file per resolution — a tree with no file answers `global` without a log line.
+  const { source } = readRepoConfig(base.repoRoot, {
+    dataDir: base.dataDir,
+    defaults: startup.repoDefaults,
+  });
+  return { ...base, repoConfigSource: source };
 }
 
 /**

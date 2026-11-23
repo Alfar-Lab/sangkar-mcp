@@ -127,6 +127,7 @@ function harness(
     registryPath: options.registryPath?.(dir) ?? join(dir, "home", "sangkar.json"),
     configPath: join(dir, "home", "config.json"),
     repoDefaults: { watch: true, watchIntervalMs: 2_000, telemetry: true },
+    repoConfigSource: "global",
     daemon: {
       pidPath: join(dir, "home", "daemon.pid"),
       logPath: join(dir, "home", "daemon.log"),

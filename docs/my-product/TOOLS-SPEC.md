@@ -187,12 +187,19 @@ reached, so it appears in no payload, no `totals` key and no envelope: every pay
 No `project`, no `verbose`, no `detail`. CBM's `verbose` + `diagnostics=none|summary|full` triple is
 three ways to ask for the same report at three sizes; `budget` and `paths` cover it with fewer axes.
 
-### `project` and the unresolved census
+### `project`, `config` and the unresolved census
 
 `payload.project` carries `branch` and `remote` beside `name`, `root`, `commit` and `db_path`. Both
 are `null` when the publish could not record them — a graph written before these keys existed, or a
 working tree where git could not answer — and `null` is disclosed rather than guessed: `status`
 still answers.
+
+`payload.config.source` is `"project"` when the tree's own `<dataDir>/config.json` was read, and
+`"global"` when it was absent or unusable and the machine file supplied the three repository
+settings. The fallback is normal and silent — a tree that was indexed but never configured has no
+file — so this one field is where it becomes visible instead of a warning on every process start. A
+file that is present and unparseable is a different case: it falls back the same way and *also*
+writes one `repo config invalid, using the global config` line to stderr.
 
 `payload.unresolved` explains the flat `coverage.unresolved_edges` count instead of restating it:
 
@@ -261,6 +268,7 @@ An example of the census on its own:
   "next_tools": ["expand"],
   "payload": {
     "project": { "name": "acme-graph-7f3a", "root": "/work/acme-graph", "branch": "staging", "remote": "origin", "commit": "bbdda4b9", "db_path": "~/.cache/<n>/acme-graph-7f3a/graph.db" },
+    "config": { "source": "project" },
     "graph": { "nodes": 13955, "edges": 130044, "size_bytes": 208666624, "db_path": "~/.cache/<n>/acme-graph-7f3a/graph.db" },
     "unresolved": { "total": 321, "material": 188, "buckets": { "builtin_stdlib": 74, "external_package": 31, "internal_module": 18, "dynamic_property_call": 40, "receiver_type_unknown": 140, "ambiguous": 18 } },
     "languages": [

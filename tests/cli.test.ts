@@ -356,6 +356,31 @@ describe("sangkar CLI", () => {
   );
 
   test(
+    "status reports which config file the settings came from, silently when there is none",
+    async () => {
+      // A tree that was indexed but never configured is the normal state: no `.sangkar/config.json`
+      // exists, the three settings come from the machine file, and that is reported by the payload
+      // rather than by a warning on stderr.
+      const global = await spawnCli(["status"], repo);
+      expectExit(global, 0, "sangkar status");
+      expect(answered<{ config: { source: string } }>(global).payload.config.source).toBe("global");
+      expect(global.stderr).not.toContain("repo config");
+
+      // Writing the tree's own file changes the answer and nothing else: the same command now says
+      // `project`, and the file's values are the ones the daemon will act on.
+      const written = await spawnCli(["repo", "config", repo, "--watch", "false"], elsewhere);
+      expectExit(written, 0, "sangkar repo config");
+
+      const project = await spawnCli(["status"], repo);
+      expectExit(project, 0, "sangkar status");
+      expect(answered<{ config: { source: string } }>(project).payload.config.source).toBe(
+        "project",
+      );
+    },
+    RUN_TIMEOUT_MS,
+  );
+
+  test(
     "status on an unindexed tree prints the one bare line and exits 0, --json included",
     async () => {
       const tree = join(root, "unindexed");
