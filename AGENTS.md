@@ -22,10 +22,10 @@ argument.
 | [`.agents/prompts/project-layout.md`](.agents/prompts/project-layout.md) | The module tree with one line per file, the recipes (add a language, a tool, a payload field, a telemetry field, a table), and the data model in one screen. |
 | [`.agents/prompts/run-build.md`](.agents/prompts/run-build.md) | How to run the CLI and the servers on this machine, the script table, and the definition of done. |
 | [`.agents/prompts/test-map.md`](.agents/prompts/test-map.md) | The map from "what you changed" to "the tests that will tell you". |
-| [`.agents/prompts/state-gaps.md`](.agents/prompts/state-gaps.md) | Plan state and the three measured gaps the suite does **not** catch (test/method kinds, binding recall). |
+| [`.agents/prompts/gaps-n-future-works.md`](.agents/prompts/gaps-n-future-works.md) | Plan state, the three measured gaps the suite does **not** catch (test/method kinds, binding recall), and the work left after them. |
 | [`docs/`](docs/) | The design record — read before changing behaviour. |
 
-## Docs and plans
+## Docs
 
 - `docs/my-product/` — the **product design record**: `DESIGN.md` (objectives, contracts, absence
   semantics, acceptance), `TELEMETRY.md` (record schemas, the privacy prohibition, the verb, the report),
@@ -40,15 +40,9 @@ argument.
   traps, the checks. It does not ship in the npm tarball; the procedure itself is the project skill
   `.agents/skills/build-n-deploy/SKILL.md`.
 - `README.md` — for users, in a fixed shape: `## sangkar-mcp`, `## Installation & Requirements`,
-  `## Usage` (`### MCP & Skill`, `### CLI`), `## License`, `## Future Works`. Maintainer material
+  `## Usage` (`### MCP & Skill`, `### CLI`), `## License`. Maintainer material
   belongs in `docs/maintainers.md`, not in a new top-level README section.
 - `src/prompts/INSTRUCTIONS.md` — the agent-facing text shipped as `INSTRUCTIONS_TEXT`; the suite pins
   the two byte for byte.
-- `.ppm/codegraph-mvp/`, `.ppm/cgraph-cli/`, `.ppm/sangkar-telemetry/` — completed plans;
-  `.ppm/sangkar-daemon/` — in progress; task JSON is the execution record for each. Do not edit
-  `.ppm/*/tasks/*.json` by hand.
-- `.ppm/issue-remediation/` — the plan that closed issues #1, #2, #4, #6, #7, #8 and the remainder of #9:
-  relative imports bind, every read answers from a refreshed store, `coverage.tests` and the repo-wide
-  skipped total are published, and the two-worktree registration in `README.md` is documented.
 
 Changing behaviour that a doc specifies means changing the doc in the same commit.

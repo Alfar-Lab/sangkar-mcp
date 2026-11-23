@@ -56,10 +56,10 @@ file in this directory a change touches, in the same commit:
 | When you change… | Update, in the same commit |
 |---|---|
 | a file, directory, entry point, module boundary, or one of the recipes | [`project-layout.md`](project-layout.md) — its tree block, that recipe, and the data model if a table or column moved |
-| a plan's or task's status, a measured graph number, or one of the three known gaps | [`state-gaps.md`](state-gaps.md) — the numbers you just measured, never the ones already written |
+| a plan's or task's status, a measured graph number, or one of the three known gaps | [`gaps-n-future-works.md`](gaps-n-future-works.md) — the numbers you just measured, never the ones already written |
 | add, rename, delete or re-scope a test file | [`test-map.md`](test-map.md) — the "if you change… → these will tell you" row |
 
-`state-gaps.md` carries counts taken from a real index of this tree, so an edit there needs the run that
+`gaps-n-future-works.md` carries counts taken from a real index of this tree, so an edit there needs the run that
 produced them: `bun run bin/sangkar.ts index --data-dir /tmp/…`, then the query the section cites. Re-measure,
 never estimate. If a change invalidates guidance you cannot restate honestly, say so in the commit body instead
 of leaving a confident stale line.

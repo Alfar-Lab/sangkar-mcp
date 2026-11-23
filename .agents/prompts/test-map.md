@@ -33,4 +33,4 @@ Which tests guard which change. Entry point: [`AGENTS.md`](../../AGENTS.md).
 | budgets and latency end to end | `acceptance.test.ts` |
 | the shipped binary | `binary-smoke.test.ts` |
 
-What this map does **not** cover is listed in [`state-gaps.md`](state-gaps.md).
+What this map does **not** cover is listed in [`gaps-n-future-works.md`](gaps-n-future-works.md).

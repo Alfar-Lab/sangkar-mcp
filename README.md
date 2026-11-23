@@ -25,13 +25,8 @@ bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
 ```
 
 Pin `@beta` rather than the bare name: `latest` is a moving target, because npm created a
-`0.0.0-stage` holding version that took the tag when the name was first claimed. Today `beta` serves
-`0.3.0-beta.2`; `0.4.0-beta.1` is tagged and released on GitHub and reaches the registry on the next
-publish, which needs the maintainer's OTP. Before it lands:
-
-```sh
-bun install -g github:Alfar-Lab/sangkar-mcp#v0.4.0-beta.1
-```
+`0.0.0-stage` holding version that took the tag when the name was first claimed. `beta` serves
+`0.4.0-beta.1`.
 
 ### From a checkout
 
@@ -253,25 +248,3 @@ sangkar <tool> [arguments] [global flags] — the name comes first
 MIT — see [LICENSE](LICENSE). The grant covers the package as published, including the migration SQL
 it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm` and the MCP SDK keep their own
 licenses.
-
-## Future Works
-
-Measured on a scratch index of this tree (2026-11-19, after phase 1 of `issue-remediation`): 1 640
-nodes, 9 347 edges (5 894 `calls`), 11 519 unresolved call sites, 115 `not_indexed` paths — all
-`unsupported_ext`, no source file among them.
-
-1. **`kind: "test"` is not applied.** 547 nodes carry `is_test = 1` but only 12 carry `kind = "test"`,
-   and 403 of the 547 are labelled `function`: extraction reaches `test` only through the name regex
-   on the declaration, never from `is_test`. Every payload that renders `kind` mislabels test
-   functions, and `search(kind='test')` is nearly empty.
-2. **`kind: "method"` is nearly unused.** 422 nodes are labelled `class` and 31 `method`; most of the
-   422 are TypeScript interfaces, type aliases and enums, which the language tables list as class
-   types.
-3. **Binding recall is the bottleneck.** 11 519 unresolved call sites against 5 894 `calls` edges
-   (≈66 %), and only 368 of 1 640 nodes have a test within two hops. `total_relation` is therefore
-   `gte` almost everywhere and `test_gaps` under-reports: absence answers are honest but thin.
-4. **Grammar WASM is not embedded in the compiled binary.** Grammars load from `node_modules` at index
-   time, so `dist/sangkar` serves an index but cannot build one. Compiling the 12-language set in is
-   what the distribution plan waits for.
-5. **`0.4.0-beta.1` is not on npm yet.** The `beta` tag still serves `0.3.0-beta.2`; the publish needs
-   the maintainer's OTP. Until then, install from the tag.

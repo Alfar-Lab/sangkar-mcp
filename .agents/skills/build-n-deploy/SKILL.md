@@ -120,8 +120,8 @@ What those checks enforce:
 - A verb, tool name, payload key or default in prose is wrong the moment the code disagrees with it.
   Fix the text; do not soften it with "currently" or "approximately".
 - The README's shape is a contract too: `## sangkar-mcp`, `## Installation & Requirements` (its `###`
-  subsections), `## Usage` with `### MCP & Skill` and `### CLI`, `## License`, `## Future Works` — in
-  that order, and nothing else. Maintainer material (distribution, publishing, checks) belongs in
+  subsections), `## Usage` with `### MCP & Skill` and `### CLI`, `## License` — in that order, and
+  nothing else. Maintainer material (distribution, publishing, checks) belongs in
   `docs/maintainers.md`, not as a new top-level section.
 - `docs/maintainers.md` §Publishing to npm restates the traps in step 9 of this skill — when that flow
   moves, both files move in the same commit.
