@@ -14,7 +14,7 @@ in-process, and no process writes a graph except that child.
 
 | Trigger | Started by | What it is |
 |---|---|---|
-| the per-repo watcher | `sangkar daemon run` | one watcher per registered, watchable repository; it polls `git HEAD` + mtimes, debounces, and spawns one `sangkar worker` per change |
+| the per-repo watcher | `sangkar daemon run` | one watcher per registered, watchable repository; it polls `git HEAD`, the porcelain status, and the mtime and size of every parseable path that status names, debounces, and spawns one `sangkar worker` per change |
 | `sangkar index` | the operator | the first index, or a forced repair — works with no daemon running |
 | `sangkar index --no-register` | the operator | the same run, with the registry left exactly as it was |
 | the `index` tool | a `sangkar mcp` session | the repair path; the same child, spawned by the root that owns the process |

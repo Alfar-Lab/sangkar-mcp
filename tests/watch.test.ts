@@ -21,9 +21,9 @@ import {
  * every wait is a bounded poll — `until` fails loudly instead of hanging.
  *
  * The fixtures are `mkdtemp` directories. Most are deliberately not git checkouts: that is the
- * degraded mtime detector, which is also the cheapest way to produce a change (touch a file). One
- * test builds a real checkout to prove the git detector is what answers there, and that a bare
- * `touch` is not a change.
+ * degraded mtime detector, which is also the cheapest way to produce a change (touch a file). Two
+ * tests build a real checkout: one proves the git detector is what answers there and that a bare
+ * `touch` is not a change, and one that a second save to a path git already reports as modified is.
  */
 
 const dirs: string[] = [];
@@ -347,6 +347,81 @@ describe("startWatch", () => {
     await until(() => handle.stats().spawns === 1, "the first spawn");
     await sleep(200);
     expect(handle.stats().spawns).toBe(1);
+  });
+
+  test("a second save to a file git already reports as modified is a change", async () => {
+    // The status text names a path, not its bytes, so one ` M app.py` line survived every save while
+    // the graph fell behind — the 19-minute stall in the 2026-11-23 daemon log. The same blind spot
+    // sat one level down for an untracked directory, which git collapses into a single `?? dir/`.
+    const repo = await fixture();
+    git(repo.repoRoot, "init", "-q");
+    git(repo.repoRoot, "add", "-A");
+    commit(repo.repoRoot, "fixture");
+
+    const stub = stubSpawn(() => 0);
+    const handle = watchFixture(repo, stub, { intervalMs: 20, debounceMs: 20 });
+
+    await baselineCaptured(handle);
+    expect(handle.stats().detector).toBe("git");
+
+    await writeFile(join(repo.repoRoot, "app.py"), "def run():\n    return 2\n", "utf8");
+    await until(() => stub.calls.length === 1, "the spawn caused by the first save");
+
+    // Still ` M app.py`: only the mtime and size stamp can tell this save from the previous one.
+    await writeFile(join(repo.repoRoot, "app.py"), "def run():\n    return 3\n", "utf8");
+    await until(
+      () => stub.calls.length === 2,
+      "the spawn caused by a save to an already-dirty file",
+    );
+
+    // An untracked directory is one line however many files it holds, so the paths have to be named.
+    await mkdir(join(repo.repoRoot, "pkg"), { recursive: true });
+    await writeFile(join(repo.repoRoot, "pkg", "one.py"), "value = 1\n", "utf8");
+    await until(() => stub.calls.length === 3, "the spawn caused by the untracked file");
+    await writeFile(join(repo.repoRoot, "pkg", "one.py"), "value = 2\n", "utf8");
+    await until(
+      () => stub.calls.length === 4,
+      "the spawn caused by the save inside the new directory",
+    );
+  });
+
+  test("a sub-root resolves the paths git reports, so a second save there is a change too", async () => {
+    // `git status` reports repository-root-relative paths even from a subdirectory, so a stamp built
+    // without the `--show-prefix` prefix would stat nothing and go blind exactly where it matters.
+    const parent = await mkdtemp(join(tmpdir(), "sangkar-watch-parent-"));
+    dirs.push(parent);
+    const repoRoot = join(parent, "pkg");
+    await mkdir(repoRoot, { recursive: true });
+    await writeFile(join(repoRoot, "app.py"), "value = 1\n", "utf8");
+    git(parent, "init", "-q");
+    git(parent, "add", "-A");
+    commit(parent, "fixture");
+
+    const stub = stubSpawn(() => 0);
+    const handle = startWatch({
+      repoRoot,
+      dataDir: join(repoRoot, ".sangkar"),
+      intervalMs: 20,
+      debounceMs: 20,
+      spawn: stub.spawn,
+    });
+    watched.push(handle);
+
+    await baselineCaptured(handle);
+    expect(handle.stats().detector).toBe("git");
+
+    await writeFile(join(repoRoot, "app.py"), "value = 2\n", "utf8");
+    await until(
+      () => stub.calls.length === 1,
+      "the spawn caused by the first save in the sub-root",
+    );
+
+    // The status text still reads ` M pkg/app.py`: only the stamp resolves the prefix.
+    await writeFile(join(repoRoot, "app.py"), "value = 3\n", "utf8");
+    await until(
+      () => stub.calls.length === 2,
+      "the spawn caused by the second save in the sub-root",
+    );
   });
 
   test("a git checkout is watched through HEAD and porcelain, so a touch is not a change", async () => {

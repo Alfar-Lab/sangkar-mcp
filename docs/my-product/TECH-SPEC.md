@@ -423,7 +423,7 @@ read-only handle held by a session or a publish by the one worker that ran for t
 | Write lock | **create-exclusive file** (`wx`) containing PID + start time, mtime heartbeat | **Bun has no `flock`**; SQLite's own lock protects the DB, this only prevents duplicate work (CRG used `flock`; not available here) |
 | Stale lock | PID dead, or heartbeat older than 60 s → reclaim and log | a killed worker must not wedge the repo |
 | Readers during publish | their own handle keeps the previous generation | the `rename()` publish protocol (`DATABASE.md` §5) |
-| Watcher | poll `git HEAD` + file mtimes on the repo's own `watch_interval` (default 2 s, clamped to 1000–300000 ms), debounce 500 ms | portable, no inotify/FSEvents dependency; `node:fs.watch` behaves differently across platforms |
+| Watcher | poll `git HEAD` + `git status --porcelain -uall` + the mtime and size of every parseable path that status names, on the repo's own `watch_interval` (default 2 s, clamped to 1000–300000 ms), debounce 500 ms | the status text names which paths differ, never how much, so the per-path stamp is what turns a second save to an already-dirty file into a change (2026-11-23: a 19-minute stall without it); a save to a dirty path therefore costs one spawn, while a bare `touch` of a clean one costs none; portable, no inotify/FSEvents dependency; `node:fs.watch` behaves differently across platforms |
 | Cancellation | MCP `notifications/cancelled` → abort signal into the handler; the worker is killed on cancel | CRG checks cancellation at every `check_cancel` boundary |
 
 ---

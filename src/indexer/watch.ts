@@ -12,12 +12,17 @@
  * `bin/sangkar.ts worker`; it never opens `graph.db`, never takes the lock and never imports the
  * writer module.
  *
- * What the signature contains, and why it is not the same everywhere: in a git checkout it is HEAD
- * plus the porcelain status, which already names every path whose bytes or tracked status differ.
- * An mtime scan on top of that would only turn a bare `touch` into a spawn the worker answers with
- * exit 2 — work for the graph's readers to wait on, for no change. A directory git cannot read
- * degrades to the mtimes of the files the graph could contain, because that is the only signal
- * left there (`#shared/domain/diff` degrades the same way, for the same reason).
+ * What the signature contains, and why it is not the same everywhere: in a git checkout it is HEAD,
+ * the porcelain status, and the mtime plus size of every parseable path that status names. The
+ * status alone is not enough — it names *which* paths differ, never how much — so a second save to a
+ * file that is already dirty leaves its line byte for byte the same while the graph falls behind.
+ * That is not a theory: the 2026-11-23 daemon log shows a plan at 06:18:46 and the next one at
+ * 06:37:45 while ten indexed files were saved in between — and since no status line changed in that
+ * window, every one of those saves landed on a path that was already dirty when the stall began.
+ * Stamping only the paths git names keeps the cost at one `stat` per dirty file: a bare `touch` of a
+ * clean file contributes nothing, so it still is not a change. A directory git cannot read degrades
+ * to the mtimes of the files the graph could contain, because that is the only signal left there
+ * (`#shared/domain/diff` degrades the same way, for the same reason).
  *
  * The child's only report is its exit code, and this module treats the four codes the worker
  * defines (`WORKER_EXIT` in `./worker`, spelled out here because importing it is forbidden by the
@@ -231,29 +236,107 @@ async function gitRun(repoRoot: string, args: readonly string[]): Promise<GitOut
 }
 
 /**
- * HEAD plus the porcelain status, or `null` when this directory is not a checkout git can read.
- * The two probes are separate calls on purpose: `rev-parse --git-dir` answers "is this a
- * repository", while `rev-parse HEAD` fails on a branch with no commits yet — a real repository
- * whose working tree still deserves watching.
+ * HEAD, the porcelain status, and a stamp of the paths that status names, or `null` when this
+ * directory is not a checkout git can read. `rev-parse` answers two questions in one process: a
+ * failure means "not a repository", and its second line is the sub-root prefix `status` needs, since
+ * `HEAD` is a separate call on purpose — `rev-parse HEAD` fails on a branch with no commits yet, and
+ * that is a real repository whose working tree still deserves watching.
+ *
+ * `-z` and `-uall` are what make the status usable as an input rather than a display: NUL-separated
+ * records mean no quoted path has to be decoded, and naming every untracked *file* (instead of
+ * collapsing an untracked directory to one `?? dir/` line) is the same blind spot one level down —
+ * a second edit inside a new directory would otherwise leave the signature unchanged too.
  */
-async function readGitSignature(repoRoot: string): Promise<Observed | null> {
-  const dir = await gitRun(repoRoot, ["rev-parse", "--git-dir"]);
-  if (!dir.ok) {
+async function readGitSignature(repoRoot: string, dataDir: string): Promise<Observed | null> {
+  const check = await gitRun(repoRoot, ["rev-parse", "--git-dir", "--show-prefix"]);
+  if (!check.ok) {
     return null;
   }
+  // Empty at the toplevel, `sub/` when `--repo-root` names a subdirectory; always with its slash.
+  const prefix = (check.stdout.split("\n")[1] ?? "").trim();
 
   const head = await gitRun(repoRoot, ["rev-parse", "HEAD"]);
-  const status = await gitRun(repoRoot, ["status", "--porcelain"]);
+  const status = await gitRun(repoRoot, ["status", "--porcelain", "-z", "-uall"]);
   if (!status.ok) {
     // The repository exists but git cannot describe its tree; mtimes are the only fallback left.
     return null;
   }
 
+  const stamp = await dirtyStamp(repoRoot, dataDir, gitStatusPaths(status.stdout), prefix);
   // An unborn HEAD contributes the empty string, which is still a stable key component.
   return {
-    key: `git\n${head.ok ? head.stdout.trim() : ""}\n${status.stdout}`,
+    key: `git\n${head.ok ? head.stdout.trim() : ""}\n${status.stdout}\n${stamp}`,
     detector: "git",
   };
+}
+
+/**
+ * The paths `git status --porcelain -z` reports. A rename or copy is two records — the new path
+ * with its status, then the original with no prefix — so the original is consumed here: it is
+ * either gone (a rename) or unchanged (a copy), and stamping it would describe nothing.
+ */
+function gitStatusPaths(stdout: string): string[] {
+  const records = stdout.split("\u0000");
+  const paths: string[] = [];
+  for (let i = 0; i < records.length; i += 1) {
+    const record = records[i] ?? "";
+    if (record === "") {
+      continue;
+    }
+    paths.push(record.slice(3));
+    const code = record.slice(0, 1);
+    if (code === "R" || code === "C") {
+      i += 1;
+    }
+  }
+  return paths;
+}
+
+/**
+ * The mtime and size of every path git just named that the graph could contain. This is the half
+ * of the signature that answers "did the bytes move", and it stays cheap because git did the
+ * selecting: one `stat` per dirty or untracked path, none for the rest of the tree. `prefix` is the
+ * sub-root `status` reports under, so a path outside it belongs to the rest of the checkout and is
+ * not this graph's tree. Paths the data dir owns are pruned here as they are in
+ * {@link readMtimeSignature}, so the stamp itself can never describe a worker's own write; the status
+ * text beside it is git's own view and is not pruned, which stays sound only because the worker
+ * writes `<dataDir>/.gitignore` and git then leaves the data dir out of that text entirely.
+ */
+async function dirtyStamp(
+  repoRoot: string,
+  dataDir: string,
+  paths: readonly string[],
+  prefix: string,
+): Promise<string> {
+  const skipDir = isInside(repoRoot, dataDir) ? resolve(dataDir) : null;
+  const rows: string[] = [];
+  for (const reported of paths) {
+    if (!reported.startsWith(prefix)) {
+      continue;
+    }
+    const absolute = resolve(repoRoot, reported.slice(prefix.length));
+    if (skipDir !== null && (absolute === skipDir || isInside(skipDir, absolute))) {
+      continue;
+    }
+    const rel = normalizeRel(relative(repoRoot, absolute));
+    if (detectLanguage(rel) === null) {
+      // Not a file any shipped grammar could parse, so its bytes cannot change the graph.
+      continue;
+    }
+    try {
+      const info = await stat(absolute);
+      if (!info.isFile()) {
+        // A directory or a device file cannot change the graph's bytes.
+        continue;
+      }
+      rows.push(`${rel}\u0000${Math.floor(info.mtimeMs)}\u0000${info.size}`);
+    } catch {
+      // Gone between the status and the stat: the next poll sees the settled tree, and the status
+      // text still carries the deletion itself.
+    }
+  }
+  rows.sort();
+  return rows.join("\n");
 }
 
 /**
@@ -323,7 +406,7 @@ async function readMtimeSignature(repoRoot: string, dataDir: string): Promise<st
  * treats that as a degradation rather than a failure (see `pump`).
  */
 async function observe(repoRoot: string, dataDir: string): Promise<Observed> {
-  const git = await readGitSignature(repoRoot);
+  const git = await readGitSignature(repoRoot, dataDir);
   if (git !== null) {
     return git;
   }
