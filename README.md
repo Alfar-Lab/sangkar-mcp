@@ -25,8 +25,13 @@ bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
 ```
 
 Pin `@beta` rather than the bare name: `latest` is a moving target, because npm created a
-`0.0.0-stage` holding version that took the tag when the name was first claimed. `beta` serves
-`0.4.0-beta.1`.
+`0.0.0-stage` holding version that took the tag when the name was first claimed. Today `beta` serves
+`0.4.0-beta.1`; `0.5.0-beta.1` is tagged and released on GitHub and reaches the registry on the next
+publish, which needs the maintainer's OTP. Before it lands:
+
+```sh
+bun install -g github:Alfar-Lab/sangkar-mcp#v0.5.0-beta.1
+```
 
 ### From a checkout
 
