@@ -1,0 +1,336 @@
+{
+  "phase": "phase_3",
+  "title": "Indexer: the write path",
+  "tasks": [
+    {
+      "id": "TASK-038",
+      "title": "index: the twelve-language table, proven against the loaded grammars",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/lang/types.rs",
+        "rust/crates/sangkar-index/src/lang/registry.rs",
+        "rust/crates/sangkar-index/tests/lang.rs"
+      ],
+      "details": {
+        "goal": "The language layer as DATA, ported row for row, with the probe test that proves every declared node type exists in the grammar the binary will actually load — the Rust replacement for tests/lang.test.ts.",
+        "contract": "Port `src/indexer/lang/{types,registry}.ts` (250 lines) row for row. Types:\n```rust\npub enum LangId { Python, TypeScript, Tsx, JavaScript, Go, Java, Rust, C, Cpp, CSharp, Php, Ruby }\npub struct LangRow { pub id: LangId, pub extensions: &'static [&'static str],\n  pub class_types: &'static [&'static str], pub function_types: &'static [&'static str],\n  pub import_types: &'static [&'static str], pub call_types: &'static [&'static str],\n  pub inheritance_types: &'static [&'static str], pub test_file_regex: Option<&'static str> }\npub fn detect_language(path: &str) -> Option<LangId>;   // extension only, lowercased, first row wins\npub fn spec_for(id: LangId) -> &'static LangRow;\npub fn tree_sitter_language(id: LangId) -> tree_sitter::Language;\n```\nThe 12 rows (extensions, and the five node-type lists) are copied VERBATIM from the registry, including the empty `inheritanceTypes` for C and the `testFileRegex` per row; the `grammarWasm` field becomes `tree_sitter_language`, which returns the crate's `LANGUAGE` constant per id.\n`tests/lang.rs` is the port of `tests/lang.test.ts`: for EVERY declared node type of all 12 rows, parse a small snippet that should contain it and assert (a) the grammar's `node_kinds` contains the name and (b) the parsed tree actually contains a node of that kind. A missing name is a test failure, never a comment. Where a native grammar genuinely lacks a name the WASM bundle had, record the substitution in `registry.rs` with a comment stating the measured effect, list it in `AGENTS.md`'s gaps file, and say so in the task report — do not silently drop the type.\nAlso port `detectLanguage`'s quirks: lowercasing, `\"\"` -> None, `.d.ts` resolving to typescript, and first-row-wins for a shared extension.",
+        "steps": [
+          "Port types.rs and the extension map/registry with all 12 rows.",
+          "Map each LangId to its grammar crate's `LANGUAGE`.",
+          "Write the snippet per language that exercises each declared node type.",
+          "Write the probe test; make it fail loudly with the language and the missing name.",
+          "Record any substitution and the measured consequence."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test lang` exits 0 and prints the number of probed node types (expect ~120).\nDone when: every one of the 12 languages has at least one probed class, function, import and call type, and the test names the language plus the node type on any failure."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-039",
+      "title": "index: discovery, exclusions, skip reasons",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/discover.rs",
+        "rust/crates/sangkar-index/tests/discover.rs"
+      ],
+      "details": {
+        "goal": "One walk that answers 'which files are indexed' AND 'why every other candidate was dropped', because the second half is a payload contract (`not_indexed`).",
+        "contract": "Port `src/indexer/discover.ts` (393 lines).\n```rust\npub const ALWAYS_EXCLUDED: [&str; 5] = [\".git\", \"node_modules\", \".sangkar\", \"dist\", \"vendor\"];\npub const SIZE_CAP_BYTES: u64 = 512 * 1024 * 1024;\npub enum SkipReason { Ignored, Binary, SizeCap, UnsupportedExt, Unreadable }\npub struct DiscoveredFile { pub path: String, pub lang: LangId, pub size: u64, pub sha256: String }\npub struct DiscoverResult { pub files: Vec<DiscoveredFile>, pub not_indexed: Vec<NotIndexedFile>, pub skipped: usize }\npub fn discover(repo_root: &Path, opts: &DiscoverOptions) -> DiscoverResult;\n```\nRules that must survive: ignore rules come from `<root>/.gitignore` then `<root>/.sangkarignore` with the documented glob subset (`*`, `?` stay in a segment; `**` crosses; a leading `/` anchors; a trailing `/` is a directory; `#` comments; `!` negates, last match wins; no character classes, no escapes); the two control files themselves are neither indexed nor reported; symlinks are never followed; classification order is ignore -> extension -> size -> binary probe (first 8192 bytes containing a NUL) -> sha256, with `HASH_CHUNK_BYTES = 1 MiB`; an unreadable directory is recorded as reason `unreadable` (EACCES/EPERM/ENOENT) instead of aborting the run; output order is byte-wise string order of the path, no locale.\nTests port `tests/discover.test.ts`: each of the five skip reasons, a nested `.gitignore`-style rule set from the root control files, a symlink loop, an unreadable directory (created with `chmod 000` at test time and restored), the size cap via a sparse file, and the `src-old` sibling behaviour.",
+        "steps": [
+          "Port the glob-subset compiler with the negation and anchoring rules.",
+          "Port the walk with the classification order and the unreadable handling.",
+          "Port the sha256 streaming and the binary probe.",
+          "Write the tests including the chmod-based unreadable case."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test discover` exits 0.\nDone when: a directory with `chmod 000` produces an `unreadable` entry and the run still completes, and the fixture's `.sangkarignore` line `rust/tests/parity/fixtures/` excludes those files from a walk of this repository."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-040",
+      "title": "index: the tree-sitter pool and parse results",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/parse.rs",
+        "rust/crates/sangkar-index/tests/parse.rs"
+      ],
+      "details": {
+        "goal": "Load a grammar on first use, keep a bounded number of parsers, never reject on a bad file, and report error ranges in the format the database already stores.",
+        "contract": "Port `src/indexer/parse.ts` (391 lines), minus the WASM loader it exists to work around.\n```rust\npub const MAX_CACHED_LANGUAGES: usize = 6;\npub const MAX_ERROR_RANGES: usize = 20;\npub enum ParseFailureReason { GrammarUnavailable, ParseFailed }\npub enum ParseResult { Ok { tree: tree_sitter::Tree, error_ranges: Vec<String> },\n                        Err { reason: ParseFailureReason, detail: String } }\npub fn parse_file(source: &[u8], lang: LangId) -> ParseResult;    // never panics, never returns Err for a syntax error\n```\nAn LRU of `(LangId, Parser)` with capacity 6, hit = move to most-recently-used, eviction of the least-recently-used beyond the cap. `error_ranges` collects every `ERROR` or `MISSING` node as `\"12\"` or `\"12-14\"` (1-based lines), deduplicated in tree order, capped at 20 with a final `\"+N more ranges\"` entry.\nThe Rust version may parse concurrently; keep a `Mutex`-guarded pool and make the public function `&self` so the worker can decide the threading. Do not add a language-inspection or syntax-highlighting API — the extractor needs the tree only.\nTests: a well-formed file per language (parse ok, no error ranges), a file with a deliberate syntax error (ok with at least one range and the `\"a-b\"` form), a file with 25+ errors (cap plus the `+N more` tail), and grammar-unavailable behaviour when asked for a language without a compiled grammar (assert the variant, not a panic).",
+        "steps": [
+          "Port the pool with a capacity-6 LRU and move-to-MRU on hit.",
+          "Port the error-range walk and the cap.",
+          "Return the tree plus ranges; keep `parse_file` infallible for syntax errors.",
+          "Write the three tests per fixture shape."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test parse` exits 0.\nDone when: the 25-error fixture yields exactly 21 entries (20 ranges plus the `+N more` line), and a 4-byte binary blob does not panic."
+      },
+      "pre_request": [
+        "TASK-038"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-041",
+      "title": "index: extract part 1 — declarations, containment, imports",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/extract/mod.rs",
+        "rust/crates/sangkar-index/src/extract/declare.rs",
+        "rust/crates/sangkar-index/tests/extract_declare.rs"
+      ],
+      "details": {
+        "goal": "Walk a parsed tree once and emit the symbol table plus the import edges, driven entirely by the language table so adding a language never means touching the extractor.",
+        "contract": "This is the first half of `src/indexer/extract.ts` (946 lines); the second half is TASK-042 and both own `extract/`. Keep the split at `declare.rs` (declarations, containment, imports) vs `sites.rs` (calls, inheritance, references) and let `mod.rs` hold only the shared types and the single walk that calls both.\nShared types (both halves obey them):\n```rust\npub const NODE_KINDS: [&str; 7] = [\"file\",\"module\",\"class\",\"function\",\"method\",\"test\",\"endpoint\"];\npub const RAW_EDGE_KINDS: [&str; 6] = [\"contains\",\"calls\",\"imports\",\"inherits\",\"implements\",\"references\"];\npub const EXTRACTED_CANDIDATE: &str = \"extracted_candidate\";\npub const REFERENCE_SITES: [&str; 6] = [\"call_argument\",\"assignment_rhs\",\"object_element\",\"array_element\",\"decorator_argument\",\"return_expression\"];\npub struct ExtractedNode { pub kind: String, pub name: String, pub qn: String, pub start_line: u32, pub end_line: u32,\n                            pub signature: Option<String>, pub is_test: bool, pub props: NodeProps }\npub struct RawEdge { pub kind: String, pub src: String, pub target: String, pub receiver: Option<String>,\n                     pub line: u32, pub tier: String, pub evidence: Option<String>, pub local_name: String }\npub struct UnresolvedSite { pub line: u32, pub raw_target: String, pub evidence_kind: String, pub evidence: String }\npub struct ExtractResult { pub nodes: Vec<ExtractedNode>, pub raw_edges: Vec<RawEdge>, pub unresolved: Vec<UnresolvedSite> }\n```\n`declare.rs` must emit: the `file` node for the path, a `module` node where the language has one (the `fileModule` rule for Python), every class node from `class_types`, every function/method from `function_types` (a function inside a class is `method`), `is_test` from the row's `test_file_regex` on the path AND from the language's test-decorator convention, `signature` as the source text of the declaration header truncated the way the TypeScript side truncates it, and `contains` edges parent->child. Imports come from `import_types`: one `imports` raw edge per imported binding with `local_name` and the specifier as `target`.\nQualified names use `paths::qn(rel_path, scope, name)` exactly, because `node.qn` is UNIQUE and every later binding step depends on the shape.\nTests: one snippet per language family (python, typescript, java, go, rust, ruby) asserting node kinds, qn shape, containment edges, `is_test`, and the import edges with their `local_name`.",
+        "steps": [
+          "Create `extract/mod.rs` with the shared types and the walk skeleton that TASK-042 will fill.",
+          "Port the declaration visitors and the parent/child stack that produces `contains`.",
+          "Port `signatureOf`, the `is_test` predicate and the `props` payload.",
+          "Port the import visitors including the `fileModule`/`callImport` exceptions.",
+          "Write the per-family tests."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test extract_declare` exits 0.\nDone when: the python snippet's `qn` matches `\"mod.py::Class.method\"`, a TSX file produces a `method` inside a `class`, and the import edge carries the local name."
+      },
+      "pre_request": [
+        "TASK-040"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-042",
+      "title": "index: extract part 2 — calls, inheritance, reference sites",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/extract/sites.rs",
+        "rust/crates/sangkar-index/tests/extract_sites.rs"
+      ],
+      "details": {
+        "goal": "The second half of the extractor: every call site with its receiver, the inheritance edges, and the reference sites that make `references` edges possible — all table-driven.",
+        "contract": "Continues `src/indexer/extract.ts`; the shared types are fixed by TASK-041 and must not be changed. `sites.rs` fills the walk from `extract/mod.rs` and emits:\n- `calls` edges for each `call_types` node: `target` is the callee's written name, `receiver` the text before the dot (or the object expression) when there is one, `local_name` empty, `line` the callee's line, `tier` `\"extracted\"` for a name written in source. A call with no resolvable callee name is NOT dropped: it becomes an `UnresolvedSite { evidence_kind: \"dynamic\", evidence: \"call <written text>\" }`, because the unresolved census is a payload contract.\n- `inherits`/`implements` edges from `inheritance_types`: `inherits` for a class base, `implements` for an interface/trait list, the base name as written, `tier` `\"extracted\"`.\n- `references` edges from the six `REFERENCE_SITES` shapes: `target` is the identifier, `evidence` names the site kind, `tier` `\"extracted\"` at this stage (binding decides later).\n- `endpoint` nodes where the language convention marks a route handler (copy the TypeScript predicate verbatim; if it is language-specific, only emit for the languages that have it).\nThe walk is one traversal: do not re-parse, do not search ancestors per node more than once, and never allocate a string per visited node that no edge uses.\nTests: a snippet per family with a method call on a receiver (`a.b()`), a bare call (`f()`), a `new`/`object_creation`, a superclass, an interface implementation, a call argument reference, an assignment RHS reference, and a dynamic unresolvable call — asserting each edge kind, the receiver text, and the unresolved row.",
+        "steps": [
+          "Port the call visitor with receiver extraction and the `new`/creation variants.",
+          "Port the inheritance visitors for both edge kinds.",
+          "Port the six reference-site shapes.",
+          "Port the endpoint predicate for the languages that have one.",
+          "Write the per-family tests including the unresolved row."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test extract_sites` exits 0.\nDone when: `a.b()` records `receiver: \"a\"` and `f()` records none, both inheritance kinds appear, and a dynamic call produces exactly one unresolved row with `evidence_kind: \"dynamic\"`."
+      },
+      "pre_request": [
+        "TASK-041"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-043",
+      "title": "index: binding — the four-step call resolution and the import taxonomy",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/resolve.rs",
+        "rust/crates/sangkar-index/tests/resolve.rs"
+      ],
+      "details": {
+        "goal": "Turn raw edges into real edges with a tier, and record every failure BY CAUSE — the tier order and the evidence kinds are what `trace` reports and what the `eq` claim depends on.",
+        "contract": "Port `src/indexer/resolve.ts` (757 lines).\n```rust\npub const EDGE_TIERS: [&str; 2] = [\"extracted\", \"inferred\"];\npub const BIND_EVIDENCE_KINDS: [&str; 4] = [\"receiver_type_unknown\", \"ambiguous\", \"dynamic\", \"missing_module\"];\npub struct SymbolIndex { /* nodes by qn, by name, by file; imports per file; bases per qn */ }\npub fn bind(units: &[FileUnit], index: &SymbolIndex) -> BindResult;   // {edges, unresolved}\n```\nBinding order per raw kind, exactly:\n| raw kind | rule | tier |\n|---|---|---|\n| `contains` | target is already a qn | extracted |\n| `inherits`/`implements` | `resolve_type_name` hit; miss -> unresolved `ambiguous` or `dynamic` | extracted |\n| `references` | exactly one `nodes_named` hit; two or more are SILENTLY DROPPED; zero emits nothing | inferred |\n| `calls` step 1 | exact qn in the same file (receiver as scope) | extracted |\n| `calls` step 2 | name visible through the import table | extracted |\n| `calls` step 3 | globally unique name | inferred |\n| `calls` step 4 | superclass method for a typed receiver | inferred |\n| ambiguity at steps 1/2/4 | unresolved `ambiguous` | — |\n| fallthrough | `receiver_type_unknown` if a receiver was written, else `ambiguous` if several globals matched, else `dynamic` | — |\n| `imports` | single `module_candidate` + target file node; >1 candidate -> `ambiguous` with the competing paths appended after the specifier; 0 candidates + a relative specifier -> `missing_module`; else `dynamic` | extracted |\nEmit guard: never emit an edge whose `src` or `dst` is not in the index; dedupe on `file\\u{0}kind\\u{0}src\\u{0}dst\\u{0}line\\u{0}local_name`.\nTests port `tests/resolve.test.ts`: every row of the table above, the silent drop for a multi-hit reference, the four evidence kinds with their `evidence` text, and the dedupe.",
+        "steps": [
+          "Port the SymbolIndex builder (qn, names, per-file imports, bases).",
+          "Port the four-step call resolution with the ambiguity check at each step.",
+          "Port inherit/implements/references/contains/imports branches.",
+          "Port the emit guard and the dedupe key.",
+          "Write the table-driven tests."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test resolve` exits 0 with at least one case per table row.\nDone when: a two-candidate reference emits no edge, a relative import with no candidate yields `missing_module`, and a bare package specifier yields `dynamic`."
+      },
+      "pre_request": [
+        "TASK-042"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-044",
+      "title": "index: persist part 1 — one unit into the stage, tombstones",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/persist/mod.rs",
+        "rust/crates/sangkar-index/src/persist/unit.rs",
+        "rust/crates/sangkar-index/tests/persist_unit.rs"
+      ],
+      "details": {
+        "goal": "Write one parsed file's rows into the stage inside the caller's transaction, and record what disappeared — the unit boundary is what makes an incremental run correct.",
+        "contract": "First half of `src/indexer/persist.ts` (830 lines); the second half is TASK-045 and both own `persist/`. Shared types:\n```rust\npub struct PersistUnit { pub rel_path: String, pub nodes: Vec<ExtractedNode>, pub raw_edges: Vec<RawEdge>,\n                         pub unresolved: Vec<UnresolvedSite>, pub not_indexed: Option<NotIndexedEntry> }\npub struct PersistCounts { pub file_id: i64, pub nodes: usize, pub edges: usize, pub unresolved: usize,\n                           pub skipped_edges: usize, pub pending_tombstones: usize }\npub const PENDING_GENERATION: &str = \"\";\npub fn persist_unit(tx: &Transaction, unit: &PersistUnit, resolved: &BindResult) -> Result<PersistCounts>;\n```\nThe SQL, verbatim (do not rewrite these as a builder):\n```sql\nDELETE FROM file WHERE path = ?\nINSERT INTO file (path, language, sha256, size, line_count, parse_status, parse_error_ranges, indexed_generation)\n  VALUES (?,?,?,?,?,?,?,?) ON CONFLICT(path) DO UPDATE SET language = excluded.language, sha256 = excluded.sha256,\n  size = excluded.size, line_count = excluded.line_count, parse_status = excluded.parse_status,\n  parse_error_ranges = excluded.parse_error_ranges, indexed_generation = excluded.indexed_generation\nDELETE FROM node|edge|unresolved WHERE file_id = (SELECT id FROM file WHERE path = ?)\nDELETE FROM node WHERE qn = ? AND file_id <> ?\nINSERT INTO node (file_id, kind, name, qn, start_line, end_line, signature, is_test, props) VALUES (?,?,?,?,?,?,?,?,?) RETURNING id\nUPDATE node SET parent_id = ? WHERE id = ?\nINSERT INTO edge (src_id, dst_id, kind, tier, file_id, line, local_name, evidence) VALUES (?,?,?,?,?,?,?,?) ON CONFLICT DO NOTHING\nINSERT INTO unresolved (file_id, line, raw_target, evidence_kind, evidence) VALUES (?,?,?,?,?) ON CONFLICT DO NOTHING\nDELETE FROM not_indexed WHERE path = ?\nINSERT INTO not_indexed (path, reason, detail, language) VALUES (?,?,?,?) ON CONFLICT DO NOTHING\n```\nPlus the tombstone upsert (`INSERT ... SELECT n.qn, n.kind, n.file_id, ?, ?, (SELECT count(*) FROM edge e WHERE e.dst_id = n.id AND e.kind NOT IN ('contains','tested_by')) FROM node n JOIN file f ON f.id = n.file_id WHERE f.path = ? ON CONFLICT(qn) DO UPDATE SET ...`) run BEFORE the deletes, with `last_seen_generation = PENDING_GENERATION` and `removed_in_generation = ''`.\n`RETURNING id` must return exactly one row — treat zero as an internal error naming the qn. Edges whose endpoints did not persist are counted in `skipped_edges`, never silently dropped.\nTests: insert then update the same file (ids stable where the qn is stable, deleted qns becoming tombstones), a unit with a `not_indexed` entry, an edge whose dst is missing (counted as skipped), and a conflict on the same qn in two files.",
+        "steps": [
+          "Create `persist/mod.rs` with the shared types and the transaction seam (a `rusqlite::Transaction`, never a `Connection`).",
+          "Port the file upsert and the per-file deletes in the documented order.",
+          "Port node insert with `RETURNING id`, the parent update and the qn-conflict delete.",
+          "Port edge/unresolved/not_indexed inserts and the tombstone upsert.",
+          "Write the tests over a temp database."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test persist_unit` exits 0.\nDone when: re-persisting an unchanged file leaves the same node ids, and removing a symbol from a file produces exactly one tombstone row with `last_seen_generation = ''`."
+      },
+      "pre_request": [
+        "TASK-043"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-045",
+      "title": "index: persist part 2 — metrics, tested_by, FTS delta, generation",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/persist/finalize.rs",
+        "rust/crates/sangkar-index/tests/persist_finalize.rs"
+      ],
+      "details": {
+        "goal": "The whole-graph derivations that make an answer possible: degrees, entry points, tested depth, the FTS mirror delta, and the generation row that publishes it.",
+        "contract": "Second half of `src/indexer/persist.ts`. Constants: `NEIGHBOURHOOD_LIMIT = 5_000`, `ID_BATCH = 400`, `FTS_REBUILD_FRACTION = 0.35`, `MIRROR_COLUMNS = \"rowid_, name, qn, signature, docstring, props_text\"`, meta keys `generation`, `generation_seq`, `project_name`, `project_root`, `project_branch`, `project_remote`.\n```rust\npub struct GenerationInput { pub files_indexed: i64, pub nodes: i64, pub edges: i64, pub duration_ms: i64,\n                             pub mode: String, pub base_commit: Option<String>, pub worktree_dirty: bool,\n                             pub identity: ProjectIdentity }\npub struct GenerationResult { pub generation: String, pub seq: i64, pub fts: FtsReport, pub metrics: MetricsReport }\npub fn finalize_generation(tx: &Transaction, input: &GenerationInput) -> Result<GenerationResult>;\n```\nThe derivations, in the documented order: degree update (`INSERT OR IGNORE INTO node_metrics (node_id) SELECT id FROM node`, then the two correlated `UPDATE node_metrics SET in_degree = (SELECT count(*) ... )` statements); the `tested_by` rebuild (`DELETE FROM edge WHERE kind = 'tested_by'`, then the `INSERT INTO edge ... SELECT ... GROUP BY c.src_id, c.dst_id ON CONFLICT DO NOTHING` over test->non-test calls); `tested_depth` (NULL, then 1 for direct, then 2 for one hop); the tombstone settle (`UPDATE tombstone SET removed_in_generation = ?`, delete settled ones whose qn came back); entry points (`reachable_count` from the `NEIGHBOURHOOD_LIMIT`-bounded neighbourhood, batched by `ID_BATCH`); the FTS mirror delta (rows in `node_fts_state` with no node -> delete from the virtual table with the `('delete', rowid, ...)` form and from the mirror; rows in `node` with no mirror row -> insert into both) with a full `INSERT INTO node_fts (node_fts) VALUES ('rebuild')` when the delta exceeds 35 % of nodes; then the generation row (`seq = coalesce(max(seq),0)+1`, previous `published` rows set to `superseded`, new row `published`) and the six meta upserts.\nTests: a graph with a test calling a production function (tested_depth 1 and 2), a node with no metrics row, a removed symbol settling its tombstone, an FTS delta above and below the rebuild threshold, and the generation sequence after three publishes.",
+        "steps": [
+          "Port the degree and entry-point derivation with the batching.",
+          "Port the tested_by and tested_depth passes.",
+          "Port the tombstone settle and the identity/meta writes.",
+          "Port the FTS mirror delta with both the incremental and the rebuild path.",
+          "Port the generation insert/supersede and write the tests."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test persist_finalize` exits 0.\nDone when: three publishes produce seq 1,2,3 with only the last `published`, and a 50 %-changed graph takes the rebuild path (asserted via `FtsReport`)."
+      },
+      "pre_request": [
+        "TASK-044"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-046",
+      "title": "index: the worker — lock, incremental routing, publish, exit codes",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/worker.rs",
+        "rust/crates/sangkar-index/tests/worker.rs"
+      ],
+      "details": {
+        "goal": "The one process that owns the writer: take the lock or refuse, decide what actually changed, write every unit into a stage, publish atomically, and report through exactly four exit codes.",
+        "contract": "Port `src/indexer/worker.ts` (1054 lines).\n```rust\npub enum WorkerMode { Full, Fast }\npub enum WorkerExit { Published = 0, Failed = 1, NothingToDo = 2, Locked = 75 }\npub fn run_worker(opts: &WorkerOptions) -> WorkerExit;   // never panics for a repository-level problem\n```\nFlow: acquire `<dataDir>/write.lock` (or return `Locked`), heartbeat at `STALE_AFTER_MS/4` = 15 s, `with_stage` (seeded from the live file when one exists), one `BEGIN IMMEDIATE` transaction covering tombstones -> file upserts -> drops -> `persist_unit` x N -> restore of the full resolved edge set -> coverage rewrite -> `finalize_generation` -> worker meta, then seal + publish, then release the lock, then write the run's telemetry record.\nIncremental routing: `read_digests` (`SELECT path, sha256 FROM file ORDER BY path`), `read_previous_base_commit` (`SELECT base_commit FROM generation ORDER BY seq DESC LIMIT 1`), `changed_since(...)`; `changed` = sha mismatch UNION git-reported, intersected with discovery; `removed` = file rows absent from discovery; `nothing_to_do = !force && changed == 0 && removed == 0`. A FAST run still rewrites the whole unit set (restore edges re-inserts the full resolved set) — copy that behaviour and its comment.\n`file.parse_status` is `ok`/`failed`/`skipped` with `parse_error_ranges` as the joined strings; a failed parse still creates the file row so its symbols tombstone correctly. Git facts for identity: `rev-parse HEAD`, `symbolic-ref --short HEAD`, `config --get remote.origin.url` with the same prologue and the 10 s timeout; any failure is `None`, never an error.\nTests port `tests/worker.test.ts`: a first run publishes (exit 0), an immediate rerun returns `NothingToDo` (2), `--force` publishes again, a fast run after one file changed republishes only that unit but restores all edges, a concurrent lock holder yields 75, and a repository with zero parseable files still publishes with `files_indexed: 0`.",
+        "steps": [
+          "Port the lock acquisition with the heartbeat and the four return paths.",
+          "Port discovery + digest comparison + git change detection into the routing decision.",
+          "Port the stage transaction: tombstones, upserts, units, restore, coverage, finalize.",
+          "Port identity capture and the run's telemetry record call (a no-op until phase_4).",
+          "Write the tests, including the concurrent-lock case with a second process holding the file."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test worker` exits 0.\nDone when: the four exit codes are each observed once, and a test asserts the live file's `sha256` is unchanged when the run returns `NothingToDo`."
+      },
+      "pre_request": [
+        "TASK-045"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-047",
+      "title": "index: the polling watcher, its debounce and its backoff",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-index/src/watch.rs",
+        "rust/crates/sangkar-index/tests/watch.rs"
+      ],
+      "details": {
+        "goal": "Decide WHEN a run is due without running one: poll the git state on an interval, debounce, back off on failure, and spawn the worker process.",
+        "contract": "Port `src/indexer/watch.ts` (671 lines).\n```rust\npub const DEFAULT_INTERVAL_MS: u64 = 2_000;\npub const DEFAULT_DEBOUNCE_MS: u64 = 500;\npub const MAX_BACKOFF_MS: u64 = 300_000;\npub fn backoff_ms(interval_ms: u64, failures: u32) -> u64;   // min(interval * 2^failures, 300_000)\npub struct WatchHandle { /* stop(), stats() */ }\npub fn start_watch(opts: &WatchOptions) -> WatchHandle;\n```\nDetector: `git` mode reads `git rev-parse --git-dir --show-prefix`, `git rev-parse HEAD`, `git status --porcelain -z -uall` with the same prologue (`--no-pager --no-optional-locks -c credential.helper= -c core.askpass= -C <root>`) and a 10 s timeout; the signature is `git\\n<HEAD>\\n<porcelain -z -uall>\\n<stamp>` where the stamp is `rel\\0floor(mtime_ms)\\0size` per parseable dirty/untracked path. `mtime` mode is the fallback: `mtime\\n<count>\\n<sha256 of sorted rows>`. The FIRST poll only records a baseline and never spawns.\nDebounce: on a changed signature, sleep `DEBOUNCE_MS` once, re-observe once, and spawn only if still different (no window restart). Loop delay = `interval` when `failures == 0`, else the backoff. Exit codes: `0`/`2` advance the baseline, `75` is logged and not a failure, anything else increments `failures`.\nSpawn target: `SpawnWorker` closure so tests inject a fake; production spawns `<config.worker_cmd> worker --repo-root <root> --data-dir <dir>` with stderr to the daemon log and reports only the exit status.\nTests port `tests/watch.test.ts`: baseline-only first poll, a real file change spawning once, a two-change burst spawning once (debounce), a worker exiting 1 raising the backoff and 75 not raising it, `backoff_ms` at failures 0..6, and the mtime detector on a directory without git.",
+        "steps": [
+          "Port the git signature builder including the per-path stamp.",
+          "Port the mtime detector for the git-less case.",
+          "Port the debounce and the backoff loop against an injected clock where possible.",
+          "Port the spawn seam and the exit-code handling.",
+          "Write the tests with a fake worker recorder."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test watch` exits 0.\nDone when: `backoff_ms(2000, 6) == 128000`, `backoff_ms(2000, 20) == 300000`, and a burst of two writes within the debounce window spawns exactly one worker."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-048",
+      "title": "Census parity: Rust indexes, TypeScript reads, numbers agree",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "scripts/parity/census.ts",
+        "rust/tests/golden/census",
+        "rust/crates/sangkar-index/tests/census.rs"
+      ],
+      "details": {
+        "goal": "The write path's gate: a database built by the Rust indexer must be readable by the TypeScript binary, and its per-language census must match the TypeScript indexer's on the same corpus.",
+        "contract": "scripts/parity/census.ts runs under bun and prints, for any graph.db, the census as JSON: sqlite_version, files, nodes, edges_by_kind_tier, unresolved_by_kind, nodes_by_kind, nodes_by_language, not_indexed_by_reason, and the generation's seq, mode and status. It works on either implementation's database.\nCounts are not enough. The parity bar makes array ORDER part of the contract (cursors index into a generation's stable ordering and rowids are minted by the writer), so the census also carries ORDERED ROW SEQUENCES for the six list-producing queries a page is taken from: node ids by rowid, edge ids by rowid, node_fts_state rowids, entryPoints(5) ids, hotspots(5) ids, and the findByName ids for a duplicated name. Compare them element by element; a count-only comparison would pass a writer that inserts in a different order and then invalidates every cursor.\nCapture the TypeScript census for the polyglot and broken fixtures into rust/tests/golden/census/<fixture>.ts.json. cargo test -p sangkar-index --test census builds the same fixtures with the Rust worker and compares, printing a per-key delta table instead of a single mismatch.\nAcceptance is a MEASURED delta: nodes, files, unresolved_by_kind and edges_by_kind_tier must match exactly per language, and every ordered sequence must match exactly. If a grammar substitution from TASK-038 makes a language differ, the test may allow that language a listed count delta, written into the golden as allowed_delta for that language with a comment naming the grammar version and repeated in the task report so it can reach .agents/prompts/gaps-n-future-works.md. An ordering difference is never allowed.\nRecord select sqlite_version() from both sides in the golden: FTS5 scoring and tie-breaks are version quantities, and the search ordering bm25 ASC, in_degree DESC, id ASC depends on them.\nAlso assert that the TypeScript binary's status answers from the Rust-built database with a non-null read_status.generation, which is the cross-implementation readability proof.",
+        "steps": [
+          "Write census.ts as a database reader usable for both implementations, with the six ordered sequences and sqlite_version.",
+          "Capture the TypeScript censuses for both fixtures.",
+          "Build the fixtures with the Rust worker in the test and compare, printing the per-key delta table.",
+          "Encode any grammar-caused allowance explicitly and record both SQLite versions.",
+          "Run the TypeScript status against the Rust-built database and record the answer."
+        ],
+        "verify": "cargo test --manifest-path rust/Cargo.toml -p sangkar-index --test census exits 0 with the delta table printed.\n~/.bun/bin/bun run bin/sangkar.ts status --repo-root rust/tests/parity/fixtures/polyglot with --data-dir pointing at the Rust-built directory exits 0 and prints a generation.\nDone when: polyglot shows zero unexplained delta, every allowed delta names its language and grammar version, and the six ordered sequences match."
+      },
+      "pre_request": [
+        "TASK-046",
+        "TASK-047"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-049",
+      "title": "Phase 3 close: the write path is the only thing that publishes",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "rust/Cargo.lock"
+      ],
+      "details": {
+        "goal": "Prove the Rust indexer publishes a graph that this repository can be served from, that the TypeScript suite still passes, and that the deltas are the measured ones and nothing else.",
+        "contract": "Read-only except `rust/Cargo.lock`. Never start a second index run while one is in flight: check `status.health.indexer` first and wait for the watcher instead.",
+        "steps": [
+          "Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.",
+          "Index `rust/tests/parity/fixtures/polyglot` and `broken` with the RUST binary into temp data dirs; then run the TypeScript `status`/`trace`/`search` against those directories and record that they answer.",
+          "Index this repository once with the Rust worker into a temp data dir and record the run's node/edge/file counts beside the TypeScript indexer's counts for the same tree.",
+          "Run `~/.bun/bin/bun test` and diff against the TASK-015 baseline.",
+          "Report every delta with its language, its size, and whether TASK-048 allowed it."
+        ],
+        "verify": "`cargo test --workspace` and clippy exit 0; the TypeScript binary answers from both Rust-built databases; `~/.bun/bin/bun test` shows no new failure.\nDone when: the report contains the this-repository comparison (nodes, edges, files, unresolved) between the two indexers and names every non-zero delta."
+      },
+      "pre_request": [
+        "TASK-038",
+        "TASK-039",
+        "TASK-040",
+        "TASK-041",
+        "TASK-042",
+        "TASK-043",
+        "TASK-044",
+        "TASK-045",
+        "TASK-046",
+        "TASK-047",
+        "TASK-048"
+      ],
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

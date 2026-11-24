@@ -1,0 +1,493 @@
+{
+  "phase": "phase_2",
+  "title": "Tools and surfaces",
+  "tasks": [
+    {
+      "id": "TASK-025",
+      "title": "core: shipped instructions and next_tools",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-core/src/instructions.rs",
+        "rust/crates/sangkar-core/tests/instructions.rs"
+      ],
+      "details": {
+        "goal": "The agent-facing text the MCP server ships as `instructions`, plus the `next_tools` suggestion table every routed envelope carries — both are public strings, so they are data, not prose the port may improve.",
+        "contract": "Port `src/shared/instructions.ts` (137 lines) and embed `src/prompts/INSTRUCTIONS.md` BYTE FOR BYTE:\n```rust\npub const INSTRUCTIONS_TEXT: &str = include_str!(\"../../../../src/prompts/INSTRUCTIONS.md\");\npub fn next_tools_for(tool: &str) -> Vec<String>;\n```\n`next_tools_for` returns the same short names in the same order for each of the seven tools and an empty vec for an unknown name. During the migration the file is included from the TypeScript tree (same mechanism as the SQL) and phase_5 moves it into the crate; the include path is the only place this task may point at `src/`.\nThe test pins the exact length and byte count of `INSTRUCTIONS_TEXT` (compute it with `wc -c` and assert it), and asserts the seven `next_tools` lists element by element. This mirrors `tests/instructions.test.ts`, which pins the same bytes.",
+        "steps": [
+          "Copy `nextToolsFor`'s table into a `match` on the tool name.",
+          "Add the `include_str!` constant with a comment naming phase_5's move.",
+          "Write the test asserting the byte count and all seven lists."
+        ],
+        "verify": "`wc -c src/prompts/INSTRUCTIONS.md` and the asserted constant agree.\n`cargo test --manifest-path rust/Cargo.toml -p sangkar-core --test instructions` exits 0.\nDone when: the test fails if one character is appended to the markdown (checked locally, then reverted)."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-026",
+      "title": "cli: the argument parser and the two renderings",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/src/args.rs",
+        "rust/crates/sangkar-cli/src/render.rs",
+        "rust/crates/sangkar-cli/tests/args_render.rs"
+      ],
+      "details": {
+        "goal": "One parser for both surfaces and one place that decides TOON vs JSON, so the CLI and the MCP answer cannot disagree about the bytes of an envelope.",
+        "contract": "Port src/shared/cli/args.ts (473 lines) and src/shared/cli/render.ts (60 lines).\nTwo parsers, both from the same field descriptors:\n- tool calls, whose declared fields come from the seven manifests and whose undeclared keys are dropped (src/index.ts:1092-1106 shows the current behaviour);\n- verb calls, which take their own flag set and REFUSE a flag that is not in it, with exit 2. The verb flag table is data in this module and must cover every flag the TypeScript CLI accepts today (src/index.ts:1399, 1440-1447, bin/sangkar.ts:60-90): worker takes --mode full|fast and --force; index adds --yes and --no-register; telemetry takes --out, --serve, --port, --host, --since; daemon takes a subcommand plus --port and --host (run only); repo takes a subcommand, a path, --watch, --watch-interval and --telemetry. Every verb also accepts the four globals.\nParser grammar, exactly: --k v and --k=v; --no-<bool> negation; a bare boolean flag means true; --k true|false accepted only for booleans; repeated array flags collect; integer-array items split on : (--range 1:5); a single positional binds the only required string field; a flag-prefixed token is never a value. Globals: --repo-root <path>, --data-dir <path>, --json, --help|-h; split_globals removes them and reports them, resolve_command finds the verb with globals on either side.\nA wrong type, a missing required field, a refused key or a malformed value produces a usage error carrying that verb's or tool's usage block; usage_of renders the same block as the TypeScript side, including the clamp notes.\nRenderer: render_json gives compact JSON plus a trailing newline; render_toon gives the encoder from TASK-010 plus a trailing newline; render_output picks between them; mcp_text gives the same without the trailing newline; exit_code_of returns 0 unless the status is Error or Bootstrapping (then 1). EXIT_FAILURE = 1, EXIT_USAGE = 2.\nTests: every case of tests/cli-args.test.ts and tests/cli-render.test.ts, plus one case per verb flag including --yes on index and its refusal on worker.",
+        "steps": [
+          "Port the parser with the `InputLiteral`/`InputField` descriptors from the manifests (TASK-027..033 supply the data).",
+          "Port `usage_of` including the clamp annotations.",
+          "Wire the renderer to TASK-010's decided encoder and keep JSON byte-identical.",
+          "Write the tests, including one asserting `render_json` output equals `src/index.ts`'s `JSON.stringify(envelope)` for the same fixture."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test args_render` exits 0.\nDone when: `--range 1:5` parses to `[1,5]`, `--json` after the verb is accepted, and a JSON rendering of the `status` golden is byte-identical to the golden's `stdout` when the golden was captured with `--json`."
+      },
+      "pre_request": [
+        "TASK-025"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-027",
+      "title": "tool: status",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/status/mod.rs",
+        "rust/crates/sangkar-tools/src/status/manifest.rs",
+        "rust/crates/sangkar-tools/src/status/handler.rs",
+        "rust/crates/sangkar-tools/tests/status.rs"
+      ],
+      "details": {
+        "goal": "The trust tool: is the graph current, what does it cover, and what can it not see — with the repository identity and the health block.",
+        "contract": "Port `src/tools/status/manifest.ts` + `handler.ts` (602 lines).\nName `status`; description first sentence VERBATIM: `Report whether the graph is current and what it covers.`; parameters: `paths: array<string>` (default `[]`), `budget: integer` (default 800), `repo: string` (no default).\nPayload top-level keys, in this order: `project{name,root,branch,remote,commit,db_path}`, `config{source:\"project\"|\"global\"}`, `graph{nodes,edges,size_bytes,db_path}`, `unresolved{total,material,buckets}`, `languages[]`, `paths[]`, `health{indexer,last_publish_ms,consecutive_failures,statement_cache_entries}`. `payload` is `null` for `bootstrapping` and `error`.\nHandler pattern (the same in all seven): read meta -> generation guard (an empty graph is `bootstrapping`, not an error) -> build `argsHash` = `sha256:` + hex of the compact JSON of `{budget, paths}` -> verify an incoming `cursor` BEFORE reading -> assemble -> `ok(...)` -> `emit(env, budget, mint)` -> if `budget_floor_of(emitted) > budget` then `fail(\"budget_too_large\")`. `mint` returns the raw `position`.\nTests port `tests/tools-status.test.ts`: the payload key set, a bootstrapping answer on an empty database, the identity block after a publish with recorded `project_*` meta rows, `health.statement_cache_entries` being non-zero after a read, and one golden comparison against `rust/tests/golden/polyglot/status.json`.",
+        "steps": [
+          "Write manifest.rs with the input literal in the same shape `src/index.ts:227-275` produces.",
+          "Write handler.rs following the seven-step pattern, reusing `sangkar_domain::coverage::assemble` and `unresolved::bucket_census`.",
+          "Compute the per-tool `argsHash` exactly as `src/tools/status/handler.ts:555-560` does.",
+          "Write tests/status.rs including the golden comparison."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test status` exits 0.\nDone when: the payload key set and order equal the golden's, and an envelope whose `budget` is below the floor returns `status: error` with code `budget_too_large`."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-028",
+      "title": "tool: trace",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/trace/mod.rs",
+        "rust/crates/sangkar-tools/src/trace/manifest.rs",
+        "rust/crates/sangkar-tools/src/trace/handler.rs",
+        "rust/crates/sangkar-tools/tests/trace.rs"
+      ],
+      "details": {
+        "goal": "The core query: what is connected to one symbol — callers, callees, implementers, importers, tests — with an honest ambiguity answer and bucket filtering.",
+        "contract": "Port `src/tools/trace/manifest.ts` + `handler.ts` (1193 lines, the largest handler).\nName `trace`; description first sentence VERBATIM: `Show what is connected to one symbol: callers, callees, implementers, importers and tests.`; parameters: `query: string` REQUIRED, `direction: enum[all,in,out]` (default `all`), `kinds: array<enum[file,module,class,function,method,test,endpoint]>`, `path: string`, `depth: integer` (default 2, min 1, max 4), `budget: integer` (default 3200), `unresolved: enum[builtin_stdlib,external_package,internal_module,dynamic_property_call,receiver_type_unknown,ambiguous]`, `cursor: string`, `repo: string`.\nPayload: `ok` -> `{resolution, node, in[], out[], unresolved[], unresolved_census, not_indexed[]}`; `ambiguous` -> `{candidates[], candidates_total, candidates_shown}`; `not_found` -> `{near_misses[]}`.\n`argsHash` = `sha256:` + hex over the compact JSON of `{query,direction,kinds,path,unresolved,depth,budget}` in that key order. `mint` position = `start + entries.len()` of what was actually shown, so a resumed page never repeats or skips an item.\nThe `unresolved` filter is applied to the census rows AFTER bucketing, and the filtered rows are what the payload lists; `unresolved_census` stays the full census.\nTests port `tests/tools-trace.test.ts` including: a resolved trace with both directions, the ambiguity cap with `candidates_total > candidates_shown`, a near-miss answer, a bucket filter that empties the list without emptying the census, a cursor round-trip (`mint` then verify then continue) and one golden comparison.",
+        "steps": [
+          "Write manifest.rs with the required `query` and the depth clamp.",
+          "Port resolution wiring (`resolve` with `path` inside the steps) and the grouped expansion.",
+          "Port the census, the bucket filter and the `unresolved` payload slice.",
+          "Port the `argsHash` and the page-position arithmetic.",
+          "Write tests/trace.rs including the cursor round-trip and the golden."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test trace` exits 0.\nDone when: a test proves that a page-2 cursor produced by the Rust binary is byte-identical to the TypeScript golden's `next` value for the same call (fixed `SANGKAR_CURSOR_KEY`)."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-029",
+      "title": "tool: summary",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/summary/mod.rs",
+        "rust/crates/sangkar-tools/src/summary/manifest.rs",
+        "rust/crates/sangkar-tools/src/summary/handler.rs",
+        "rust/crates/sangkar-tools/tests/summary.rs"
+      ],
+      "details": {
+        "goal": "The situation report: what changed, what it risks, what is untested, and — for a repository or an area — the size, languages, entry points, hotspots and flows.",
+        "contract": "Port `src/tools/summary/manifest.ts` + `handler.ts` (909 lines).\nName `summary`; description first sentence VERBATIM: `Summarize the current situation in a few hundred tokens.`; parameters: `scope: enum[change,repo,area]` (default `change`), `target: string`, `base: string`, `budget: integer` (default 1200), `cursor: string`, `repo: string`.\nPayload by scope: `change` -> `{base, changed_files[], changed_symbols[], risk{score,band,drivers}, test_gaps[], removed_symbols[], suggested_next[], unresolved{total,material,buckets}}`; `repo` -> `{size{files,nodes,edges}, languages[], entry_points[], coupling_hotspots[], flows[], not_indexed[], unresolved}`; `area` -> `{target, surface[], dependents_total, risk}`.\n`argsHash` = `sha256:` + hex over the compact JSON array `[scope,target,base,budget]`. `mint` position = `min(paged_length, paged_length - dropped)` as the TypeScript side computes it.\nTwo filed-bug behaviours must be preserved: an empty change set reports `test_gaps_total: null` (not `0`) and emits no test-coverage driver, and `--no-renames` is gone so a rename is one entry with `from`.\nTests port `tests/tools-summary.test.ts`: all three scopes, the empty-change-set driver/total, a rename in the change set, the area scope's `dependents_total`, and one golden per scope.",
+        "steps": [
+          "Write manifest.rs for the three scopes.",
+          "Port the change scope over `sangkar_domain::diff::changed_since` and `risk::score`.",
+          "Port the repo and area scopes over the reader's analytics methods.",
+          "Port the `argsHash`, the totals and the `mint` arithmetic.",
+          "Write tests/summary.rs with the three goldens and the two filed-bug cases."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test summary` exits 0.\nDone when: an empty change set yields `test_gaps_total: null`, zero drivers, and the same payload keys as the TypeScript golden."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-030",
+      "title": "tool: search",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/search/mod.rs",
+        "rust/crates/sangkar-tools/src/search/manifest.rs",
+        "rust/crates/sangkar-tools/src/search/handler.rs",
+        "rust/crates/sangkar-tools/tests/search.rs"
+      ],
+      "details": {
+        "goal": "Full-text search over the FTS5 mirror with a stable ranking, a prefix filter and the degrees a caller needs to judge a hit.",
+        "contract": "Port `src/tools/search/manifest.ts` + `handler.ts` (373 lines).\nName `search`; description first sentence VERBATIM: `Find symbols or text in the indexed code.`; parameters: `query: string` REQUIRED, `kind: enum[function,method,class,file,decorator]`, `path: string`, `budget: integer` (default 2000), `cursor: string`, `repo: string`.\nPayload: `{mode:\"bm25\", results:[{id,qn,kind,file,lines,signature?,degree{in,out},score}]}`. `score` is the raw `bm25()` value (smaller is better) — do not convert it.\n`argsHash` here is BARE HEX over the compact JSON array `[query,kind,prefix]` — no `sha256:` prefix, unlike the other tools; that inconsistency is a contract and is asserted.\nThe FTS query string is built by the same sanitiser as the TypeScript side (quoting, no bare operators), and an empty result is `not_found` with `near_misses` empty — not an error.\nTests port `tests/tools-search.test.ts`: a hit with the expected key set and ordering by `bm25 ASC, in_degree DESC, id ASC`, a `kind` filter, a `path` filter excluding a `src-old/` sibling, a query with FTS operator characters that must not raise, and a golden comparison including the `next` token.",
+        "steps": [
+          "Write manifest.rs with the required `query`.",
+          "Port the FTS query construction and the ranked read through `read_node_fts`.",
+          "Port the degree join and the payload projection.",
+          "Port the bare-hex `argsHash` and the page arithmetic.",
+          "Write tests/search.rs with the sanitisation and golden cases."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test search` exits 0.\nDone when: a query containing `*`, `\"` and `:` returns a well-formed envelope (never a SQL error), and the `next` token equals the TypeScript golden's for the same call."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-031",
+      "title": "tool: impact",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/impact/mod.rs",
+        "rust/crates/sangkar-tools/src/impact/manifest.rs",
+        "rust/crates/sangkar-tools/src/impact/handler.rs",
+        "rust/crates/sangkar-tools/tests/impact.rs"
+      ],
+      "details": {
+        "goal": "What a change can reach: dependents, affected entry points, the tests that cover it, and a risk score — computed from a path list or a git change set.",
+        "contract": "Port `src/tools/impact/manifest.ts` + `handler.ts` (695 lines).\nName `impact`; description first sentence VERBATIM: `Given a change set, list what it can reach: dependents, affected entry points, and the tests that cover it, with a risk score.`; parameters: `paths: array<string>`, `base: string`, `depth: integer` (default 2, min 1, max 4), `budget: integer` (default 2500), `cursor: string`, `repo: string`.\nPayload: `{changed[], impacted[], unmatched_files[], risk{score,band,drivers}, unresolved{total,material,buckets}}`.\n`argsHash` = BARE HEX, TRUNCATED TO 32 CHARS, over the compact JSON of `{paths,base,depth,budget}` — the truncation and the missing prefix are both contract; assert them.\n`removed` paths from the change set appear in `changed[]` (a filed-bug behaviour), and untested changes must not claim coverage.\nTests port `tests/tools-impact.test.ts`: a path list and a `base` commit, a removed file appearing in `changed[]`, `unmatched_files` for a path that is not indexed, the risk band on a small and a large change, and one golden comparison.",
+        "steps": [
+          "Write manifest.rs with the depth clamp.",
+          "Port the change-set assembly (paths or git) with removed files included.",
+          "Port the impact walk, the test-coverage join and the risk call.",
+          "Port the truncated bare-hex `argsHash`.",
+          "Write tests/impact.rs including the removed-file case."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test impact` exits 0.\nDone when: the test asserts the `argsHash` length is exactly 32 hex characters and that a removed path appears in `changed[]`."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-032",
+      "title": "tool: expand",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/expand/mod.rs",
+        "rust/crates/sangkar-tools/src/expand/manifest.rs",
+        "rust/crates/sangkar-tools/src/expand/handler.rs",
+        "rust/crates/sangkar-tools/tests/expand.rs"
+      ],
+      "details": {
+        "goal": "Fetch more detail for one item from a previous answer: members, edges, source, coverage or outline — the tool an agent calls when a result was truncated on purpose.",
+        "contract": "Port `src/tools/expand/manifest.ts` + `handler.ts` (1157 lines).\nName `expand`; description first sentence VERBATIM: `Fetch more detail for one item from a previous result.`; parameters: `target: string` REQUIRED, `what: enum[members,edges,source,coverage,outline]`, `path: string`, `range: array<integer>`, `budget: integer` (default 2500), `repo: string`. It has NO `cursor` parameter — declared truncation is not resumable; the manifest must not declare one.\nPayload by `what`: `members{target,what,why,members[]}`, `edges{target,what,why,direction,depth,in[],out[]}`, `coverage{target,what,why,prefix,files[],not_indexed[]}`, `source{target,what,why,path,source_drift,window,content[]|null}`, `outline{target,what,why,path,members[]}`; plus `ambiguous{target,candidates[],candidates_total,candidates_shown,hint}` and `not_found{target,why,hint}`.\n`range` clamps to the node's own extent and rejects `from > to` with the existing refusal vocabulary; `source_drift` compares the file's current `sha256` with the indexed one and reports drift instead of silently serving stale lines; a file that is now missing reports `content: null` with drift set.\nTests port `tests/tools-expand.test.ts`: all five `what` values, an ambiguity, a `not_found`, a `range` clamp, a `from > to` refusal, and a drifted file.",
+        "steps": [
+          "Write manifest.rs WITHOUT a cursor field.",
+          "Port the resolution + dispatch on `what`.",
+          "Port members and outline from `members(parent_id)` in source order.",
+          "Port `source` including the sha256 drift check and the range clamp.",
+          "Write tests/expand.rs covering the five branches and the two refusals."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test expand` exits 0.\nDone when: `tools/list` for `expand` contains no `cursor` property and the drift case sets `source_drift: true` with the observed sha256."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-033",
+      "title": "tool: index, spawning the worker named by config",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-tools/src/index/mod.rs",
+        "rust/crates/sangkar-tools/src/index/manifest.rs",
+        "rust/crates/sangkar-tools/src/index/handler.rs",
+        "rust/crates/sangkar-tools/tests/index.rs"
+      ],
+      "details": {
+        "goal": "The repair tool: start a full or fast index run, map the worker's exit status onto an envelope, and — during the migration — be able to start the TypeScript worker until phase_3 lands.",
+        "contract": "Port `src/tools/index/manifest.ts` + `handler.ts` (648 lines).\nName `index`; description first sentence VERBATIM: `Admin: force a full or fast index, or repair a broken one.`; parameters: `force: boolean` (default false), `mode: enum[full,fast]` (default full), `repo: string`, `register: boolean` (default true).\nPayload: `{mode, duration_ms, previous_generation, files{indexed,parsed,failed,skipped}}`; no list, so `emit` is called with a mint that panics if reached (the TypeScript side uses `unreachableMint`).\nWorker invocation: `ctx.config.worker_cmd` + `worker --repo-root <root> --data-dir <dir>` (+ `--force`/`--mode` when set). During the migration `worker_cmd` may be `[\"bun\", \"bin/sangkar.ts\"]`; after phase_3 it is `[current_exe]`. Never read the environment in the handler.\nExit-status mapping: `0` -> `ok` with the counts parsed from the worker's stderr JSON lines; `2` -> `ok` with zero files and a summary saying nothing changed; `75` -> `error` code `index_locked` with `retryable: true`; `1` or a signal -> `error` code `internal` carrying the worker's last stderr line as `detail`; a spawn failure -> `error` code `internal` naming the failed command.\n`register: true` registers the repository in `<home>/sangkar.json` after a successful run, through `sangkar_core::registry`.\nTests port `tests/tools-index.test.ts` using a fake worker script (a shell script that prints two JSON lines and exits with the code under test), covering all five outcomes.",
+        "steps": [
+          "Write manifest.rs.",
+          "Port the spawn with piped stderr, a line reader and a timeout.",
+          "Port the exit-status mapping and the count parsing.",
+          "Port registration on success and the unreachable mint.",
+          "Write tests/index.rs driving a fake worker for 0, 1, 2, 75 and a spawn error."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-tools --test index` exits 0 with five cases.\nDone when: the `75` case returns `retryable: true` and `retry_after_ms`, and the test proves the handler never touched `std::env` (assert by construction: the fake worker path arrives through `AppConfig`)."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-034",
+      "title": "cli: verb dispatch and the tool registry",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/src/main.rs",
+        "rust/crates/sangkar-cli/src/dispatch.rs",
+        "rust/crates/sangkar-tools/src/registry.rs",
+        "rust/crates/sangkar-cli/tests/dispatch.rs"
+      ],
+      "details": {
+        "goal": "The process entry point as bin/sangkar.ts is today: six reserved verbs, every other token a tool name, globals accepted on either side, usage on stderr with exit 2 — plus the fixed-order tool registry it dispatches to.",
+        "contract": "Port `bin/sangkar.ts` (180 lines) and `src/index.ts`'s composition half.\nVerb set, exactly six: `mcp`, `worker`, `index`, `telemetry`, `daemon`, `repo`. Any other first non-global token is a tool name; no token at all means `mcp`. Exit codes: `0` success, `1` failure (an error or bootstrapping envelope, a refused store, a daemon start/stop failure, `repo remove` on an unregistered path), `2` usage (unknown verb, bad flag, repo-selection refusal, index-gate refusal). Exit code `70` has no producer in this binary — the missing-interpreter preflight it existed for is gone; it survives only in the npm launcher shim (TASK-058) for a missing platform package.\n`sangkar-tools::registry` holds `TOOLS: [RegisteredTool; 7]` in the documented order (status, summary, trace, search, impact, expand, index) mapping name to descriptor to handler, with the descriptor derived from each manifest exactly as `src/index.ts:227-275` derives it: an object schema with properties, an optional required list and an optional examples list. Registration is an explicit list, never discovery.\n`dispatch.rs` wires the six verbs to their modules (mcp to TASK-035, telemetry to TASK-054, daemon to TASK-056, repo to TASK-071, index to TASK-072's gate plus the spawn) and the tool names to the registry, and owns the composition root: build `AppConfig`, open the store through TASK-070, build `ToolContext`, route the envelope (TASK-035), render (TASK-026), exit.\nUsage text goes to stderr, never stdout; the repo usage block it prints is copied verbatim from `bin/sangkar.ts:79-90`.\nTests: verb resolution with globals before and after the verb, the six reserved names each reaching their module, an unknown verb's exit 2 plus a stderr usage block, a tool name resolving to the registry, and no stdout bytes for any failure path.",
+        "steps": [
+          "Port the dispatch with the six-name set and the tool fallback.",
+          "Add `sangkar-tools/src/registry.rs` with the fixed-order table and the descriptor derivation.",
+          "Wire the six verbs to their modules and the tool names to the registry.",
+          "Map errors to exit codes 1 and 2, with no 70 path in this binary.",
+          "Write tests/dispatch.rs over a fake argv."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test dispatch` exits 0.\nDone when: `sangkar bogus` exits 2 with the usage block on stderr and nothing on stdout, the registry order matches the golden tools/list order, and no exit code 70 remains in `rust/crates/sangkar-cli/src`."
+      },
+      "pre_request": [
+        "TASK-027",
+        "TASK-028",
+        "TASK-029",
+        "TASK-030",
+        "TASK-031",
+        "TASK-032",
+        "TASK-033",
+        "TASK-070",
+        "TASK-071",
+        "TASK-072"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-035",
+      "title": "cli: the MCP server, route() post-conditions, in-band errors",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/src/mcp.rs",
+        "rust/crates/sangkar-cli/src/route.rs",
+        "rust/crates/sangkar-cli/tests/mcp_surface.rs"
+      ],
+      "details": {
+        "goal": "The stdio server: two handlers only, results framed as one text block, every error in-band, and the post-conditions the composition root applies to every envelope before it leaves.",
+        "contract": "Transport: the decision from TASK-011 (rmcp over newline-delimited JSON-RPC, or the hand-rolled frame). Server options: name `sangkar`, `server_version()`, capabilities `{tools:{}}`, and `instructions: INSTRUCTIONS_TEXT`.\nHandlers: `tools/list` -> `[descriptor]` from TASK-034's registry; `tools/call` -> `CallToolResult { content: [{type:\"text\", text: mcp_text(envelope, output_json)}], is_error }` with NO `structuredContent`, `output_json` from the `--json` global, `is_error = status in {error, bootstrapping}`. An unknown tool, a bad argument, a cursor refusal, a budget refusal and a handler panic ALL become a text envelope with `status: error` — never a JSON-RPC error.\n`route.rs` post-conditions, applied after every handler: `next_tools` is always replaced by `next_tools_for(tool)`; a `root_mismatch` staleness forces `read_status.stale = true` with its reason; `decisive = !stale`. A handler that throws becomes `fail(...)` built from `boundary_spec(store, tool, \"<tool> could not answer\", \"the call failed before the graph answered\")` with `UNKNOWN_COVERAGE {complete:false}` and an `unchecked_read_status`.\nShutdown: SIGINT/SIGTERM drain in-flight calls, then exit 0; stdin EOF is the client-gone signal. Nothing writes to stdout except the protocol.\nTests: replay `rust/tests/vectors/mcp_session.ndjson` and compare `tools/list` against the TypeScript descriptor JSON captured in `mcp_session_ts_only.json`; assert an invalid argument yields `isError: true` with a `cursor_invalid`-style envelope rather than a protocol error; assert a panicking handler yields code `internal`; assert stdout has exactly one JSON object per response and no other bytes.",
+        "steps": [
+          "Wire the transport from TASK-011's decision with the two handlers.",
+          "Implement `route.rs`'s three post-conditions.",
+          "Implement the throw boundary and the two failure envelopes.",
+          "Wire signal handling and stdin EOF.",
+          "Write tests/mcp_surface.rs against the recorded session."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test mcp_surface` exits 0.\nDone when: the replayed `tools/list` equals the TypeScript capture field by field, and a test asserts zero non-protocol bytes on stdout for a full session."
+      },
+      "pre_request": [
+        "TASK-034",
+        "TASK-070"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-036",
+      "title": "Golden harness: seven tools × three fixtures against the binary",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/tests/goldens.rs",
+        "rust/tests/parity/README.md"
+      ],
+      "details": {
+        "goal": "Turn the captured goldens into a permanent cargo test that drives the real binary, so 'the port still answers the same' is a command and not a review opinion.",
+        "contract": "goldens.rs locates the built binary (CARGO_BIN_EXE_sangkar), and for every rust/tests/golden/<fixture>/<tool>.json:\n1. builds the fixture database into a temp dir with the TYPESCRIPT binary - this phase's promise is that the Rust server serves a TypeScript-built graph - using ~/.bun/bin/bun run bin/sangkar.ts index --repo-root rust/tests/parity/fixtures/<fixture> --data-dir <temp>;\n2. runs <bin> <tool> <args from the golden> --json --repo-root <fixture> --data-dir <temp> with SANGKAR_CURSOR_KEY set to the golden's fixed key;\n3. compares stdout bytes to the golden's stdout and the exit code to exit_code, with the same structural comparison as scripts/parity/compare.py implemented in Rust (key sets, values, array order) so a single field difference names its JSON pointer;\n4. compares the next token byte for byte - that is the cursor contract, and it is what forces every per-tool argsHash to be right.\nWhen the TypeScript binary is absent (after phase_5 deletes it) the fixture database is built with the Rust indexer instead, and the SAME byte comparison runs. That remains sound only because TASK-048 pins the six ordered row sequences: ids and order must match or the goldens break. Note that dependency in the test header, and never let the test silently skip: it must always compare every golden and print the count.\nA golden captured before a payload field existed is a stale golden: the test fails and the fix is recapture, not relaxation. Mark the broken fixture's unreadable-directory case with an explicit skip guarded by a runtime file-mode check.\nUpdate rust/tests/parity/README.md with the exact commands, the fixture list, and a paragraph on why the cursor key is fixed and why goldens are committed.",
+        "steps": [
+          "Implement the structural comparator in Rust with a JSON-pointer diff.",
+          "Implement per-fixture database construction in a temp dir, with the TypeScript binary when present and the Rust indexer otherwise.",
+          "Loop the goldens, running the binary and comparing bytes and exit codes.",
+          "Add the unreadable-directory skip guard.",
+          "Update the README with the commands and the recapture procedure."
+        ],
+        "verify": "cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test goldens exits 0 and reports the number of compared golden files (at least 21) in BOTH modes: with bin/sangkar.ts present and after it is deleted.\nDone when: flipping one byte in a copied golden makes the test fail with a JSON pointer to the field."
+      },
+      "pre_request": [
+        "TASK-035"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-037",
+      "title": "Phase 2 close: read-only Rust server proven against TypeScript",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "rust/Cargo.lock"
+      ],
+      "details": {
+        "goal": "Prove the Rust binary is a real read-only server for a TypeScript-built graph, and that the TypeScript suite is untouched and still green.",
+        "contract": "Read-only except `rust/Cargo.lock`. A failing golden is reported with its fixture, tool and JSON pointer; do not edit goldens inside this task.",
+        "steps": [
+          "Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.",
+          "Index `rust/tests/parity/fixtures/polyglot` with the TYPESCRIPT binary into `<temp>/ts-graph`, then run the Rust binary's seven tools against that same database via `--repo-root`/`--data-dir` and record that they answer (`status` reports the TS generation id).",
+          "Run `~/.bun/bin/bun test` and diff against TASK-015's baseline list.",
+          "Run one end-to-end MCP session against the Rust binary and record the two handler verdicts.",
+          "Report: goldens compared, exit codes observed, any divergence and whether it is in the payload or the formatting."
+        ],
+        "verify": "All of `cargo test --workspace`, clippy and the golden suite exit 0; the Rust binary answers all seven tools from a TypeScript-built database; `~/.bun/bin/bun test` shows no new failure.\nDone when: the report names the generation id the TypeScript indexer produced, confirms the Rust `status` payload reports it, and states `git status --short src/ tests/` is empty."
+      },
+      "pre_request": [
+        "TASK-025",
+        "TASK-026",
+        "TASK-027",
+        "TASK-028",
+        "TASK-029",
+        "TASK-030",
+        "TASK-031",
+        "TASK-032",
+        "TASK-033",
+        "TASK-034",
+        "TASK-035",
+        "TASK-036",
+        "TASK-070",
+        "TASK-071",
+        "TASK-072",
+        "TASK-073"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-072",
+      "title": "cli: the index gate and `--yes`",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-cli/src/index_gate.rs",
+        "rust/crates/sangkar-cli/tests/index_gate.rs"
+      ],
+      "details": {
+        "goal": "An `index` run must ask before indexing an unregistered tree or one that is too far above the working directory, and `--yes` must answer that question without a terminal.",
+        "contract": "Port `src/shared/cli/index-gate.ts` (123 lines).\n```rust\npub enum GateAction { Run, Ask, Refuse(RefuseReason) }\npub enum RefuseReason { Unregistered, TooDeep }\npub fn index_gate(input: &GateInput) -> GateAction;\npub fn refusal_message(input: &GateInput) -> String;\npub const CONTINUE_QUESTION: &str = \"continue with this repo? (y/N) \";\npub fn ask_continue(input: &mut impl BufRead, output: &mut impl Write) -> bool;   // only /^y(es)?$/i proceeds\n```\nThe five facts the gate reads are the ones the TypeScript version reads: whether `--repo-root` was given explicitly, how many levels the autodetection climbed, whether the tree is registered, whether `.sangkar`/`.git` was found, and whether stdin is a terminal. `--yes` skips the question and acts as `Run` for the `Ask` action; a `Refuse` action is never overridable.\n`refusal_message` is printed to stderr and the process exits 2; the question is written to stderr and the answer read from stdin, so stdout stays clean for the rendered envelope.\nTests port `tests/cli-index-gate.test.ts`: all five facts' combinations, `y`/`yes`/`Y`/`n`/empty answering, `--yes` bypassing the question, a `Refuse` not bypassed by `--yes`, and the exit-2 path with the message on stderr.",
+        "steps": [
+          "Port the gate predicate over the five input facts.",
+          "Port `refusal_message` verbatim.",
+          "Port the prompt with the `/^y(es)?$/i` rule, injectable stdin/stdout for tests.",
+          "Wire `--yes` and write the tests as a truth table."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test index_gate` exits 0.\nDone when: a test shows `--yes` running an `Ask` case and NOT running a `Refuse` case, and every accepted answer form (`y`, `yes`, `Y`) is asserted."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-073",
+      "title": "core: process facts for telemetry and the worker default",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-core/src/runtime.rs",
+        "rust/crates/sangkar-core/tests/runtime.rs"
+      ],
+      "details": {
+        "goal": "The four process facts that used to come from Bun — version, os, arch, own executable — so telemetry records and the worker's default command stop depending on an interpreter.",
+        "contract": "```rust\npub fn server_version() -> &'static str;      // env!(\"CARGO_PKG_VERSION\")\npub fn runtime_version() -> String;           // `rustc <version>`, captured at build time\npub fn os() -> &'static str;                  // std::env::consts::OS\npub fn arch() -> &'static str;                // std::env::consts::ARCH\npub fn current_exe() -> std::io::Result<PathBuf>;\npub fn git_available() -> bool;\n```\nThis module replaces `src/shared/runtime.ts` (77 lines), of which only the facts survive: the Bun version gate disappears with the interpreter, so this binary has no exit code 70 (the npm launcher shim keeps 70 for a missing platform package — say that in the module comment). `runtime_version()` feeds the telemetry field `bun_version`, which KEEPS its name for record-shape compatibility because the report never reads it (`src/shared/telemetry/report.ts:277-311`).\nPut the value in a build script (`rust/crates/sangkar-core/build.rs` writing `RUSTC_VERSION`) or a `const` set by the packaging script — pick one and say why in the comment.\nTests: `server_version()` equals the workspace version; `os()`/`arch()` match `std::env::consts`; `current_exe()` resolves to an existing file during `cargo test`; `git_available()` is true in this environment.",
+        "steps": [
+          "Port the four facts and the comment about the retired gate and the shim's 70.",
+          "Add the build-script constant for the Rust toolchain version.",
+          "Write the four assertions."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-core --test runtime` exits 0.\nDone when: `server_version()` matches the workspace version without a hardcoded duplicate, and `rust/crates/sangkar-core/src/runtime.rs` names 70 only in prose explaining who owns it."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-070",
+      "title": "cli: store lifecycle — fingerprint, reopen after publish, schema_too_new",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/src/store_lifecycle.rs",
+        "rust/crates/sangkar-cli/tests/store_refresh.rs"
+      ],
+      "details": {
+        "goal": "A server process must notice that a publish renamed a new inode over graph.db and serve the new generation — the behaviour tests/store-refresh.test.ts encodes and the one every stale-payload bug comes from losing.",
+        "contract": "Port the store-lifecycle half of `src/index.ts`: `FileFingerprint` (:290), `fingerprintOf` (:315), `sameFile` (:332), `openStore`/`refreshStore` (:438-533), `dbSizeBytes` (:1003).\n```rust\npub struct FileFingerprint { pub path: PathBuf, pub inode: u64, pub size: u64, pub mtime_ns: i128 }\npub fn fingerprint_of(path: &Path) -> Result<Option<FileFingerprint>>;   // None when the file is absent\npub fn same_file(a: &FileFingerprint, b: &FileFingerprint) -> bool;      // inode + size + mtime, never path equality\npub struct Store { /* reader handle, fingerprint, schema_version, db_size_bytes */ }\npub enum StoreFailure { Missing, SchemaTooNew { found: i64, built: i64 }, Open(String) }\npub fn open_store(data_dir: &Path) -> Result<Store, StoreFailure>;\npub fn refresh_store(store: &mut Store) -> RefreshOutcome;               // Reopened | Unchanged | Missing\n```\nsame_file MUST compare the inode, not the path: the publish step replaces the inode, and a path comparison is exactly the bug this module exists to prevent (copy the comment). On `Reopened`, the reader handle, the schema version and db_size_bytes are replaced atomically from the caller's point of view.\nA missing database is a `bootstrapping` answer, not an error; a database whose `meta.schema_version` exceeds the built one is `AppError{code:\"schema_too_new\"}` with a hint naming the indexer version; db_size_bytes comes from the file metadata at open time.\nTests port `tests/store-refresh.test.ts`: a publish (rename a new file over the live one) is detected and the reader answers the NEW generation; an untouched file reports `Unchanged` in under 1 ms; a deleted file reports `Missing`; a database with a bumped `schema_version` is refused with `schema_too_new`; and two distinct files with the same size are not `same_file`.",
+        "steps": [
+          "Port `fingerprint_of` through `std::fs::metadata` (inode via `MetadataExt` on unix, a documented fallback elsewhere).",
+          "Port `same_file` and its inode comment.",
+          "Port `open_store` and `refresh_store` including the schema_too_new refusal and the size read.",
+          "Write the tests, including a real rename-over publish."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test store_refresh` exits 0.\nDone when: the rename case makes the reader answer the new generation id, and the unchanged case is asserted with a generous bound so it cannot flake."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-071",
+      "title": "cli: the repo verb",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-cli/src/repo.rs",
+        "rust/crates/sangkar-cli/tests/repo_cmd.rs"
+      ],
+      "details": {
+        "goal": "sangkar repo add|remove|list|config must keep working: it is how a user registers the trees the daemon then watches.",
+        "contract": "Port `src/shared/cli/repo.ts` (332 lines).\nSubcommands: `add <path>`, `remove <path>`, `list`, `config <path> [--watch t|f] [--watch-interval ms] [--telemetry t|f]`.\nRules: `~/` is expanded; a positional that starts with a flag dash is refused (the first non-flag token is the path, `repo.ts:16`); `--watch-interval` outside 1000..=300000 is a usage refusal with exit 2; `config` resolves the tree the same way a tool call does (a named path, else cwd autodetection) and writes `<dataDir>/config.json` through `sangkar_core::repo_config`, reporting the file it wrote; `add`/`remove` go through `sangkar_core::registry` and are idempotent.\nstdout lines, verbatim: `registered <path>`, `already registered <path>`, `removed <path>`, `not registered <path>`, and for `config`/`list` the `watch=on|off`, `interval=<n>ms`, `telemetry=on|off` lines; `list --json` prints the registry document `{\"version\":1,\"repos\":[...]}`.\nExit codes: `1` for `remove` on an unregistered path, `2` for a usage refusal, `0` otherwise.\nTests port the CLI-facing half of `tests/repo-config.test.ts`: add twice, remove a registered and an unregistered path, `list` plain and with `--json`, a `config` write followed by a read, the interval clamps refused at 999 and 300001, and a dash-prefixed positional refused.",
+        "steps": [
+          "Port the subcommand parser and the tilde expansion.",
+          "Port add/remove/list over the registry module.",
+          "Port config over the repo-config module, including the clamp refusals.",
+          "Port the stdout lines and exit codes.",
+          "Write the tests over a temp home and temp trees."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test repo_cmd` exits 0.\nDone when: `repo add` is idempotent (second run prints `already registered`), `list --json` parses as the registry document, and `--watch-interval 999` exits 2."
+      },
+      "pre_request": [
+        "TASK-026"
+      ],
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

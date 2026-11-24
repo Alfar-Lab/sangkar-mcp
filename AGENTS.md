@@ -31,7 +31,8 @@ argument.
   semantics, acceptance), `TELEMETRY.md` (record schemas, the privacy prohibition, the verb, the report),
   `TOOLS-SPEC.md` (per-tool params, payload keys, budgets), `DATABASE.md` (tables, index plan, publish
   protocol), `TECH-SPEC.md` (runtime facts, module isolation, Drizzle, parser strategy),
-  `INDEXING-PIPELINE.md` (triggers, registration, the per-repo policy file).
+  `INDEXING-PIPELINE.md` (triggers, registration, the per-repo policy file), `RUST-MIGRATION.md` (the
+  decided Rust migration: parity bar, crate map, strangler mechanics, phases — plan in `.ppm/rust-migration/`).
 - `docs/research/` — the **product-related research record**: the two reference implementations analysed
   from their own source (`TOOL-SURFACE.md`, `TOOL-USAGE-ANALYSIS.md`, `GRAPH-MODEL.md`,
   `STORAGE-ARCHITECTURE.md`, `INDEXING-PIPELINE.md`) and `tool-outputs/`, the real MCP payloads

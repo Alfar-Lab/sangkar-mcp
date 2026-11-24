@@ -1,0 +1,261 @@
+{
+  "phase": "phase_1",
+  "title": "Read path: store/read and domain",
+  "tasks": [
+    {
+      "id": "TASK-016",
+      "title": "store::read — nodes, edges, metrics",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-store/src/read/nodes.rs",
+        "rust/crates/sangkar-store/src/read/edges.rs",
+        "rust/crates/sangkar-store/src/read/metrics.rs",
+        "rust/crates/sangkar-store/tests/read_nodes_edges.rs"
+      ],
+      "details": {
+        "goal": "The three row-level query families every higher reader method composes: symbols by qualified name and by bare name, containment and graph neighbours, and the derived metrics row.",
+        "contract": "Port `src/shared/store/read/{nodes,edges,metrics}.ts` (161 + 245 + 53 lines). Signatures, with rows exactly as the TypeScript row types:\n```rust\npub fn find_by_qn(conn: &Conn, qn: &str) -> Result<Option<NodeRow>>;\npub fn find_by_name(conn: &Conn, name: &str, kinds: Option<&[String]>) -> Result<Vec<NodeRow>>;\npub fn members(conn: &Conn, parent_id: i64) -> Result<Vec<NodeRow>>;\npub fn nodes_by_file(conn: &Conn, file_id: i64) -> Result<Vec<NodeRow>>;\npub fn inbound(conn: &Conn, node_id: i64, kinds: Option<&[String]>) -> Result<Vec<NeighbourEdge>>;\npub fn outbound(conn: &Conn, node_id: i64, kinds: Option<&[String]>) -> Result<Vec<NeighbourEdge>>;\npub fn metrics_for(conn: &Conn, node_id: i64) -> Result<Option<NodeMetrics>>;\n```\n`find_by_qn` is always called with an exact `qn` (the UNIQUE index `node_qn_unique`) and returns at most one row. `find_by_name` orders deterministically — copy the ordering of the TypeScript statement verbatim; a re-sorted result silently changes which callers a trace page shows. `members` returns source order (`start_line`, then `id`). `inbound`/`outbound` join the opposite node and the edge's `file_id` path so a caller can render `{file, line, kind, tier, qn}` without a second query; the `kinds` filter is optional and must not become a per-call dynamic string — build the statement once per arity through the prepared cache, keyed like `reader.inbound/3` as the TypeScript side does.\nAll statements go through `Conn::prepared(sql_key, …)` from TASK-008 — never `conn.prepare` inside a handler and never a query string built in a loop.\nTests build a tiny database with two files, a class with a method, an edge both ways and a metrics row, and assert: exact hit/miss for `find_by_qn`, ordering of `find_by_name` for a duplicate name, `members` order, kinds filtering, and that the second call of the same statement is a cache hit (`statement_cache_stats().hits == 1`).",
+        "steps": [
+          "Read the three TypeScript modules and copy every SQL string with its ORDER BY.",
+          "Port the row structs with `#[serde(rename_all = \"snake_case\")]` and the same optionality as the TypeScript types.",
+          "Wire the three modules through `Conn::prepared` with stable SQL keys.",
+          "Write the test database fixture by hand (raw INSERTs, no indexer dependency).",
+          "Assert ordering, filtering and cache hits."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-store --test read_nodes_edges` exits 0.\nDone when: the test asserts a cache hit on the second identical call, and `grep -n 'format!' rust/crates/sangkar-store/src/read/{nodes,edges,metrics}.rs` shows only the IN-list arity placeholders, never a value."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-017",
+      "title": "store::read — coverage rows, files, language census",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-store/src/read/coverage.rs",
+        "rust/crates/sangkar-store/src/read/files.rs",
+        "rust/crates/sangkar-store/tests/read_coverage_files.rs"
+      ],
+      "details": {
+        "goal": "The absence side of the graph: what was skipped and why, which files cover a prefix, which unresolved call sites live in them, and the per-language census the status payload reports.",
+        "contract": "Port `src/shared/store/read/coverage.ts` (222 lines) and `files.ts` (213 lines):\n```rust\npub fn rows_for_paths(conn: &Conn, prefixes: &[String]) -> Result<PathCoverage>;   // {files, not_indexed, indexed, skipped}\npub fn not_indexed_all(conn: &Conn) -> Result<Vec<SkippedPathRow>>;\npub fn not_indexed_count(conn: &Conn) -> Result<i64>;\npub fn unresolved_for_files(conn: &Conn, file_ids: &[i64]) -> Result<Vec<UnresolvedRef>>;\npub fn file_by_path(conn: &Conn, path: &str) -> Result<Option<IndexedFileRow>>;\npub fn all_files(conn: &Conn) -> Result<Vec<IndexedFileRow>>;\npub fn census_by_language(conn: &Conn) -> Result<Vec<LanguageCensus>>;\npub fn tests_census(conn: &Conn) -> Result<TestCensus>;   // {nodes, languages:[{language,nodes}]}\n```\nDetails that must survive the port: prefix matching uses the half-open bounds from `paths::prefix_bounds` (so `src` does not match `src-old`); `rows_for_paths` counts `indexed`/`skipped` from the SAME rows it returns, so the number and the list cannot disagree; `not_indexed` preserves the `reason`, `detail` and `language` columns and orders deterministically (copy the ORDER BY); `unresolved_for_files` returns `{id, file_id, file, line, raw_target, evidence_kind, evidence}` with `file` joined from `file.path`, and an empty id list returns an empty vec without a query; `tests_census` counts `node.is_test = 1` grouped by `file.language`, and reports `{nodes: 0, languages: []}` — not an error — on a clean tree.\nTests: a fixture with one skipped path per reason (`ignored`, `binary`, `size_cap`, `unsupported_ext`, `unreadable`), a `src-old/` sibling that a `src` prefix must not match, two languages with test nodes, and three unresolved rows with different `evidence_kind` values.",
+        "steps": [
+          "Port files.rs first (the simpler module) and its ordering.",
+          "Port coverage.rs with the prefix bounds and the shared counting.",
+          "Port tests_census and census_by_language.",
+          "Write the fixture with all five skip reasons and the `src-old` sibling.",
+          "Assert counts equal list lengths and that an empty prefix list performs no query."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-store --test read_coverage_files` exits 0.\nDone when: a test asserts `rows_for_paths([\"src\"])` excludes a `src-old/x.rs` file, and another asserts `tests_census()` returns `{nodes: 0, languages: []}` on a tree with no test nodes."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-018",
+      "title": "store::read — the GraphReader aggregate, GraphMeta, pool, ToolContext",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-store/src/read/reader.rs",
+        "rust/crates/sangkar-store/src/read/context.rs",
+        "rust/crates/sangkar-store/src/pool.rs",
+        "rust/crates/sangkar-store/tests/read_reader.rs"
+      ],
+      "details": {
+        "goal": "One trait with the 22 methods the seven handlers call, a `GraphMeta` that reads identity and generation, a per-root reader pool, and the `ToolContext` seam a handler receives.",
+        "contract": "Port `src/shared/store/read/reader.ts` (544 lines) as a trait plus its SQLite implementation. Exact method set:\n```rust\nfind_by_qn, find_by_name(name, kinds?), members(parent_id), nodes_by_file(file_id),\ninbound(node_id, kinds?), outbound(node_id, kinds?), metrics_for(node_id),\nrows_for_paths(prefixes), not_indexed_all(), not_indexed_count(), unresolved_for_files(file_ids),\nfile_by_path(path), all_files(), census_by_language(), tests_census(), meta_for(),\nlatest_generation(), removed_symbols_for(since_generation), entry_points(limit), hotspots(limit),\ntest_gaps(ids), read_node_fts(match_query, limit)\n```\n`meta_for()` returns `GraphMeta { schema_version, generation, generation_seq, indexer_state, consecutive_failures, project_name, project_root, project_branch, project_remote, embed_dim }`, reading the `meta` key/value rows with `Null` for an absent key (never an error). `latest_generation()` returns the `generation` row with the highest `seq`. `removed_symbols_for(gen)` reads tombstones. `entry_points(limit)` orders by `reachable_count` descending over `idx_metrics_entry` with `is_entry = 1`; `hotspots(limit)` — copy the TypeScript ORDER BY; `test_gaps(ids)` uses `idx_metrics_tested` and returns nothing when `ids` is empty without querying; `read_node_fts` is the ONLY place `MATCH` and `bm25(node_fts)` appear, ordered `bm25 ASC, in_degree DESC, id ASC` (score is raw bm25; smaller is better), reusing the ranked SELECT the TypeScript module defines.\n`context.rs`: `ToolContext { reader: Rc<dyn GraphReader>, cursor: CursorFacade, log: Logger, now: fn() -> DateTime<Utc>, config: Rc<AppConfig>, db_size_bytes: u64 }` — six fields, no environment access, no connection. `pool.rs`: one reader per repository root keyed by canonical path, idle eviction without its own timer (the caller ticks).\nTests: a populated fixture asserting one non-empty answer per method, `meta_for` with a missing key, `test_gaps(&[])` performing zero queries (assert via the cache counters), and a pool that returns the same handle for the same root twice and another for a second root.",
+        "steps": [
+          "Port reader.rs: row types, GraphMeta, then the aggregate trait with adapters over TASK-016/017's functions.",
+          "Port the four analytics queries (entry_points, hotspots, test_gaps, read_node_fts) verbatim, including the ranked SELECT constant.",
+          "Port context.rs as types only (the cursor facade trait, logger, clock).",
+          "Port pool.rs with keyed handles and idle eviction.",
+          "Write the per-method test over a hand-built fixture."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-store --test read_reader` exits 0 with at least 22 assertions (one per method).\nDone when: `grep -rn 'MATCH node_fts\\|bm25(' rust/crates` shows hits in `read/reader.rs` only, and `meta_for()` returns `None` (not an error) for a dropped `project_name` row."
+      },
+      "pre_request": [
+        "TASK-016",
+        "TASK-017"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-019",
+      "title": "domain: symbol resolution and grouped neighbours",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-domain/src/resolve.rs",
+        "rust/crates/sangkar-domain/src/neighbors.rs",
+        "rust/crates/sangkar-domain/tests/resolve_neighbors.rs"
+      ],
+      "details": {
+        "goal": "The two functions `trace` and `expand` are built on: resolve a free-text query into exactly one symbol (or an honest ambiguity), and expand one symbol's neighbourhood to a bounded depth with grouping.",
+        "contract": "Port `src/shared/domain/resolve.ts` (479 lines) and `neighbors.ts` (259 lines). Signatures:\n```rust\npub const CANDIDATE_CAP: usize = 5;\npub const RESOLUTION_STEPS: [&str; 5] = [\"exact_qn\", \"exact_name\", \"dotted_tail\", \"path\", \"decorator\"];\npub struct ResolveOptions { pub kinds: Option<Vec<String>>, pub path: Option<String> }\npub enum Resolution { Ok { step: ResolutionStep, node: NodeRow },\n  Ambiguous { step: ResolutionStep, candidates: Vec<ResolutionCandidate>, candidates_total: usize, candidates_shown: usize },\n  NotFound { near_misses: Vec<ResolutionCandidate> } }\npub fn resolve(src: &dyn ResolutionSource, query: &str, opts: &ResolveOptions) -> Resolution;\npub fn resolution_source(conn: &Conn) -> impl ResolutionSource;\npub const EXPAND_DEPTH_MAX: u8 = 4;\npub fn clamp_depth(depth: i64) -> u8;                   // 1..=4\npub fn expand(src: &dyn NeighbourSource, node_id: i64, direction: Direction, depth: u8, kinds: Option<&[String]>) -> GroupedNeighbors;\n```\nRules that must not drift: the five steps are tried in order with their scores; the `path` filter (`is_under_prefix`) applies INSIDE every step and to near misses, before the cap; `candidates_total` is the pre-cap tie count and `candidates_shown` the returned length, and every `why` string is built from `candidates_total`; an ambiguous set must actually tie. `expand` returns groups `{kind, tier, items}` ordered as the TypeScript side orders them, deduplicating by `(kind, qn)` while keeping the closest hop, and reports `depth` clamped to 1..=4.\nTests: every case of `tests/domain.test.ts` for resolution (all five steps, ambiguity above the cap, path filter, near misses), plus expansion at depth 1 and 3, both directions, with a dedup case.",
+        "steps": [
+          "Port resolve.rs including the step table, candidate scoring and the path predicate.",
+          "Port neighbors.rs with its grouping, hop bookkeeping and clamp.",
+          "Copy the `why` wording verbatim from the TypeScript source.",
+          "Write the tests over a hand-built graph with a duplicate name and a dotted tail."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-domain --test resolve_neighbors` exits 0.\nDone when: a test shows `candidates_total > CANDIDATE_CAP` while `candidates_shown == CANDIDATE_CAP`, and one shows a `src-old/` symbol excluded by `path = \"src\"`."
+      },
+      "pre_request": [
+        "TASK-018"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-020",
+      "title": "domain: coverage assembly and the risk score",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-domain/src/coverage.rs",
+        "rust/crates/sangkar-domain/src/risk.rs",
+        "rust/crates/sangkar-domain/tests/coverage_risk.rs"
+      ],
+      "details": {
+        "goal": "Turn raw rows into the coverage claim every envelope carries, and turn changed/impacted facts into the risk score `summary` and `impact` report — including the vacuous-test-coverage case that was a filed bug.",
+        "contract": "Port `src/shared/domain/coverage.ts` (132 lines) and `risk.ts` (154 lines).\n```rust\npub struct CoverageScope { pub paths: Option<Vec<String>>, /* plus the counters the scope needs */ }\npub struct CoverageAssembly { pub coverage: Coverage, pub unresolved: Vec<UnresolvedRef> }\npub fn assemble(src: &dyn CoverageSource, scope: &CoverageScope) -> CoverageAssembly;\npub const RISK_BANDS: [&str; 3] = [\"low\", \"medium\", \"high\"];\npub fn score(changed: &ChangedFacts, impacted: &ImpactedFacts) -> RiskScore;   // {score, band, drivers}\n```\n`assemble` must: derive `complete` from `failed == 0 && skipped == 0` (copy the TypeScript predicate exactly), return `not_indexed` trimmed to the scope's prefixes, carry `tests` only when the caller asked for it, and return the same `unresolved` rows it counted so `coverage.unresolved_edges == unresolved.len()` cannot disagree.\n`score` must: weigh the same changed/impacted facts with the same weights and thresholds, emit `drivers` in the same order and wording, and — the filed bug — emit NO test-coverage driver and no `test_gaps_total: 0` claim when the change set is empty. A clean tree reports `{score: 0, band: \"low\", drivers: []}`.\nTests: every case of `tests/domain.test.ts` for coverage and risk, including an empty change set, an incomplete coverage (skipped > 0), and one band boundary on each side.",
+        "steps": [
+          "Port coverage.rs with the scope predicate and the count/list coupling.",
+          "Port risk.rs weights, bands and driver wording verbatim.",
+          "Add the empty-change-set case explicitly as a test.",
+          "Write the tests over fake sources, not a database, matching the TypeScript tests' seams."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-domain --test coverage_risk` exits 0.\nDone when: a test asserts `assemble` never returns `unresolved_edges != unresolved.len()`, and another asserts an empty change set yields zero drivers and no test-gap claim."
+      },
+      "pre_request": [
+        "TASK-018"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-021",
+      "title": "domain: the git change set and freshness",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-domain/src/diff.rs",
+        "rust/crates/sangkar-domain/src/freshness.rs",
+        "rust/crates/sangkar-domain/tests/diff_freshness.rs"
+      ],
+      "details": {
+        "goal": "The only two modules that talk to git: the change set behind `summary(change)` and `impact`, and the staleness verdict every envelope's `read_status` reports.",
+        "contract": "Port `src/shared/domain/diff.ts` (630 lines) and `freshness.rs` (310 lines).\n`diff`:\n```rust\npub const GIT_TIMEOUT_MS: u64 = 30_000;\npub struct ChangeSet { changed: Vec<String>, removed: Vec<String>, unmatched: Vec<UnmatchedChange>,\n                       entries: Vec<ChangeEntry>, degraded: bool }\npub struct ChangeEntry { state: ChangeState, path: String, from: Option<String>, sha256: Option<String> }\npub enum ChangeState { Modified, Added, Deleted, Renamed, Untracked }\npub fn changed_since(repo_root: &Path, base: Option<&str>, digests: &dyn DigestSource, opts: &ChangedSinceOptions) -> ChangeSet;\n```\nCopy exactly: the git invocation `git --no-pager --no-optional-locks -c credential.helper= -c core.askpass= -C <root> <args>`, the 30 s timeout with SIGKILL, and the rename-aware `diff --name-status -z` parse that `diff.ts` now uses (`R`/`C` records produce ONE entry carrying `from`; `diff.ts` no longer passes `--no-renames`). Note the one deliberate difference: `src/indexer/worker.ts:750-755` still passes `--no-renames` for its own changed-file list — that call is TASK-046's and keeps its flag, so do not 'harmonise' the two.\nA single unparseable record is skipped and recorded in `unmatched` (never nulls the whole parse), an untracked file is an entry with `state: untracked`, and a git failure sets `degraded` rather than throwing.\n`freshness`:\n```rust\npub const WATCHER_STALL_MS: u64 = 600_000;\npub const STALE_REASONS: [&str; N] = [...];              // copy the TypeScript list verbatim\npub struct Freshness { generation: String, indexed_at: String, stale: bool, stale_reason: Option<String>, stale_checked_at: Option<String> }\npub fn head_commit_of(repo_root: &Path) -> Option<String>;   // reads .git/HEAD, no child process\npub fn check_freshness(reader: &dyn GraphReader, opts: &FreshnessOptions) -> Freshness;\npub fn health(reader: &dyn GraphReader) -> ToolHealth;       // {indexer, last_publish_ms, consecutive_failures, statement_cache_entries}\n```\n`head_commit_of` must handle a detached HEAD (a raw sha in `.git/HEAD`), a `ref:` line, a packed refs file, and a missing `.git` (None, not an error).\nTests: a temp git repo with a modified, an added, a deleted, a renamed and an untracked file; a git-less directory; a detached HEAD; a stale generation (indexed at a different commit); and the stall threshold.",
+        "steps": [
+          "Port diff.rs's git runner and the name-status parser with the `-z` record split.",
+          "Port the rename-aware entry construction and the `degraded` path.",
+          "Port freshness.rs including the four HEAD shapes.",
+          "Write the tests against real temp git repositories created with `git init`."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-domain --test diff_freshness` exits 0 (git required; the test skips with a clear message if `git` is missing).\nDone when: the rename case produces one entry with `state: renamed` and both paths, and the git-less directory produces `head_commit_of() == None` with `check_freshness` still answering."
+      },
+      "pre_request": [
+        "TASK-018"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-022",
+      "title": "domain: unresolved-edge buckets and the material count",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-domain/src/unresolved.rs",
+        "rust/crates/sangkar-domain/tests/unresolved.rs"
+      ],
+      "details": {
+        "goal": "Classify unresolved call sites into the five documented buckets, decide which of them are material, and produce the census every answering payload carries beside the unchanged `coverage.unresolved_edges`.",
+        "contract": "Port `src/shared/domain/unresolved.ts` (247 lines):\n```rust\npub const UNRESOLVED_BUCKETS: [&str; 5] = [\"builtin_stdlib\", \"external_package\", \"internal_module\", \"dynamic_property_call\", \"receiver_type_unknown\"];\npub fn bucket_of(row: &UnresolvedRef) -> UnresolvedBucket;\npub fn bucket_census(rows: &[UnresolvedRef]) -> UnresolvedCensus;   // {total, material, buckets:[{bucket,count}]}\n```\nPlus the two allowlists (`BUILTIN_RECEIVERS`, `BUILTIN_MEMBERS`) copied verbatim — they collapse a receiver/member tail into `builtin_stdlib`. `material` is its own predicate: `evidence_kind == \"ambiguous\"` OR bucket `receiver_type_unknown`; `dynamic_property_call` is never material by construction. `buckets` lists only non-zero buckets, in `UNRESOLVED_BUCKETS` order, and `material <= total` is an invariant a test asserts.\nThe ambiguous bucket must be driven by `evidence_kind` (the writer's taxonomy), not by the raw target text: `evidence` carries the specifier or receiver after the first space and the classifier must never re-parse it as the primary signal.\nTests: one row per `evidence_kind` the writer can produce (`receiver_type_unknown`, `ambiguous`, `dynamic`, `missing_module`) crossed with a builtin receiver, a builtin member, and a plain name; assert the census totals, the bucket order, and that `missing_module` lands in `internal_module`.",
+        "steps": [
+          "Port the two allowlists exactly (they are data, not judgement).",
+          "Port `bucket_of` with the evidence-kind switch first.",
+          "Port `bucket_census` with the ordering and the material predicate.",
+          "Write the cross-product test."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-domain --test unresolved` exits 0.\nDone when: a test asserts `material <= total` for every fixture and that `dynamic_property_call` never contributes to `material`."
+      },
+      "pre_request": [
+        "TASK-018"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-023",
+      "title": "Reader goldens: dump the TypeScript answers, compare the Rust ones",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "scripts/parity/capture-reader-dump.ts",
+        "rust/tests/golden/reader",
+        "rust/crates/sangkar-store/tests/reader_golden.rs"
+      ],
+      "details": {
+        "goal": "Prove the Rust reader answers the same rows as the TypeScript reader on the same database, method by method, before any handler depends on it.",
+        "contract": "`scripts/parity/capture-reader-dump.ts` runs under bun against a fixture indexed by the TypeScript binary and writes `rust/tests/golden/reader/<fixture>.json`, one key per reader method with a deterministic projection:\n`find_by_name(\"<a name that exists twice>\")`, `find_by_qn(\"<qn>\")`, `members(<class id>)`, `nodes_by_file(<file id>)`, `inbound`/`outbound` for a node with at least three edges, `metrics_for`, `rows_for_paths([\"src\"])` and `([\"lib\"])` on polyglot, `not_indexed_all`, `unresolved_for_files`, `file_by_path`, `all_files`, `census_by_language`, `tests_census`, `meta_for`, `latest_generation`, `removed_symbols_for(<generation>)`, `entry_points(5)`, `hotspots(5)`, `test_gaps(<three ids>)`, `read_node_fts(\"<a query that matches>\", 5)`.\nProjections must be stable across runs: ids included (they are rowids and must match only if the two implementations read the same database — which they do), timestamps excluded, and every list in its query order.\n`rust/crates/sangkar-store/tests/reader_golden.rs` opens the same `graph.db` (path from an env var the test reads once, `SANGKAR_FIXTURE_DB`, and skipped with a clear message when unset), produces the identical projection through the Rust `GraphReader`, and compares it to the committed JSON with a structural diff that names the method and the first differing element.\nCapture for both `polyglot` and `broken`. Do not hand-edit the goldens.",
+        "steps": [
+          "Write the capture script with one deterministic projection per method.",
+          "Index both fixtures with the TypeScript binary and write the two golden files.",
+          "Write the Rust projection and the comparison test.",
+          "Run both and fix any reader mismatch by fixing the Rust query ordering/joins — never by relaxing the comparison.",
+          "Commit the goldens and document the `SANGKAR_FIXTURE_DB` contract in the test header."
+        ],
+        "verify": "`~/.bun/bin/bun run scripts/parity/capture-reader-dump.ts` exits 0 and writes two files under `rust/tests/golden/reader/`.\n`SANGKAR_FIXTURE_DB=<path to a polyglot graph.db> cargo test --manifest-path rust/Cargo.toml -p sangkar-store --test reader_golden` exits 0 and reports 22 compared methods.\nDone when: the comparison covers all 22 methods and a deliberately re-sorted `find_by_name` ordering makes it fail."
+      },
+      "pre_request": [
+        "TASK-018",
+        "TASK-019",
+        "TASK-020",
+        "TASK-021",
+        "TASK-022"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-024",
+      "title": "Phase 1 close: read path green and TypeScript suite untouched",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "rust/Cargo.lock"
+      ],
+      "details": {
+        "goal": "Prove the whole read path compiles, passes its gates, and that the goldens were captured against the current TypeScript HEAD rather than an older one.",
+        "contract": "Read-only verification except `rust/Cargo.lock`. Report, never weaken: a comparison that fails is reported with the method and the first differing element.",
+        "steps": [
+          "Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.",
+          "Run the reader golden test for both fixtures.",
+          "Run `~/.bun/bin/bun test` and diff any failure against the list captured at TASK-015.",
+          "Confirm `git status --short src/ tests/` is empty (this phase adds no TypeScript).",
+          "Report the counts: tests run, methods compared, fixtures covered."
+        ],
+        "verify": "All of `cargo test --workspace`, clippy, and the reader goldens exit 0; `~/.bun/bin/bun test` shows no new failure versus TASK-015's list.\nDone when: the report states the number of Rust tests, the 23 compared reader methods per fixture, and confirms `src/` and `tests/` are byte-identical to `3592da3`."
+      },
+      "pre_request": [
+        "TASK-016",
+        "TASK-017",
+        "TASK-018",
+        "TASK-019",
+        "TASK-020",
+        "TASK-021",
+        "TASK-022",
+        "TASK-023"
+      ],
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

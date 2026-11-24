@@ -1,0 +1,227 @@
+{
+  "phase": "phase_4",
+  "title": "Daemon and telemetry",
+  "tasks": [
+    {
+      "id": "TASK-050",
+      "title": "telemetry: record shape, identity, JSONL sink",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-telemetry/src/record.rs",
+        "rust/crates/sangkar-telemetry/src/identity.rs",
+        "rust/crates/sangkar-telemetry/src/sink.rs",
+        "rust/crates/sangkar-telemetry/tests/record_sink.rs"
+      ],
+      "details": {
+        "goal": "The three decisions a telemetry record needs before any buffer exists: what fields it carries, which install it belongs to, and which file it lands in.",
+        "contract": "Port src/shared/telemetry/{record,identity,sink}.ts (359 + 234 + 50 lines).\nrecord.rs: RECORD_VERSION = 1; three kinds call, index_run, session; whitelist copies only, every field always present, in declaration order.\nCallRecord fields in order: ts, v, kind, install_id, session_id, seq, tool, status, error_code, duration_ms, arg_names_set[], budget_tokens, payload_tokens, budget_used_ratio, truncated, truncation_reason, total_relation, coverage_complete, coverage_indexed, coverage_skipped, coverage_failed, unresolved_edges, stale, stale_reason, generation_age_ms, result_counts{}, server_version, bun_version, os, arch, graph_schema_version.\nIndexRunRecord: ts, v, kind, install_id, session_id, mode, exit_code, duration_ms, was_forced, generation_advanced, files_seen, files_indexed, files_skipped, files_failed, nodes_by_kind{}, edges_by_kind_tier{}, unresolved_count, unresolved_ratio, languages{}, db_size_bytes, files_changed_in_run.\nSessionRecord: ts, v, kind, install_id, session_id, session_mode, server_version, bun_version, os, arch, is_first_run, repo_size_bucket, languages[], root_kind.\nTHE FIELD NAME STAYS bun_version. It carries sangkar_core::runtime::runtime_version(). The report never reads it (src/shared/telemetry/report.ts:277-311), so a rename would buy nothing and would change a v1 record shape that the parity bar forbids changing; put that reasoning in a comment above the field.\nDerivations copied verbatim: payload_tokens = ceil(bytes of compact JSON / 4); budget_used_ratio rounded to 4 decimals; an unknown stale_reason becomes other; result_counts maps each array-valued payload key to its length; generation_advanced = exit_code == 0; unresolved_ratio = unresolved / (unresolved + sum(edges_by_kind_tier)); repo_size_bucket and root_kind use the written thresholds.\nidentity.rs: <dir>/install_id.json = an object with install_id (32 hex) and date (YYYY-MM-DD), created with create_new (EEXIST means another process won the race, which is fine), a stale file removed first, new_session_id() 32 hex, utc_date_of from the record's own timestamp.\nsink.rs: <dir>/<YYYY-MM-DD>.jsonl, one append of the joined lines plus a trailing newline, zero lines writes nothing.\nTests: the exact JSON of one record of each kind with key order asserted, the runtime field present under its original name, the ratio and rounding cases, the identity race, and an append that never rewrites an existing file.",
+        "steps": [
+          "Port record.rs with one struct per kind and the two builders.",
+          "Fill bun_version from runtime_version() and add the comment explaining why the name stays.",
+          "Port identity.rs with create_new and the stale-file removal.",
+          "Port sink.rs and the date split.",
+          "Write the tests asserting the exact serialized bytes of three records."
+        ],
+        "verify": "cargo test --manifest-path rust/Cargo.toml -p sangkar-telemetry --test record_sink exits 0.\nDone when: the serialized call record's key order equals the TypeScript one exactly, the field is still named bun_version, and docs/my-product/TELEMETRY.md is untouched."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-051",
+      "title": "telemetry: the buffered recorder and the per-repo gate",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-telemetry/src/telemetry.rs",
+        "rust/crates/sangkar-telemetry/src/for_repo.rs",
+        "rust/crates/sangkar-telemetry/tests/recorder.rs"
+      ],
+      "details": {
+        "goal": "Buffer records, flush on a count or an age, and decide per repository whether anything is recorded at all — with consent read in exactly one place.",
+        "contract": "Port `src/shared/telemetry/{telemetry,for-repo}.ts` (256 + 60 lines).\n```rust\npub const FLUSH_AT_RECORDS: usize = 32;\npub const FLUSH_AT_MS: u64 = 5_000;\npub struct Recorder { /* install_id, session_id, seq, buffer */ }\npub fn create(opts: &TelemetryOptions) -> Recorder;\npub fn null() -> Recorder;         // every method a no-op; never touches the filesystem\nimpl Recorder { pub fn record_call(&mut self, ctx: &RecordContext, spec: &CallSpec);\n                pub fn record_index_run(&mut self, ctx: &RecordContext, spec: &IndexRunSpec);\n                pub fn flush(&mut self); }\npub fn telemetry_for_repo(input: &RepoTelemetryInput) -> Recorder;\n```\nFlush triggers: 32 buffered records OR the oldest buffered record is at least 5000 ms old; `seq` increments per session and is written into every record; a flush groups by the record's own UTC date and calls the sink once per date. `telemetry_for_repo` applies the gate `consent && registered && repo_flag` (all three are inputs, none is an env read) and returns `null()` when closed.\nTests: a 31-record buffer not flushed, the 32nd flushed once, an age-triggered flush, `seq` monotonicity across a flush, both sides of the repository gate, and `null()` writing nothing to a temp dir.",
+        "steps": [
+          "Port the buffer with the count and age triggers.",
+          "Port the per-session `seq` and the record construction calls.",
+          "Port the per-repo gate as an input-only predicate.",
+          "Write the tests with a recording sink."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-telemetry --test recorder` exits 0.\nDone when: 31 records produce no file, the 32nd produces one file with 32 lines, and a gated-off repository produces none."
+      },
+      "pre_request": [
+        "TASK-050"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-052",
+      "title": "telemetry: read the JSONL back and aggregate the report",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-telemetry/src/report.rs",
+        "rust/crates/sangkar-telemetry/tests/report.rs"
+      ],
+      "details": {
+        "goal": "Fold a directory of records into the numbers the report page shows, tolerating files written by the other implementation and never counting a malformed line as a record.",
+        "contract": "Port src/shared/telemetry/report.ts (643 lines).\n```rust\npub struct TelemetryReadResult { pub files: usize, pub records: usize, pub unparsed: usize, pub data: ReportData }\npub fn read_records(dir: &Path, since: Option<Since>) -> TelemetryReadResult;\npub fn parse_since(raw: &str, now: DateTime<Utc>) -> Result<Since>;\npub fn aggregate(records: &[TelemetryRecord]) -> ReportData;\n```\nparse_since accepts exactly the two forms the TypeScript side accepts (src/shared/telemetry/report.ts:121-136): a calendar date YYYY-MM-DD, and a relative Nd. Anything else is a usage refusal with exit 2 — do not add hours or weeks, which the CLI help does not offer either (`bin/sangkar.ts:73` prints --since <YYYY-MM-DD|Nd>).\nReader rules: a line counts as unparsed when it is not JSON, has v != 1, or misses a per-kind required field; the required-field table is copied verbatim. since filters by the record's own ts. bun_version is parsed but never used — no field of the report depends on it.\nReportData must carry the same sections the page renders: totals (records, calls, index runs, sessions, unparsed lines, install ids, days), per-tool stats (tool, calls, statuses, error_codes, p50, p95, mean, max, truncated, mean budget ratio, eq, gte), truncation counts, total-relation counts, coverage counts, argument-name frequencies, the per-day unresolved trend, index-run rows, and session breakdowns (mode, root kind, size bucket).\nPercentile method, rounding and bucket order must match the TypeScript implementation: copy the code, do not re-derive a better percentile.\nTests: a directory with a valid file, a file with one malformed line, a since filter, a rejected since value, and an aggregate over two tools whose p50/p95 are asserted exactly.",
+        "steps": [
+          "Port the reader with the validation table.",
+          "Port parse_since for the two accepted forms only.",
+          "Port the aggregation section by section, keeping the ordering.",
+          "Write the tests including the rejected since value."
+        ],
+        "verify": "cargo test --manifest-path rust/Cargo.toml -p sangkar-telemetry --test report exits 0.\nDone when: a file with 3 good and 1 malformed line reports records 3 and unparsed 1, --since 24h is refused while 7d and 2026-11-01 are accepted."
+      },
+      "pre_request": [
+        "TASK-050"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-053",
+      "title": "telemetry: the HTML report and its multi-repository variant",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-telemetry/src/html.rs",
+        "rust/crates/sangkar-telemetry/src/html_multi.rs",
+        "rust/crates/sangkar-telemetry/tests/html.rs"
+      ],
+      "details": {
+        "goal": "One self-contained HTML page with the same panels, the same numbers and the same dark-mode stylesheet, plus the per-repository variant the report server renders.",
+        "contract": "Port `src/shared/telemetry/{html,html-multi}.ts` (563 + 111 lines).\n```rust\npub fn render_body(data: &ReportData) -> String;\npub fn render_html(data: &ReportData, generated_at: &str, since: Option<&str>) -> String;\npub fn render_multi_report(sections: &[ReportSection]) -> String;\n```\nPanel order is the contract: `<header class=\"panel\">` (h1 `sangkar telemetry`, the window/generated line, and `dl.totals`), then `<section id=…>` for `tools`, `truncation`, `relations`, `coverage`, `argument-names`, `trend`, `index-runs`, `sessions`, and an `empty` panel appended only when `totals.records == 0`. The trend bars are scaled by an inline `<script>` to the window maximum, as today.\nEvery interpolated value must be HTML-escaped; a record field containing `<` must not break the page (a test asserts it). No framework, no `fetch`, no external asset: one `<style>` with a `prefers-color-scheme: dark` block, copied as-is.\nThe multi variant emits one section per registered repository, labelled `<basename> — <root>`, reusing `render_body` per section.\nTests: render a fixture `ReportData` and assert the panel ids in order, the absence of an `empty` panel when records exist, its presence when none do, escaping of a hostile string, and a byte-size sanity bound (the page stays under 200 KB for the fixture).",
+        "steps": [
+          "Port the stylesheet and the page skeleton first, then fill panels in the documented order.",
+          "Port each panel's table builder from its `ReportData` section.",
+          "Add HTML escaping at every interpolation point.",
+          "Port the multi variant.",
+          "Write the tests over a fixture dataset."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-telemetry --test html` exits 0.\nDone when: the rendered page's `<section id>` order equals the documented order, and a record with `<script>` in a tool name appears escaped."
+      },
+      "pre_request": [
+        "TASK-052"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-054",
+      "title": "telemetry: the loopback report server and the `telemetry` verb",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-telemetry/src/serve.rs",
+        "rust/crates/sangkar-cli/src/telemetry_cmd.rs",
+        "rust/crates/sangkar-telemetry/tests/serve.rs"
+      ],
+      "details": {
+        "goal": "Serve the report on loopback and write it to a file, with the flags, the refusal and the two stdout lines the CLI answers today.",
+        "contract": "Port `src/shared/telemetry/{serve,cli}.ts` (205 + 222 lines).\n`serve.rs`: `DEFAULT_REPORT_PORT = 7317`; hosts limited to `127.0.0.1`, `::1`, `localhost` (any other host is a usage refusal, not a bind attempt); one HTTP listener answering `GET /` with `text/html`, re-rendering `render_multi_report` per request from `<home>`'s registry roots; `{\"url\", \"port\", \"host\", \"repositories\"}` returned on start; `stop()` releases the port.\n`telemetry_cmd.rs`: flags `--out` (default `<dataDir>/telemetry/report.html`), `--serve`, `--port`, `--host`, `--since`, plus the inert globals; `--serve` and `--out` are mutually exclusive (usage refusal); stdout is exactly `wrote <path> (<n> records, <m> unparsed lines)` or `serving <url> (<n> repositories)`; exit `0` success, `2` usage, `1` write failure.\nTests: a bind on port 0 then a `GET /` returning 200 with `text/html` and a body containing a panel id; a bound non-loopback host refused with exit 2; the mutual-exclusion refusal; and the `wrote …` line for a temp directory with two records and one malformed line.",
+        "steps": [
+          "Port the listener with the one route and the loopback allow-list.",
+          "Port the per-request re-render from the registry.",
+          "Port the verb's flag parsing, the mutual exclusion and the two stdout lines.",
+          "Write the tests, closing the server at the end of each."
+        ],
+        "verify": "cargo test --manifest-path rust/Cargo.toml -p sangkar-telemetry --test serve exits 0 and leaves no listening socket behind.\nDone when: sangkar telemetry --serve --port 0 prints a serving line whose URL answers 200 with text/html, and the body contains the eight panel markers tools, truncation, relations, coverage, argument-names, trend, index-runs and sessions (assert the marker names, not a line count)."
+      },
+      "pre_request": [
+        "TASK-053"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-055",
+      "title": "daemon: status types and the single-daemon lifecycle",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-daemon/src/types.rs",
+        "rust/crates/sangkar-daemon/src/lifecycle.rs",
+        "rust/crates/sangkar-daemon/tests/lifecycle.rs"
+      ],
+      "details": {
+        "goal": "One daemon at a time, on a pid lock, with start/stop/status that behave the way the TypeScript CLI already does — the piece that must never run twice after cutover.",
+        "contract": "Port `src/daemon/{types,lifecycle}.ts` (355 lines).\n```rust\npub struct DaemonStatus { pub pid: Option<u32>, pub started_at: Option<String>, pub uptime_ms: Option<u64>,\n  pub repositories: Vec<RepoRuntime>, pub report: Option<ReportAddress> }\npub struct RepoRuntime { pub root: String, pub watch: bool, pub last_run: Option<String>,\n  pub last_exit: Option<i32>, pub generation: Option<String> }\npub fn run_daemon(opts: &DaemonOptions) -> i32;      // owns the pid lock until a signal\npub fn start(opts: &DaemonOptions) -> StartOutcome;  // spawns detached, waits for the lock to appear\npub fn stop(home: &Path) -> StopOutcome;             // SIGTERM, wait, then report\npub fn status(home: &Path) -> DaemonStatus;\n```\nRules: the lock file is `<home>/daemon.pid` with `{\"pid\",\"startedAt\"}` (same shape as phase 0 — the TypeScript daemon must be able to reclaim it); the daemon writes `<home>/daemon.log`; the loop ticks at `watch_interval` and heartbeats the pid lock; SIGINT/SIGTERM shut down cleanly (stop all watchers, close the report server, release the lock, exit 0); `start` refuses when a live lock exists and reports the holder's pid; `stop` refuses nothing but reports a stale pid honestly; the detached child must not inherit stdout (protocol discipline applies to the daemon too).\nTests: run/stop via a child process, `status` before and after, a second `start` refusal, a stale lock reclaim (dead pid), and a signal shutdown leaving no lock file.",
+        "steps": [
+          "Port types.rs and the pid-lock wiring through `sangkar_core::pidlock`.",
+          "Port `run_daemon`'s loop, tick and signal handling.",
+          "Port `start` (detached spawn + wait for the lock) and `stop`.",
+          "Port `status` including the stale case.",
+          "Write the tests using a child process and temp home."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-daemon --test lifecycle` exits 0.\nDone when: a second `start` while the first is alive reports the holder's pid and exit 1, and a stop leaves `<home>/daemon.pid` absent."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-056",
+      "title": "daemon: the reconciler, the composition order, the `daemon` verb",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "rust/crates/sangkar-daemon/src/reconcile.rs",
+        "rust/crates/sangkar-daemon/src/main.rs",
+        "rust/crates/sangkar-daemon/src/cli.rs",
+        "rust/crates/sangkar-daemon/tests/integration.rs"
+      ],
+      "details": {
+        "goal": "Make the live watchers match `<home>/sangkar.json` on every pass, compose the daemon in the documented order, and answer the four subcommands with the same lines and exit codes.",
+        "contract": "Port `src/daemon/{reconcile,main,cli}.ts` (294 + 114 + 236 lines).\n`reconcile`: one pass over the registry — start a watcher for a newly registered root, stop and forget one that was removed or whose watch flag turned off, keep an unchanged one untouched (no restart), and refresh the repo's config on a change. A failing startup for one root is logged and does not abort the pass. Watch interval per root comes from that repo's own config, clamped 1000..=300000.\n`main`: composition order is lock -> reconciler -> report server -> loop; on shutdown the reverse order. The report server starts only when the machine config enables it and `--port`/`--host` are for `run` only.\n`cli`: `daemon run|start|stop|status`; `run` blocks and logs to stderr (and `<home>/daemon.log`); `status --json` prints the `DaemonStatus` object; the plain forms print the same human lines as today. Exit `1` when `start` finds a live daemon, `2` for a bad subcommand or a flag given to the wrong subcommand.\nTests: a temp home with two registered repositories — a run indexes both, removing one from the registry stops exactly that watcher, adding one starts one, a repo whose watch flag is off never spawns, and `status --json` reports both roots.",
+        "steps": [
+          "Port reconcile.rs with the three-case diff and the per-root interval.",
+          "Port main.rs's composition and shutdown order.",
+          "Port cli.rs with the four subcommands and the flag scoping.",
+          "Write the integration test using a temp home, two tiny fixtures and a fake worker command."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-daemon --test integration` exits 0.\nDone when: the test observes two watcher starts, one stop after the registry edit, and `status --json` carrying both roots with their last exit codes."
+      },
+      "pre_request": [
+        "TASK-055"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-057",
+      "title": "Phase 4 close: daemon and report behave as the TypeScript suite describes",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "rust/Cargo.lock"
+      ],
+      "details": {
+        "goal": "Prove the daemon owns exactly one pid lock, spawns one watcher per registered repository, and that the report renders the same numbers from the same records.",
+        "contract": "Read-only except `rust/Cargo.lock`. Never leave a daemon or a listening socket behind: kill what you start, and check `<home>/daemon.pid` is absent at the end.",
+        "steps": [
+          "Run `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace`.",
+          "Start the Rust daemon on a temp home with two registered fixtures, confirm two watchers and at least one index run, then `status --json`, then `stop`.",
+          "Generate a report from a telemetry directory containing both a legacy `bun_version` record and a new `runtime_version` record; confirm both are counted.",
+          "Run `~/.bun/bin/bun test` and diff against the TASK-015 baseline.",
+          "Report: watchers started, runs observed, records read, and any divergence from the TypeScript behaviour."
+        ],
+        "verify": "All gates exit 0; the daemon leaves no pid file; the report counts both record generations.\nDone when: the report states the exact path of the pid file it checked, the number of runs observed, and `pgrep -f 'sangkar daemon'` returns nothing."
+      },
+      "pre_request": [
+        "TASK-050",
+        "TASK-051",
+        "TASK-052",
+        "TASK-053",
+        "TASK-054",
+        "TASK-055",
+        "TASK-056"
+      ],
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}

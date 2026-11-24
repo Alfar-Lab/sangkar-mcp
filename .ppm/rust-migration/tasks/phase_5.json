@@ -1,0 +1,341 @@
+{
+  "phase": "phase_5",
+  "title": "Cutover: packaging, deletion, docs",
+  "tasks": [
+    {
+      "id": "TASK-058",
+      "title": "packaging: the Linux x64 platform package and the launcher shim",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "package.json",
+        "bin/sangkar.js",
+        "npm",
+        "rust/scripts/package.sh"
+      ],
+      "details": {
+        "goal": "npm i -g sangkar-mcp must install a native binary on Linux x64 with no Bun and no build step, and must refuse every other platform by name instead of failing obscurely.",
+        "contract": "The first Rust release targets ONE platform: `x86_64-unknown-linux-gnu`.\n`package.json`: keep the name `sangkar-mcp` and the current version; `bin` becomes `{\"sangkar\": \"bin/sangkar.js\"}`; `files` becomes `[\"bin\", \"agent\", \"README.md\"]`; `optionalDependencies` declares exactly one entry, `sangkar-mcp-linux-x64-gnu`, pinned to the SAME version as the parent; `engines` becomes `{\"node\": \">=18\"}` (the shim only — the server is native); remove every `scripts` entry that invokes bun/tsc/biome/drizzle.\n`bin/sangkar.js`: `#!/usr/bin/env node`, CommonJS, no dependencies. It resolves a platform key from `process.platform` + `process.arch` and needs exactly one mapping for now (`linux:x64` -> `sangkar-mcp-linux-x64-gnu`). If the key is not that one, or the package is not installed, it prints ONE stderr line and exits 70, naming: the key it wanted, the single published platform, and the version to pin to stay on the TypeScript build (`sangkar-mcp@<the current beta line>`). Otherwise it `spawnSync`s `<pkg>/bin/sangkar` with `stdio: 'inherit'`, forwarding every argv byte, and exits with the child's code. Forward SIGINT/SIGTERM to the child.\nThe key table is DATA (one map plus one refusal string) so adding macOS or Windows later is one entry, one `npm/<key>/` directory and one release-matrix row — never a rewrite.\n`rust/scripts/package.sh`: `cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu`, `strip`, then lay out `npm/linux-x64-gnu/bin/sangkar` and `npm/linux-x64-gnu/package.json` with `{\"name\", \"version\", \"os\": [\"linux\"], \"cpu\": [\"x64\"], \"files\": [\"bin\"], \"license\": \"MIT\", \"repository\"}` consistent with the parent.\n`npm/` holds the generated layout, committed as a template for the release workflow (the workflow fills the version).\nVerify on this machine only (Linux x64): `node bin/sangkar.js status --repo-root rust/tests/parity/fixtures/polyglot --data-dir <temp>` answers, and moving `node_modules/sangkar-mcp-linux-x64-gnu` aside makes the shim exit 70 with the one-line refusal.",
+        "steps": [
+          "Rewrite package.json (name/version kept, bin, files, ONE optionalDependency, engines, scripts pruned).",
+          "Write bin/sangkar.js with the one-entry key table, the refusal line and signal forwarding.",
+          "Write rust/scripts/package.sh for the single target and generate npm/linux-x64-gnu/.",
+          "Build, run the shim against a fixture, then rename the platform package aside and record the refusal."
+        ],
+        "verify": "`node bin/sangkar.js --help` exits 0 and prints the same usage the native binary prints.\n`node -e \"console.log(Object.keys(require('./package.json').optionalDependencies).join())\"` prints exactly `sangkar-mcp-linux-x64-gnu`.\nDone when: moving the platform package aside makes the shim exit 70 with one stderr line naming the wanted key, the published platform and the version to pin."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-059",
+      "title": "CI and release: one target, artifacts, no npm publish",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml"
+      ],
+      "details": {
+        "goal": "Every push checks formatting, lints and tests on the pinned toolchain; a tag builds the single Linux x64 binary and attaches it, leaving the npm publish to the maintainer (it needs an OTP).",
+        "contract": "`.github/workflows/ci.yml`: on push/PR — `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` on `ubuntu-latest` with `dtolnay/rust-toolchain@1.100.0` and a `Swatinem/rust-cache` step. `git` must be available for the diff tests. One job only: a macOS job lands with the macOS release (open question 3 is answered \"Linux x64 first\"), and adding it later must be an extension of this file, not a rewrite.\n`.github/workflows/release.yml`: `workflow_dispatch` plus `push: tags: ['v*']`; ONE target, `x86_64-unknown-linux-gnu`, built on `ubuntu-22.04` because that image decides the glibc floor (2.35) — record the floor in a comment and in the release notes; `cargo build --release --locked`; run `rust/scripts/package.sh`; upload the platform package as an artifact; create a GitHub Release on a tag and attach the tarball plus the platform `.tgz`. Do NOT run `npm publish` in CI — the release notes say the maintainer publishes TWO packages by hand in order (the platform package first, then the parent), matching `.agents/skills/build-n-deploy`.\nKeep both files minimal: no matrix of Rust versions, no `cargo-audit`, no cache keys that expire silently.",
+        "steps": [
+          "Write ci.yml with the single ubuntu job and the pinned toolchain.",
+          "Write release.yml with the one target, the glibc comment and the artifact upload.",
+          "Add the step that creates the GitHub Release on a tag.",
+          "Add the note that npm publish is manual, in which order, and why the platform package goes first."
+        ],
+        "verify": "`python3 -c \"import yaml; [yaml.safe_load(open(p)) for p in ['.github/workflows/ci.yml','.github/workflows/release.yml']]\"` parses both files (install-free check).\nDone when: the release workflow names exactly one target, records the glibc floor, and contains no `npm publish`."
+      },
+      "pre_request": [
+        "TASK-058"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-060",
+      "title": "Smoke: the shipped binary needs no interpreter",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-cli/tests/binary_smoke.rs"
+      ],
+      "details": {
+        "goal": "Prove the artifact this migration exists for: one native binary that answers, indexes and serves a protocol with no Bun, no Node and no WASM beside it.",
+        "contract": "`binary_smoke.rs` uses `env!(\"CARGO_BIN_EXE_sangkar\")` and:\n- runs `<bin> status --repo-root <fixture>` with `PATH` set to an empty directory and `HOME` to a temp dir, asserting exit 0 — a binary that shells out to an interpreter fails here;\n- runs `<bin> index` on the `polyglot` fixture with the same stripped environment, asserting exit 0 and that `<dataDir>/graph.db` exists;\n- runs all seven tools against that database and asserts each exits 0 with a status other than error;\n- runs `<bin> mcp` with the recorded `rust/tests/vectors/mcp_session.ndjson` on stdin and asserts the response lines parse as JSON and carry no `Content-Length` header;\n- asserts the binary has no sibling `.wasm`/`.node`/`node_modules` requirement (check the binary's directory listing).\nKeep the runtime under 60 s; no network, no host state. The release target is Linux x64, so no cross-platform skip is needed — but if the test ever runs elsewhere, skip the empty-`PATH` variant with an explicit message rather than a false pass.",
+        "steps": [
+          "Write the four subprocess cases with a temp HOME and a stripped PATH.",
+          "Assert the fixture database exists and each tool answers.",
+          "Add the MCP stdin replay case.",
+          "Add the no-sibling-assets assertion."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test binary_smoke --release` exits 0.\nDone when: the empty-PATH case passes and the test prints the binary's size in bytes for the record."
+      },
+      "pre_request": [
+        "TASK-058"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-061",
+      "title": "Move the SQL into the crate and repoint both readers",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-store/migrations",
+        "rust/crates/sangkar-store/src/migrations.rs",
+        "src/shared/store/migrate.ts"
+      ],
+      "details": {
+        "goal": "End the two-copy risk: the migrations live inside the crate that owns them, and the TypeScript reader is repointed at the new location for the short time it still exists.",
+        "contract": "`git mv src/shared/store/migrations rust/crates/sangkar-store/migrations` preserving BYTES for `0000_init.sql`, `raw/0001_fts.sql` and `meta/` (the drizzle journal is kept as history). `migrations.rs`'s two `include_str!` paths become `../migrations/0000_init.sql` and `../migrations/raw/0001_fts.sql`; add a compile-time assertion that `schema_version() == 2`.\n`src/shared/store/migrate.ts`'s `MIGRATIONS_DIR` is repointed with a comment saying it is the pre-cutover stopgap and is deleted in TASK-063. `bun run db:drift` and `bun test` must stay green — that is the proof the move lost nothing.\nDo not regenerate any SQL: `drizzle-kit` is about to be deleted, and a regenerated file would change bytes.",
+        "steps": [
+          "`git mv` the migrations directory into the crate.",
+          "Update the two include paths and add the version assertion.",
+          "Repoint the TypeScript `MIGRATIONS_DIR` with its stopgap comment.",
+          "Run `bun run db:drift` and both test suites."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-store --test migrate` exits 0.\n`~/.bun/bin/bun run db:drift` exits 0 and `git diff --stat` shows no change under the new migrations path.\nDone when: `sha256sum` of both SQL files is unchanged from `3592da3` (record the hashes)."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-062",
+      "title": "Move INSTRUCTIONS.md into the crate",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "rust/crates/sangkar-core/assets",
+        "rust/crates/sangkar-core/src/instructions.rs",
+        "src/shared/instructions.ts"
+      ],
+      "details": {
+        "goal": "The agent-facing text ships inside the binary, byte for byte, with the TypeScript reader repointed until it is deleted.",
+        "contract": "`git mv src/prompts/INSTRUCTIONS.md rust/crates/sangkar-core/assets/INSTRUCTIONS.md` (bytes preserved); `include_str!(\"../assets/INSTRUCTIONS.md\")`; the byte-count assertion from TASK-025 keeps working unchanged (it must, which is the proof nothing changed).\n`src/shared/instructions.ts` reads the file from the new location with the same stopgap comment as TASK-061; `tests/instructions.test.ts` must stay green.\nDo not re-word a single sentence, and do not add a trailing newline: the suite pins these bytes.",
+        "steps": [
+          "`git mv` the markdown.",
+          "Update the include path and confirm the length assertion still passes.",
+          "Repoint the TypeScript reader.",
+          "Run both suites."
+        ],
+        "verify": "`cargo test --manifest-path rust/Cargo.toml -p sangkar-core --test instructions` exits 0 with the same byte count as before the move.\n`~/.bun/bin/bun test tests/instructions.test.ts` exits 0.\nDone when: `sha256sum` of the markdown is unchanged from `3592da3`."
+      },
+      "pre_request": [],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-063",
+      "title": "Delete the TypeScript source tree",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "src",
+        "tests",
+        "bin/sangkar.ts",
+        "biome.json",
+        "drizzle.config.ts"
+      ],
+      "details": {
+        "goal": "One implementation, one tree: remove the TypeScript source, its test suite and its lint/schema tooling, keeping only the shim the npm package needs.",
+        "contract": "Delete `src/`, `tests/`, `bin/sangkar.ts`, `biome.json`, `drizzle.config.ts`. KEEP `bin/sangkar.js` (TASK-058's shim) and KEEP `agent/` (the distributable skill).\nPreconditions, checked before deleting: TASK-061/062 have moved every asset the Rust tree embeds, so `grep -rn 'include_str!' rust/crates` names no path under `src/`.\nAfter deleting: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` and `cargo test -p sangkar-cli --test goldens` must all pass with no TypeScript anywhere — the goldens are now the only oracle, which is the point of having captured them.\nAlso update `.sangkarignore` if it still names a deleted path, and confirm `git grep -l 'bun:sqlite\\|drizzle-orm\\|web-tree-sitter\\|@toon-format'` returns nothing outside `docs/` and `.ppm/` history.",
+        "steps": [
+          "Run the precondition greps and record their output.",
+          "Delete the five paths (keep `bin/sangkar.js`).",
+          "Run the full Rust suite plus the golden suite.",
+          "Run the four-technology grep and record the remaining hits (docs and plan history only)."
+        ],
+        "verify": "`cargo test --workspace` and the golden suite exit 0 with `src/` absent.\n`ls src tests 2>&1 | grep -c 'No such file'` prints 2.\nDone when: the report lists the four grep results and states the repository test count before and after."
+      },
+      "pre_request": [
+        "TASK-060",
+        "TASK-061",
+        "TASK-062"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-064",
+      "title": "Retire the TypeScript build configuration",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "package.json",
+        "tsconfig.json",
+        "bunfig.toml",
+        "bun.lock",
+        ".gitignore"
+      ],
+      "details": {
+        "goal": "The npm package must describe a native binary and nothing else: no Bun engine, no TypeScript toolchain, no drizzle, no import map.",
+        "contract": "`package.json`: delete `\"type\": \"module\"` (the shim is CommonJS, and a `module` type would make Node parse it as ESM), delete the `imports` map (`#shared/*`), delete every `devDependencies` entry, delete the bun-only `scripts` (`test`, `typecheck`, `lint`, `build`, `db:*`, `acceptance`, `index`, `status`, `dev`, `mcp`), keep `release:beta`, keep `bin`/`files`/`optionalDependencies`/`engines.node`/`keywords`/`repository`/`license`, and refresh `description` if it still mentions Bun.\nDelete `tsconfig.json`, `bunfig.toml`, `bun.lock`.\n`.gitignore`: drop `dist/`-only rules that no longer apply, add `/rust/target/`, keep `.sangkar/`, `.codegraph/`, `*.db*`, `node_modules/`.\nAfter this task `node bin/sangkar.js --help` (the only entry point) still works, and `npm pack --dry-run` lists `bin`, `agent`, `README.md` and nothing TypeScript.",
+        "steps": [
+          "Rewrite package.json by deletion only (no version change).",
+          "Delete the three config files and the lockfile.",
+          "Update .gitignore for the Rust target directory.",
+          "Run `npm pack --dry-run` and `node bin/sangkar.js --help`."
+        ],
+        "verify": "`npm pack --dry-run --json | python3 -c \"import json,sys; print([f['path'] for f in json.load(sys.stdin)[0]['files']])\"` shows no `.ts` file.\n`node bin/sangkar.js --help` exits 0.\nDone when: `grep -c '\"type\"' package.json` prints 0 and the pack list contains `bin/sangkar.js`."
+      },
+      "pre_request": [
+        "TASK-063"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-065",
+      "title": "Docs: the product record describes the Rust artifact",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "docs/my-product/TECH-SPEC.md",
+        "docs/maintainers.md",
+        "README.md",
+        ".agents/skills/build-n-deploy/SKILL.md"
+      ],
+      "details": {
+        "goal": "A reader of the shipped docs must learn the truth without a changelog: the runtime is a native binary, the install path is npm platform packages, and the release procedure changed.",
+        "contract": "`docs/my-product/TECH-SPEC.md` §15: replace the Bun distribution table with the native one — ONE platform package (`sangkar-mcp-linux-x64-gnu`), the Node shim, the glibc floor taken from the release image, the measured binary size (record it, do not estimate), why the shim is Node rather than `sh`, and the exact steps that add a second platform (one `optionalDependencies` row, one `npm/<key>/`, one release-matrix row). Rewrite the 'runtime facts' paragraph: no Bun, no WASM grammars, `rusqlite` bundled, tree-sitter compiled in, and the module-isolation paragraph now points at the crate DAG.\n`docs/maintainers.md`: new build/release procedure — `cargo build --release --locked --target x86_64-unknown-linux-gnu`, `rust/scripts/package.sh`, the TWO-package publish order (platform then parent) with the OTP note, the glibc floor, and the tag format.\n`README.md`: keep its fixed shape (`## sangkar-mcp`, `## Installation & Requirements`, `## Usage` with `### MCP & Skill` and `### CLI`, `## License`); `Installation & Requirements` says Linux x64 with the named glibc floor, Node ≥ 18 for the shim only, no Bun; and it states plainly that macOS and Windows stay on the last TypeScript release until their platform ships. Update the version/registry lines that name the current release state.\n`.agents/skills/build-n-deploy/SKILL.md`: the SemVer standard and the two-version-string rule stay; the preflight becomes the cargo gates plus the golden suite; the publish step becomes the two packages, platform first.\nDo not invent numbers: build the release binary first and use its actual size.",
+        "steps": [
+          "Build the release binary for the target and record its size.",
+          "Rewrite TECH-SPEC §15, the runtime facts and the add-a-platform steps.",
+          "Rewrite maintainers.md's build/release sections with the two-package order and the glibc floor.",
+          "Update README's installation and usage sections in its fixed shape, including the macOS/Windows statement.",
+          "Update the release skill's preflight and publish steps."
+        ],
+        "verify": "`grep -rn 'Bun\\|bun build\\|bun run' README.md docs/ .agents/skills/build-n-deploy/SKILL.md` returns only historical statements that name the TypeScript era explicitly.\nDone when: every command quoted in the release skill runs here, the binary size in TECH-SPEC matches `ls -l` on the artifact, and the README names one platform plus the glibc floor."
+      },
+      "pre_request": [
+        "TASK-064"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-066",
+      "title": "Docs: AGENTS.md and the prompt files describe one tree",
+      "agent": "implement",
+      "size": "M",
+      "files": [
+        "AGENTS.md",
+        ".agents/prompts/project-layout.md",
+        ".agents/prompts/rules.md",
+        ".agents/prompts/run-build.md",
+        ".agents/prompts/gaps-n-future-works.md"
+      ],
+      "details": {
+        "goal": "The repository's own instructions must stop describing a tree that no longer exists, and must carry the measured deltas the migration produced.",
+        "contract": "`AGENTS.md`: 'What this is' names the Rust binary; 'Where to look' drops `src/` references; the docs list keeps `RUST-MIGRATION.md` and adds nothing that is not true.\n`.agents/prompts/project-layout.md`: replace the TypeScript tree with the `rust/` tree, one line per crate and per module, the recipes rewritten for the new layout (add a language = one registry row + one grammar crate; add a tool = one module + one manifest + one golden; change a payload field = the golden, the handler and `TOOLS-SPEC.md`), and the data model section unchanged (the schema did not move).\n`.agents/prompts/rules.md`: the six module rules now name the crate boundary that enforces each one; the stdout rule names `println!`; the Drizzle rule becomes the `rusqlite`-location rule; delete the dependency-pin paragraph that lists the five npm pins and put the `Cargo.lock` rule in its place.\n`.agents/prompts/run-build.md`: the Rust script table only, the toolchain install, `cc` requirement, and the definition of done (fmt, clippy, tests, goldens, plus `npm pack --dry-run`).\n`.agents/prompts/gaps-n-future-works.md`: replace the three measured gaps with the current ones — including any per-language extraction delta TASK-048 measured — using the run that produced them, and state the re-measure command.",
+        "steps": [
+          "Rewrite project-layout.md's tree and recipes against the actual `rust/` files.",
+          "Rewrite rules.md's enforcement column and the pins paragraph.",
+          "Rewrite run-build.md's commands and definition of done.",
+          "Re-measure the gaps with a real index run and write the numbers.",
+          "Sweep AGENTS.md for stale `src/` claims."
+        ],
+        "verify": "`grep -rn 'src/' AGENTS.md .agents/prompts/` returns only references that still exist.\n`grep -c 'cargo' .agents/prompts/run-build.md` shows every gate command.\nDone when: every path named in project-layout.md exists (`python3 -c` over the listed paths confirms it) and the gaps file cites the command that produced its numbers."
+      },
+      "pre_request": [
+        "TASK-065"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-067",
+      "title": "Docs: test map and the migration record as built",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        ".agents/prompts/test-map.md",
+        "docs/my-product/RUST-MIGRATION.md"
+      ],
+      "details": {
+        "goal": "The test map must point at the tests that now exist, and the migration record must stop saying 'decided, not started' and report what was actually built, including every place the result differs from the plan.",
+        "contract": "`.agents/prompts/test-map.md`: rebuild the 'if you change X -> these will tell you' rows over the Rust crates: each crate, each tool, the store, the indexer stages, the daemon, telemetry, plus the golden harness, the cursor vectors, the MCP session replay, the census comparison and the binary smoke test. Rows must name real paths.\n`docs/my-product/RUST-MIGRATION.md`: set Status to 'complete at <commit>', keep §1–§6 as the record but correct any claim the build disproved, update §7's gates with the observed result per phase, rewrite §8's risk table with each risk's actual outcome, replace §10's estimate with the measured effort if the maintainer supplies it, and add a short 'What differs from this plan' section listing every deviation (a grammar substitution, a delta allowance, a dropped behaviour, a renamed field).\nA deviation that is not listed here is a defect in the document.",
+        "steps": [
+          "Rebuild test-map.md against the actual test files.",
+          "Update the migration record's status, gates and risk outcomes.",
+          "Add 'What differs from this plan' with the deviations gathered from the phase reports.",
+          "Cross-check every path named in both files exists."
+        ],
+        "verify": "Every path named in both files resolves (`python3` check over the extracted paths prints no missing file).\nDone when: `grep -n 'not started' docs/my-product/RUST-MIGRATION.md` returns nothing and the deviations section is non-empty or explicitly says there were none."
+      },
+      "pre_request": [
+        "TASK-066"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-068",
+      "title": "Final close: the definition of done from a clean checkout",
+      "agent": "verify",
+      "size": "S",
+      "files": [
+        "rust/Cargo.lock"
+      ],
+      "details": {
+        "goal": "One report that answers, with observed evidence, whether the migration's six Done-when criteria in plan.objective.md hold.",
+        "contract": "Read-only except `rust/Cargo.lock`. Nothing here may weaken a test, a golden or a gate. Leave no daemon, no listening socket, no temp HOME behind.\nIf a criterion fails, report it as failed with the exact command and output; do not fix it inside this task — the fix is a new task.",
+        "steps": [
+          "`cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo test --workspace` from a clean `rust/target` (`cargo clean` first is allowed).",
+          "`npm pack` the parent and the one platform package, install both locally (platform first), and run `status`/`trace`/`index` plus one MCP session through the shim.",
+          "Run the parity, census and binary-smoke suites and report each count.",
+          "Run the two interpreter-free checks: empty `PATH` case and a `grep` proving no TypeScript build file remains.",
+          "Confirm the shim's refusal on a simulated non-linux-x64 key."
+        ],
+        "verify": "All six criteria from `plan.objective.md` `## Done when` are reported with a command and its output; a PASS requires exit 0 from that command.\nDone when: the report lists tests run, goldens compared, census deltas, binary size, the tarball's file list for both packages, the refusal message, and a one-line verdict per criterion."
+      },
+      "pre_request": [
+        "TASK-058",
+        "TASK-059",
+        "TASK-060",
+        "TASK-061",
+        "TASK-062",
+        "TASK-063",
+        "TASK-064",
+        "TASK-065",
+        "TASK-066",
+        "TASK-067",
+        "TASK-074"
+      ],
+      "status": "todo",
+      "progress": []
+    },
+    {
+      "id": "TASK-074",
+      "title": "Docs: the shipped agent skill stops mentioning Bun",
+      "agent": "implement",
+      "size": "S",
+      "files": [
+        "agent/SKILL.md",
+        "agent/README.md",
+        "agent/install.sh"
+      ],
+      "details": {
+        "goal": "agent/ ships in the npm tarball and tells an agent how to install and run this server; after cutover it must not tell anyone to run bin/sangkar.ts through Bun.",
+        "contract": "Three files carry the stale wording: agent/README.md:51 and agent/install.sh:179-180 both say to run `<repo>/bin/sangkar.ts` through `~/.bun/bin/bun` when the CLI is not on PATH, and agent/SKILL.md's YAML frontmatter declares `compatibility: … Bun 1.4.4+.` — that line ships the requirement into every agent that loads the skill. Replace them with the installed binary (`sangkar mcp --repo-root <path>`, or `npx sangkar-mcp mcp --repo-root <path>` when nothing is on PATH) and with a compatibility line that states the truth: `Requires Linux x64 in the first Rust release; Node.js >=18 for the launcher shim only; the server is a native binary with no interpreter.`\nagent/SKILL.md restates the seven tool manifests (names, arguments, defaults, budget ceilings) and the install matrix for Claude Code, Codex, OpenCode and Pi; re-read it against `rust/crates/sangkar-tools/src/*/manifest.rs`, correct any drift, then run every command it quotes.\nDo not change argument names, defaults or budget numbers: they are the contract. Only the runtime/install sentences change, plus any drift the manifests reveal.",
+        "steps": [
+          "Grep both stale command lines and the frontmatter requirement, and rewrite all three around the installed binary and npx.",
+          "Re-read SKILL.md against the seven manifests and correct drift.",
+          "Run install.sh against a temp HOME and confirm it leaves a working MCP config.",
+          "Run one quoted MCP snippet end to end."
+        ],
+        "verify": "`grep -rni 'bun' agent/` returns nothing (case-insensitive: the frontmatter spells it `Bun`).\n`bash agent/install.sh --help` (or its documented dry-run) exits 0.\nDone when: every command quoted in the three files has been executed once and the manifest table matches the Rust manifests field by field."
+      },
+      "pre_request": [
+        "TASK-064"
+      ],
+      "status": "todo",
+      "progress": []
+    }
+  ]
+}
