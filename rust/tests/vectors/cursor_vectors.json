@@ -1,0 +1,56 @@
+[
+  {
+    "label": "trace: sha256:<64 hex>, unbound repo, position 0",
+    "generation": "g-7f3a91",
+    "tool": "trace",
+    "argsHash": "sha256:a050a9ea2ac9c76f1310d0d513b1468d4248207ad548e3368f8fa4018e95a8f8",
+    "position": 0,
+    "repo": "",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy03ZjNhOTEiLCJ0b29sIjoidHJhY2UiLCJhcmdzSGFzaCI6InNoYTI1NjphMDUwYTllYTJhYzljNzZmMTMxMGQwZDUxM2IxNDY4ZDQyNDgyMDdhZDU0OGUzMzY4ZjhmYTQwMThlOTVhOGY4IiwicG9zaXRpb24iOjAsInJlcG8iOiIifQ.3bSbLwB5j-O8U1eJs8PUNQ"
+  },
+  {
+    "label": "expand: sha256:<64 hex>, bound repo, position 37",
+    "generation": "g-7f3a91",
+    "tool": "expand",
+    "argsHash": "sha256:098b068b2ad24806f4ff4420a4badd30079f3dd2b0b3a9c2b2fd2c59e31e9d27",
+    "position": 37,
+    "repo": "/srv/repos/sangkar-fixture",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy03ZjNhOTEiLCJ0b29sIjoiZXhwYW5kIiwiYXJnc0hhc2giOiJzaGEyNTY6MDk4YjA2OGIyYWQyNDgwNmY0ZmY0NDIwYTRiYWRkMzAwNzlmM2RkMmIwYjNhOWMyYjJmZDJjNTllMzFlOWQyNyIsInBvc2l0aW9uIjozNywicmVwbyI6Ii9zcnYvcmVwb3Mvc2FuZ2thci1maXh0dXJlIn0.s1EZ7TqrKGtmCKT_Ex34Xw"
+  },
+  {
+    "label": "search: bare 64 hex, bound repo, position 37",
+    "generation": "g-7f3a91",
+    "tool": "search",
+    "argsHash": "168b414e222667bbac0eef525d4a3c73d60597031bee4d647c787e71786fac9f",
+    "position": 37,
+    "repo": "/srv/repos/sangkar-fixture",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy03ZjNhOTEiLCJ0b29sIjoic2VhcmNoIiwiYXJnc0hhc2giOiIxNjhiNDE0ZTIyMjY2N2JiYWMwZWVmNTI1ZDRhM2M3M2Q2MDU5NzAzMWJlZTRkNjQ3Yzc4N2U3MTc4NmZhYzlmIiwicG9zaXRpb24iOjM3LCJyZXBvIjoiL3Nydi9yZXBvcy9zYW5na2FyLWZpeHR1cmUifQ.FyTfBnm7IFB1TWQyB5fgwg"
+  },
+  {
+    "label": "search: bare 64 hex, unbound repo, position 0",
+    "generation": "g-91c4de",
+    "tool": "search",
+    "argsHash": "b0fb863bce5206796eb01f73cdb93567e50f4e6892cb7fa62d2d36bd732fc5a7",
+    "position": 0,
+    "repo": "",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy05MWM0ZGUiLCJ0b29sIjoic2VhcmNoIiwiYXJnc0hhc2giOiJiMGZiODYzYmNlNTIwNjc5NmViMDFmNzNjZGI5MzU2N2U1MGY0ZTY4OTJjYjdmYTYyZDJkMzZiZDczMmZjNWE3IiwicG9zaXRpb24iOjAsInJlcG8iOiIifQ.YQY_XUTHvjFZ_tMNFXkoAw"
+  },
+  {
+    "label": "impact: 32-char truncation, unbound repo, position 0",
+    "generation": "g-91c4de",
+    "tool": "impact",
+    "argsHash": "ca77e4f1b6b6a704c958ab9729297253",
+    "position": 0,
+    "repo": "",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy05MWM0ZGUiLCJ0b29sIjoiaW1wYWN0IiwiYXJnc0hhc2giOiJjYTc3ZTRmMWI2YjZhNzA0Yzk1OGFiOTcyOTI5NzI1MyIsInBvc2l0aW9uIjowLCJyZXBvIjoiIn0.tYoagS53BxmamERUxXaoPw"
+  },
+  {
+    "label": "impact: 32-char truncation, bound repo, position 37",
+    "generation": "g-91c4de",
+    "tool": "impact",
+    "argsHash": "4057a515ac6f3e45ad0b988bfca5c280",
+    "position": 37,
+    "repo": "/srv/repos/sangkar-fixture",
+    "token": "eyJnZW5lcmF0aW9uIjoiZy05MWM0ZGUiLCJ0b29sIjoiaW1wYWN0IiwiYXJnc0hhc2giOiI0MDU3YTUxNWFjNmYzZTQ1YWQwYjk4OGJmY2E1YzI4MCIsInBvc2l0aW9uIjozNywicmVwbyI6Ii9zcnYvcmVwb3Mvc2FuZ2thci1maXh0dXJlIn0.w7YjFK6SzODqngyrAPEhLw"
+  }
+]

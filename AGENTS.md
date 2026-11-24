@@ -23,6 +23,7 @@ argument.
 | [`.agents/prompts/run-build.md`](.agents/prompts/run-build.md) | How to run the CLI and the servers on this machine, the script table, and the definition of done. |
 | [`.agents/prompts/test-map.md`](.agents/prompts/test-map.md) | The map from "what you changed" to "the tests that will tell you". |
 | [`.agents/prompts/gaps-n-future-works.md`](.agents/prompts/gaps-n-future-works.md) | Plan state, the three measured gaps the suite does **not** catch (test/method kinds, binding recall), and the work left after them. |
+| [`rust/`](rust/) | The Rust port — a nine-crate workspace in Phase 0: skeleton modules, the kernel that has landed, the parity harness the goldens came from. Both trees exist until cutover, `src/` is still the published artifact, and [`RUST-MIGRATION.md`](docs/my-product/RUST-MIGRATION.md) records what has moved (plan: `.ppm/rust-migration/`). |
 | [`docs/`](docs/) | The design record — read before changing behaviour. |
 
 ## Docs

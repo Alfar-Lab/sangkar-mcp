@@ -1,0 +1,26 @@
+[package]
+name = "sangkar-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+autobins = false
+
+[[bin]]
+name = "sangkar"
+path = "src/main.rs"
+
+[dependencies]
+sangkar-core = { path = "../sangkar-core" }
+sangkar-store = { path = "../sangkar-store" }
+sangkar-domain = { path = "../sangkar-domain" }
+sangkar-tools = { path = "../sangkar-tools" }
+sangkar-index = { path = "../sangkar-index" }
+sangkar-telemetry = { path = "../sangkar-telemetry" }
+sangkar-daemon = { path = "../sangkar-daemon" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process", "signal", "sync", "time"] }
+rmcp = "3.11"
+serde_toon_format = "0.2"
+
+[lints]
+workspace = true

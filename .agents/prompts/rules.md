@@ -4,17 +4,27 @@ The hard constraints. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 ## Non-negotiables
 
-These six module rules are enforced by `tests/boundary.test.ts` and are a build failure, not a preference.
-The rule ids below are the exact strings in a violation message.
+These six module rules are enforced by `tests/boundary.test.ts`, and by `cargo test -p sangkar-boundary` in
+the Rust tree that is being built beside it. Either failure is a build failure, not a preference. The rule ids
+below are the exact strings in a TypeScript violation message; the Rust gate names the same boundaries in prose.
 
-| Rule | Meaning |
-|---|---|
-| `tool-isolation` | `src/tools/<tool>/**` may import only `#shared/*` and `./` siblings inside the same tool. **Tools never import each other.** |
-| `indexer-isolation` | `src/indexer/**` may import only `#shared/*` and siblings inside `src/indexer`. |
-| `shared-isolation` | `src/shared/**` may never import `src/tools/**` or `src/indexer/**`. |
-| `drizzle-location` | `drizzle-orm` may be imported only under `src/shared/store/**`. |
-| `root-privileges` | `src/index.ts` is the only module allowed to import the indexer or a tool handler. |
-| `daemon-privileges` | `src/daemon/** may import only #shared/*, src/indexer/** and ./ siblings inside src/daemon, never src/tools/**` |
+| Rule | Meaning | Rust |
+|---|---|---|
+| `tool-isolation` | `src/tools/<tool>/**` may import only `#shared/*` and `./` siblings inside the same tool. **Tools never import each other.** | `sangkar-tools` depends on `core`, `store`, `domain` and no other workspace crate, and its tool modules may not name each other — `sangkar-boundary` scans them |
+| `indexer-isolation` | `src/indexer/**` may import only `#shared/*` and siblings inside `src/indexer`. | `sangkar-index` takes the same three workspace crates and nothing else; only `sangkar-cli` and `sangkar-daemon` may name it |
+| `shared-isolation` | `src/shared/**` may never import `src/tools/**` or `src/indexer/**`. | `core`, `store`, `domain`, `telemetry` never declare `tools`, `index`, `daemon` or `cli`; the manifest is the enforcement |
+| `drizzle-location` | `drizzle-orm` may be imported only under `src/shared/store/**`. | becomes `rusqlite`-location: `rusqlite` is declared in `sangkar-store`'s manifest and in no other |
+| `root-privileges` | `src/index.ts` is the only module allowed to import the indexer or a tool handler. | `sangkar-cli` is the only manifest that names `tools`, `index` and `daemon` together, and the only crate with a binary |
+| `daemon-privileges` | `src/daemon/** may import only #shared/*, src/indexer/** and ./ siblings inside src/daemon, never src/tools/**` | `sangkar-daemon` declares `core`, `store`, `index`, `telemetry`, never `tools` |
+
+In Rust the crate-level version of that table is the `DAG` constant in
+`rust/crates/sangkar-boundary/src/lib.rs`, and the teeth are in `rust/crates/sangkar-boundary/tests/dag.rs`: the
+crate is test-only and dependency-free, it reads the nine manifests and every source file as text, and
+`cargo test -p sangkar-boundary` fails on an undeclared edge, `rusqlite` outside the store, a print macro in a
+`src/` file, a tool naming another tool, or a `TODO(phase…` hand-off marker. The stdout rule ports with it:
+**`println!` replaces the banned `console.log`**, and `print!`, `eprintln!` and `std::io::stdout` are banned as
+well, because `sangkar-core/src/log.rs` is the single stderr writer. Tests are exempt from that one check — a
+test prints its own evidence — but not from the marker scan.
 
 Other invariants that break the product when violated:
 

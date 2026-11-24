@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--query",
+    "request",
+    "--budget",
+    "300"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"Found 7 declarations for 'request', showing 1-1 of 7.\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":false,\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[]},\"totals\":{\"total_relation\":\"gte\",\"results_total\":7},\"truncated\":true,\"truncation_reason\":\"budget\",\"next\":\"eyJnZW5lcmF0aW9uIjoiZy00YjU2ZGYiLCJ0b29sIjoic2VhcmNoIiwiYXJnc0hhc2giOiJkNGI0YWI4ZmE5NDdlZGM3Y2U2ODQ2N2U5N2Q3ODBhN2M0MzdmM2RkZDRhNWNjYjZhZDEyMzg0Yzc2MTA1YzRjIiwicG9zaXRpb24iOjEsInJlcG8iOiIvdG1wL3NhbmdrYXItcGFyaXR5LWNhcHR1cmUvcG9seWdsb3QvcG9seWdsb3QifQ.SjSqLW7AVQOPDbicVEaywQ\",\"next_tools\":[\"trace\",\"expand\"],\"payload\":{\"mode\":\"bm25\",\"results\":[{\"id\":53,\"qn\":\"src/service.go::respond\",\"kind\":\"function\",\"file\":\"src/service.go\",\"lines\":[11,13],\"degree\":{\"in\":2,\"out\":0},\"score\":-2.16986079514713,\"signature\":\"func respond(request string) string\"}]}}\n",
+  "exit_code": 0
+}

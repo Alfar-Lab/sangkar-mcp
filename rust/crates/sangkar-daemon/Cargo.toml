@@ -1,0 +1,17 @@
+[package]
+name = "sangkar-daemon"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+# src/main.rs is the daemon's composition module, not a binary target: the `sangkar` bin lives in sangkar-cli.
+autobins = false
+
+[dependencies]
+sangkar-core = { path = "../sangkar-core" }
+sangkar-store = { path = "../sangkar-store" }
+sangkar-index = { path = "../sangkar-index" }
+sangkar-telemetry = { path = "../sangkar-telemetry" }
+
+[lints]
+workspace = true

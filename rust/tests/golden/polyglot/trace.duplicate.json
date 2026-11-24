@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--query",
+    "parseInput",
+    "--depth",
+    "1"
+  ],
+  "stdout": "{\"status\":\"ambiguous\",\"summary\":\"parseInput: 2 candidates matched, none preferred\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":false,\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[]},\"totals\":{\"total_relation\":\"gte\",\"candidates_total\":2,\"candidates_shown\":2},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"expand\"],\"payload\":{\"candidates\":[{\"id\":25,\"qn\":\"src/chain.ts::parseInput\",\"kind\":\"function\",\"file\":\"src/chain.ts\",\"lines\":[15,17],\"score\":0.9,\"why\":\"exact name, 1 of 2 candidates\",\"next_call\":{\"tool\":\"trace\",\"query\":\"src/chain.ts::parseInput\",\"direction\":\"all\"}},{\"id\":27,\"qn\":\"src/duplicate.ts::parseInput\",\"kind\":\"function\",\"file\":\"src/duplicate.ts\",\"lines\":[4,6],\"score\":0.9,\"why\":\"exact name, 2 of 2 candidates\",\"next_call\":{\"tool\":\"trace\",\"query\":\"src/duplicate.ts::parseInput\",\"direction\":\"all\"}}],\"candidates_total\":2,\"candidates_shown\":2}}\n",
+  "exit_code": 0
+}

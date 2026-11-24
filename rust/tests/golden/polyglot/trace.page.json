@@ -1,0 +1,12 @@
+{
+  "args": [
+    "--query",
+    "alpha",
+    "--depth",
+    "2",
+    "--budget",
+    "500"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"alpha: 14 callers, 2 callees (3 of 16 neighbours shown); 1 unresolved call site in src/chain.ts.\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:42.668Z\",\"decisive\":true},\"coverage\":{\"complete\":true,\"indexed\":1,\"skipped\":0,\"failed\":0,\"unresolved_edges\":1,\"not_indexed\":[]},\"totals\":{\"total_relation\":\"gte\",\"callers_total\":14,\"callees_total\":2},\"truncated\":true,\"truncation_reason\":\"budget\",\"next\":\"eyJnZW5lcmF0aW9uIjoiZy00YjU2ZGYiLCJ0b29sIjoidHJhY2UiLCJhcmdzSGFzaCI6InNoYTI1Njo5ZmFlYmY2YjY4MmIyNGZlNThjZTdlZDIzNjFjYzAxYzA4NTIxYTE4MTVkNzdkMWE4NGYzNmVhNWYwMmFiOTE0IiwicG9zaXRpb24iOjMsInJlcG8iOiIvdG1wL3NhbmdrYXItcGFyaXR5LWNhcHR1cmUvcG9seWdsb3QvcG9seWdsb3QifQ.N5wRCWLJwuR5AtfW1mBybA\",\"next_tools\":[\"expand\"],\"payload\":{\"resolution\":{\"query\":\"alpha\",\"matched\":\"src/chain.ts::alpha\",\"kind\":\"function\",\"how\":\"exact name, 1 of 1 candidate\",\"confidence\":\"extracted\"},\"node\":{\"id\":22,\"qn\":\"src/chain.ts::alpha\",\"kind\":\"function\",\"file\":\"src/chain.ts\",\"lines\":[3,5],\"signature\":\"function alpha(n: number): number {\",\"is_test\":false},\"in\":[{\"edge\":\"calls\",\"tier\":\"extracted\",\"items\":[{\"id\":30,\"qn\":\"src/legacy.js::legacyEntry\",\"kind\":\"function\",\"file\":\"src/legacy.js\",\"line\":3,\"hop\":1},{\"id\":27,\"qn\":\"src/duplicate.ts::parseInput\",\"kind\":\"function\",\"file\":\"src/duplicate.ts\",\"line\":4,\"hop\":1},{\"id\":20,\"qn\":\"src/broken-import.ts::usesGhost\",\"kind\":\"function\",\"file\":\"src/broken-import.ts\",\"line\":5,\"hop\":1}]}],\"out\":[],\"unresolved\":[{\"file\":\"src/chain.ts\",\"line\":16,\"name\":\"parseDuplicate\",\"bucket\":\"dynamic_property_call\",\"evidence\":\"call:parseDuplicate\",\"tier\":\"unresolved\"}],\"unresolved_census\":{\"total\":1,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":1,\"receiver_type_unknown\":0,\"ambiguous\":0}},\"not_indexed\":[]}}\n",
+  "exit_code": 0
+}

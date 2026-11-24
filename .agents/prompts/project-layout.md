@@ -84,21 +84,63 @@ src/indexer/                the writer — runs in a spawned process, never in t
 src/prompts/                INSTRUCTIONS.md, the agent-facing guide `INSTRUCTIONS_TEXT` ships; the suite
                             pins the two byte for byte, so it is data, not a module — no .ts lives here
 tests/                      59 files, see `.agents/prompts/test-map.md`
+rust/                       the Rust port: a Cargo workspace of nine crates, filled in phase by phase from
+                            `.ppm/rust-migration/`. Skeletons today, except what Phase 0 has landed
+  Cargo.toml                the workspace: resolver 3, edition 2024, rust-version 1.100.0, one
+                            `[workspace.package] version`, `unused_dependencies = "allow"` so a crate
+                            can declare its DAG edge before the code that uses it
+  Cargo.lock                committed, 145 packages, lockfile v4 — the pinning job package.json does
+  rust-toolchain.toml       channel 1.100.0, components rustfmt + clippy, profile minimal
+  crates/sangkar-core/      envelope, budget, cursor, errors, log, paths, instructions, config,
+                            global-config, repo-config, registry, pidlock, runtime
+  crates/sangkar-store/     the only crate that links rusqlite: schema, migrations (the TypeScript
+                            `.sql` files, `include_str!`), migrate (forward-only, same ledger), db,
+                            publish, lock, pool, read/
+  crates/sangkar-domain/    resolve, neighbors, coverage, risk, diff, freshness, unresolved
+  crates/sangkar-tools/     one module per tool: manifest.rs (name, description, input) + handler.rs
+  crates/sangkar-index/     lang/{types,registry}, discover, parse, extract, resolve, persist, worker,
+                            watch
+  crates/sangkar-telemetry/ record, sink, aggregator, report, html, serve
+  crates/sangkar-daemon/    types, lifecycle, reconcile, main, cli — no binary of its own; the
+                            `sangkar` binary lives in sangkar-cli
+  crates/sangkar-cli/       the `sangkar` binary: verb dispatch, args, render, repo, index gate
+  crates/sangkar-boundary/  test-only and dependency-free: reads the nine manifests and every source
+                            file as text, and fails on an undeclared DAG edge, `rusqlite` outside the
+                            store, a print macro in `src/`, a tool naming another tool, or a phase
+                            marker
+  spikes/mcp/               the `rmcp` 3.11 stdio spike, its own workspace and target dir, and
+                            DECISION.md, the recorded verdict that the wire reproduces
+  tests/parity/fixtures/    three checked-in repositories to index: polyglot, broken, empty
+  tests/golden/<fixture>/   the TypeScript envelopes captured per fixture — the answers the Rust suite
+                            has to reproduce after the oracle is gone
+  tests/vectors/            the cursor vectors and the recorded MCP session both implementations replay
+scripts/parity/             the harness that writes those files: capture-goldens.ts (the TypeScript
+                            oracle), compare.py (envelope diff), mcp-session.ts (record and replay),
+                            cursor-vectors.ts
 agent/                      the distributable Agent Skills skill (SKILL.md) + install.sh for
                             Claude Code, Codex, OpenCode, Pi; restates the manifests, so a tool's
                             arguments, defaults or budget ceilings move here in the same commit
 docs/                       the record — read before changing behaviour
   my-product/               the product design record: what this product must do and the contracts it
                             keeps — DESIGN.md (objectives, absence semantics, acceptance),
-                            TOOLS-SPEC.md, DATABASE.md, TECH-SPEC.md, TELEMETRY.md, INDEXING-PIPELINE.md
+                            TOOLS-SPEC.md, DATABASE.md, TECH-SPEC.md, TELEMETRY.md, INDEXING-PIPELINE.md,
+                            and RUST-MIGRATION.md (the decided port, its parity bar, its phases)
   research/                 the product-related research record these decisions rest on: the two
                             reference implementations read from their own source (TOOL-SURFACE.md,
                             TOOL-USAGE-ANALYSIS.md, GRAPH-MODEL.md, STORAGE-ARCHITECTURE.md,
                             INDEXING-PIPELINE.md) and tool-outputs/, the 49 real MCP payloads
                             TOOL-OUTPUTS.md documents and the parity tests quote as oracles
-.ppm/                       two completed PPM plans (see `AGENTS.md` § "Docs and plans")
+.ppm/                       nine PPM plans: eight complete, `rust-migration` in Phase 0 (see `AGENTS.md`
+                            § Docs)
 .sangkar/graph.db           this repo's graph (git-ignored); `.codegraph/` is the pre-rename store
 ```
+
+**Two trees until cutover.** `src/` is the published artifact and the only implementation that answers
+today; `rust/` is the port beside it, and neither tree is deleted before Phase 5. They share the schema
+rather than a description of it — `sangkar-store`'s `migrations.rs` embeds the TypeScript `.sql` files by
+`include_str!`, so the port migrates the same bytes instead of re-deriving the DDL. What has actually
+moved is recorded in `docs/my-product/RUST-MIGRATION.md` §7, never inferred from the tree: most of the
+crates are still stubs.
 
 ## Recipes
 

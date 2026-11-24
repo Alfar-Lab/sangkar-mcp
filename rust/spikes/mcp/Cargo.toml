@@ -1,0 +1,19 @@
+# Standalone package, deliberately outside the `rust/` workspace: the empty `[workspace]` table is
+# what stops cargo from attaching this spike to `rust/Cargo.toml`, so a probe of rmcp 3.11's stdio
+# transport can never enter the crate graph the product ships.
+[workspace]
+
+[package]
+name = "sangkar-spike-mcp"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "sangkar-spike-mcp"
+path = "src/main.rs"
+
+[dependencies]
+rmcp = { version = "3.11", features = ["server", "transport-io"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "macros", "rt-multi-thread"] }

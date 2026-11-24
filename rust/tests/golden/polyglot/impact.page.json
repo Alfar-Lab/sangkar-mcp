@@ -1,0 +1,12 @@
+{
+  "args": [
+    "--paths",
+    "src/chain.ts",
+    "--depth",
+    "2",
+    "--budget",
+    "500"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"1 of 1 requested paths reach 12 nodes in 5 files. 0 entry points affected. 2 of 12 covered by tests. Showing 3 of 12.\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":true,\"stale_reason\":\"the change set was given explicitly, so the working tree was not compared to the index\",\"stale_checked_at\":\"2026-11-24T04:44:43.507Z\",\"decisive\":false},\"coverage\":{\"complete\":true,\"indexed\":1,\"skipped\":0,\"failed\":0,\"unresolved_edges\":1,\"not_indexed\":[]},\"totals\":{\"impacted_total\":12,\"unresolved_material\":0,\"total_relation\":\"gte\"},\"truncated\":true,\"truncation_reason\":\"budget\",\"next\":\"eyJnZW5lcmF0aW9uIjoiZy00YjU2ZGYiLCJ0b29sIjoiaW1wYWN0IiwiYXJnc0hhc2giOiIyNmQyYzI0MjlmYjZlNzgwYTlkMzdjYzM4NTE4NTBhZCIsInBvc2l0aW9uIjozLCJyZXBvIjoiL3RtcC9zYW5na2FyLXBhcml0eS1jYXB0dXJlL3BvbHlnbG90L3BvbHlnbG90In0.vT4aAnHVW1ZuDUcTtSKKhw\",\"next_tools\":[\"trace\",\"expand\"],\"payload\":{\"changed\":[{\"path\":\"src/chain.ts\",\"state\":\"modified\",\"symbols\":5,\"entry_point\":false}],\"impacted\":[{\"id\":19,\"qn\":\"src/broken-import.ts::broken-import.ts\",\"kind\":\"file\",\"hop\":1,\"via\":\"imports\",\"tier\":\"extracted\",\"tested\":false},{\"id\":20,\"qn\":\"src/broken-import.ts::usesGhost\",\"kind\":\"function\",\"hop\":1,\"via\":\"calls\",\"tier\":\"extracted\",\"tested\":false},{\"id\":26,\"qn\":\"src/duplicate.ts::duplicate.ts\",\"kind\":\"file\",\"hop\":1,\"via\":\"imports\",\"tier\":\"extracted\",\"tested\":false}],\"unmatched_files\":[],\"risk\":{\"score\":0.29,\"band\":\"low\",\"drivers\":[\"12 dependents sit inside the expanded radius\",\"the widest single impact is src/duplicate.ts::encodeTwice with 3 direct dependents\",\"5 changed symbols span 1 files\",\"2 changed symbols have no reachable test\"]},\"unresolved\":{\"total\":1,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":1,\"receiver_type_unknown\":0,\"ambiguous\":0}}}}\n",
+  "exit_code": 0
+}

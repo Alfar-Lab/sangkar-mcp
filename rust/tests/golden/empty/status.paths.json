@@ -1,0 +1,8 @@
+{
+  "args": [
+    "--paths",
+    "src"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"0 files indexed, generation g-bbdd3a. 0 of 1 requested paths indexed.\",\"read_status\":{\"generation\":\"g-bbdd3a\",\"indexed_at\":\"2026-11-24T04:44:47.488Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:47.752Z\",\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[],\"tests\":{\"nodes\":0,\"languages\":[]}},\"totals\":{\"total_relation\":\"gte\",\"paths_total\":1,\"not_indexed_total\":0},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"summary\",\"search\"],\"payload\":{\"project\":{\"name\":\"empty\",\"root\":\"/tmp/sangkar-parity-capture/empty/empty\",\"branch\":null,\"remote\":null,\"commit\":null,\"db_path\":\"/tmp/sangkar-parity-capture/empty/data/graph.db\"},\"config\":{\"source\":\"global\"},\"graph\":{\"nodes\":0,\"edges\":0,\"size_bytes\":172032,\"db_path\":\"/tmp/sangkar-parity-capture/empty/data/graph.db\"},\"unresolved\":{\"total\":0,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":0,\"receiver_type_unknown\":0,\"ambiguous\":0}},\"languages\":[],\"paths\":[{\"path\":\"src\",\"indexed\":false,\"reason\":\"not_indexed_unknown\"}],\"health\":{\"indexer\":\"idle\",\"last_publish_ms\":20,\"consecutive_failures\":0,\"statement_cache_entries\":11}}}\n",
+  "exit_code": 0
+}

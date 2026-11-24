@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--scope",
+    "repo",
+    "--budget",
+    "400"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"0 files, 0 nodes, 0 edges. no language was indexed. 0 entry points. no coupling hotspots were measured.\",\"read_status\":{\"generation\":\"g-bbdd3a\",\"indexed_at\":\"2026-11-24T04:44:47.488Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:48.466Z\",\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[],\"tests\":{\"nodes\":0,\"languages\":[]}},\"totals\":{\"total_relation\":\"gte\",\"languages_total\":0,\"entry_points_total\":0,\"coupling_hotspots_total\":0,\"flows_total\":0,\"unresolved_material\":0,\"not_indexed_total\":0},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"impact\",\"trace\",\"expand\"],\"payload\":{\"size\":{\"files\":0,\"nodes\":0,\"edges\":0},\"languages\":[],\"entry_points\":[],\"coupling_hotspots\":[],\"flows\":[],\"not_indexed\":[],\"unresolved\":{\"total\":0,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":0,\"receiver_type_unknown\":0,\"ambiguous\":0}}}}\n",
+  "exit_code": 0
+}

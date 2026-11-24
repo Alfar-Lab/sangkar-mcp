@@ -4,13 +4,22 @@ Plan state and the open work. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 ## Current state and known gaps
 
-All eight plans are complete (`ppm plan_status`, no open task): `codegraph-mvp` 36/36, `cgraph-cli` 22/22,
-`sangkar-telemetry` 22/22, `sangkar-daemon` 27/27, `issue-remediation` 20/20, `answer-fidelity` 19/19,
-`fix-ghissue13` 8/8, `fix-ghissue14` 6/6. What that leaves in the tree: the daemon with its `daemon` and
-`repo` verbs over `sangkar.json`, the machine's `<home>/config.json` beside each repository's
-`<repo>/.sangkar/config.json`, and usage records under `<dataDir>/telemetry/` — recording is on by default,
-`SANGKAR_TELEMETRY=off` outranks both config files and disables it, and `sangkar telemetry` renders the
-offline HTML report they are read with. The suite is green: 938 tests across 59 files.
+All eight earlier plans are complete (`ppm plan_status` has no open task in any of them): `codegraph-mvp`
+36/36, `cgraph-cli` 22/22, `sangkar-telemetry` 22/22, `sangkar-daemon` 27/27, `issue-remediation` 20/20,
+`answer-fidelity` 19/19, `fix-ghissue13` 8/8, `fix-ghissue14` 6/6. What that leaves in the tree: the daemon
+with its `daemon` and `repo` verbs over `sangkar.json`, the machine's `<home>/config.json` beside each
+repository's `<repo>/.sangkar/config.json`, and usage records under `<dataDir>/telemetry/` — recording is on by
+default, `SANGKAR_TELEMETRY=off` outranks both config files and disables it, and `sangkar telemetry` renders
+the offline HTML report they are read with. The suite is green: 938 tests across 59 files.
+
+A ninth plan is open: `rust-migration`, six phases and 73 tasks under `.ppm/rust-migration/`, in Phase 0. What
+it has added is `rust/`, a nine-crate Cargo workspace whose modules are mostly 1-byte stubs: the kernel
+modules that have landed, the store's `schema`/`migrations`/`migrate`, the `sangkar-boundary` DAG gate, the
+parity harness under `scripts/parity/`, the three fixture repositories and the captured goldens exist; the
+read path, the indexer, the tools and the daemon do not. `src/` is untouched and is still the published
+artifact, and neither tree is deleted before Phase 5. `docs/my-product/RUST-MIGRATION.md` §7 states each
+phase's gate; the three gaps below were measured on a graph the TypeScript indexer built, which is still the
+only implementation that can build one.
 
 Three things the tests do **not** catch, re-measured on 2026-11-23 from a fresh index of this tree
 (`index --data-dir /tmp/…`, 136 files): **1 951 nodes**, **11 739 edges** (7 309 `calls`, 1 815 `contains`,

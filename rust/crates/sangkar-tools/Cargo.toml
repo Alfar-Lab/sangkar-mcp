@@ -1,0 +1,14 @@
+[package]
+name = "sangkar-tools"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sangkar-core = { path = "../sangkar-core" }
+sangkar-store = { path = "../sangkar-store" }
+sangkar-domain = { path = "../sangkar-domain" }
+
+[lints]
+workspace = true

@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--scope",
+    "area",
+    "--target",
+    "src"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"src: 0 symbols in 0 files. 0 dependents. risk 0 (low).\",\"read_status\":{\"generation\":\"g-bbdd3a\",\"indexed_at\":\"2026-11-24T04:44:47.488Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:48.177Z\",\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[],\"tests\":{\"nodes\":0,\"languages\":[]}},\"totals\":{\"total_relation\":\"gte\",\"surface_total\":0,\"unresolved_material\":0,\"not_indexed_total\":0},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"impact\",\"trace\",\"expand\"],\"payload\":{\"target\":\"src\",\"surface\":[],\"dependents_total\":0,\"risk\":{\"score\":0,\"band\":\"low\",\"drivers\":[\"no dependents were found inside the expanded radius\",\"0 changed symbols span 0 files\"]}}}\n",
+  "exit_code": 0
+}

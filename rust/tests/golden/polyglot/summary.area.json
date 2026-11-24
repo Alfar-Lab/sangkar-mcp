@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--scope",
+    "area",
+    "--target",
+    "src"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"src: 14 symbols in 14 files. 9 dependents. risk 0.47 (medium).\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:41.952Z\",\"decisive\":true},\"coverage\":{\"complete\":true,\"indexed\":14,\"skipped\":0,\"failed\":0,\"unresolved_edges\":16,\"not_indexed\":[],\"tests\":{\"nodes\":3,\"languages\":[{\"language\":\"typescript\",\"nodes\":3}]}},\"totals\":{\"total_relation\":\"gte\",\"surface_total\":14,\"unresolved_material\":8,\"not_indexed_total\":0},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"impact\",\"trace\",\"expand\"],\"payload\":{\"target\":\"src\",\"surface\":[{\"qn\":\"src/Account.cs::Account.cs\",\"kind\":\"file\"},{\"qn\":\"src/Controller.php::Controller.php\",\"kind\":\"file\"},{\"qn\":\"src/Service.java::Service.java\",\"kind\":\"file\"},{\"qn\":\"src/broken-import.ts::broken-import.ts\",\"kind\":\"file\"},{\"qn\":\"src/chain.ts::chain.ts\",\"kind\":\"file\"},{\"qn\":\"src/duplicate.ts::duplicate.ts\",\"kind\":\"file\"},{\"qn\":\"src/legacy.js::legacy.js\",\"kind\":\"file\"},{\"qn\":\"src/lib.rs::lib.rs\",\"kind\":\"file\"},{\"qn\":\"src/matrix.cpp::matrix.cpp\",\"kind\":\"file\"},{\"qn\":\"src/scalar.c::scalar.c\",\"kind\":\"file\"},{\"qn\":\"src/service.go::service.go\",\"kind\":\"file\"},{\"qn\":\"src/shapes.py::shapes.py\",\"kind\":\"file\"},{\"qn\":\"src/widget.tsx::widget.tsx\",\"kind\":\"file\"},{\"qn\":\"src/worker.rb::worker.rb\",\"kind\":\"file\"}],\"dependents_total\":9,\"risk\":{\"score\":0.47,\"band\":\"medium\",\"drivers\":[\"9 dependents sit inside the expanded radius\",\"the widest single impact is src/chain.ts::chain.ts with 7 direct dependents\",\"14 changed symbols span 14 files\",\"14 changed symbols have no reachable test\"]}}}\n",
+  "exit_code": 0
+}

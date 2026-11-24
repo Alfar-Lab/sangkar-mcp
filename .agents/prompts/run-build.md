@@ -39,6 +39,30 @@ plain: `bun run test`. Verified the other way round too — `bun run db:parity` 
 Data lives in `<repoRoot>/.sangkar/`; override with `--data-dir`. Delete the stale `.codegraph/` directory
 after the first `sangkar index` (`.gitignore` says as much).
 
+## The Rust tree
+
+`rust/` is a second workspace under the toolchain `rust/rust-toolchain.toml` pins: 1.100.0 with rustfmt and
+clippy. `rustup` holds it in `~/.cargo/bin`, and `.profile` / `.bashrc` source `~/.cargo/env` — a stripped
+shell exports `PATH="$HOME/.cargo/bin:$PATH"`, which is the call every command below assumes. rustup fetches
+the pinned channel on the first command inside `rust/`; `rustup toolchain install 1.100.0` does it up front.
+`cc` has to exist: `rusqlite`'s `libsqlite3-sys` compiles the SQLite amalgamation and every `tree-sitter-*`
+grammar compiles C or C++, so a box without a C toolchain fails before it links.
+
+Run all of these from `rust/`; there is no root manifest, and `src/` is still the tree that answers.
+
+| Command | Does |
+|---|---|
+| `cargo check --workspace` | type-check all nine crates (`--all-targets` adds the tests) |
+| `cargo fmt --check` | rustfmt over the workspace; `cargo fmt` writes |
+| `cargo clippy --workspace --all-targets -- -D warnings` | the lint gate: warnings denied, `[workspace.lints]` applied |
+| `cargo test -p <crate>` | one crate — `-p sangkar-boundary` is the module-rule gate, `-p sangkar-core` the kernel |
+| `cargo test --workspace` | the whole workspace: the gate a phase closes on, not something green while its modules are stubs |
+
+`cargo check`, `cargo fmt --check` and `cargo clippy` pass over the workspace; while a phase is in flight the
+loop is `cargo test -p <crate>`, and `cargo test --workspace` is what that phase's last task makes pass.
+`cargo run -p sangkar-cli -- status` is the binary under construction — it answers nothing until the read path
+lands.
+
 ## Definition of done
 
 ```sh
@@ -47,4 +71,6 @@ bun run typecheck && bun run lint && bun run test && bun run db:drift
 
 Plus, when behaviour changed: the tool's own test, `docs/TOOLS-SPEC.md` if a payload moved, and one line in
 the commit body naming the invariant you touched. `bun run acceptance` when latency, budgets or the prepared
-statement path could have moved.
+statement path could have moved. For `rust/` the same gate is
+`cargo fmt --check && cargo clippy --workspace --all-targets -- -D warnings`, plus `cargo test -p <crate>` while
+a phase is still filling stubs and `cargo test --workspace` once its last task lands.

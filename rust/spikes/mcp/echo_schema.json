@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "properties": {
+    "text": { "type": "string", "description": "the text to echo" },
+    "count": { "type": "integer", "minimum": 1 }
+  },
+  "required": ["text"],
+  "additionalProperties": false
+}

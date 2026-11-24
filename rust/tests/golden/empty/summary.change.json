@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--scope",
+    "change",
+    "--base",
+    "HEAD"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"0 files changed, 0 symbols touched, risk 0 (low). no dependants were found for the changed symbols. no changed symbols to assess.\",\"read_status\":{\"generation\":\"g-bbdd3a\",\"indexed_at\":\"2026-11-24T04:44:47.488Z\",\"stale\":false,\"stale_checked_at\":\"2026-11-24T04:44:48.328Z\",\"decisive\":true},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[],\"tests\":{\"nodes\":0,\"languages\":[]}},\"totals\":{\"total_relation\":\"gte\",\"changed_files_total\":0,\"changed_symbols_total\":0,\"test_gaps_total\":null,\"removed_symbols_total\":0,\"impacted_total\":0,\"unresolved_material\":0,\"not_indexed_total\":0},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"impact\",\"trace\",\"expand\"],\"payload\":{\"base\":\"HEAD\",\"changed_files\":[],\"changed_symbols\":[],\"risk\":{\"score\":0,\"band\":\"low\",\"drivers\":[\"no dependents were found inside the expanded radius\",\"0 changed symbols span 0 files\"]},\"test_gaps\":[],\"removed_symbols\":[],\"suggested_next\":[{\"tool\":\"summary\",\"query\":\"repo\",\"why\":\"no working-tree changes; summarize the repository instead\"}],\"unresolved\":{\"total\":0,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":0,\"receiver_type_unknown\":0,\"ambiguous\":0}}}}\n",
+  "exit_code": 0
+}

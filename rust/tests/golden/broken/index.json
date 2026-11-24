@@ -1,0 +1,8 @@
+{
+  "args": [
+    "--mode",
+    "fast"
+  ],
+  "stdout": "",
+  "exit_code": 0
+}

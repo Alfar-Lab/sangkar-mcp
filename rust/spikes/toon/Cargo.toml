@@ -1,0 +1,18 @@
+# Standalone package, deliberately outside the `rust/` workspace: the empty `[workspace]` table is
+# what stops cargo from attaching this spike to `rust/Cargo.toml`, so a probe of
+# serde_toon_format 0.2 can never enter the crate graph the product ships.
+[workspace]
+
+[package]
+name = "sangkar-spike-toon"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "sangkar-spike-toon"
+path = "src/main.rs"
+
+[dependencies]
+serde_json = "1"
+serde_toon_format = "0.2"

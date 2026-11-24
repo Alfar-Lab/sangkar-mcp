@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--target",
+    "src/Account.cs",
+    "--what",
+    "members"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"members of src/Account.cs::Account.cs: 2.\",\"read_status\":{\"generation\":\"g-4b56df\",\"indexed_at\":\"2026-11-24T04:44:41.233Z\",\"stale\":false,\"decisive\":true},\"coverage\":{\"complete\":true,\"indexed\":1,\"skipped\":0,\"failed\":0,\"unresolved_edges\":1,\"not_indexed\":[]},\"totals\":{\"members_total\":2,\"total_relation\":\"gte\"},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"trace\"],\"payload\":{\"target\":{\"id\":1,\"qn\":\"src/Account.cs::Account.cs\",\"kind\":\"file\",\"lines\":[1,25]},\"what\":\"members\",\"why\":\"requested: members\",\"members\":[{\"id\":2,\"name\":\"Account\",\"kind\":\"class\",\"lines\":[3,16],\"degree\":{\"in\":2,\"out\":2}},{\"id\":5,\"name\":\"SavingsAccount\",\"kind\":\"class\",\"lines\":[18,24],\"degree\":{\"in\":1,\"out\":2}}]}}\n",
+  "exit_code": 0
+}

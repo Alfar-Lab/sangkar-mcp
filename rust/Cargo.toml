@@ -1,0 +1,24 @@
+[workspace]
+resolver = "3"
+members = [
+  "crates/sangkar-core",
+  "crates/sangkar-store",
+  "crates/sangkar-domain",
+  "crates/sangkar-tools",
+  "crates/sangkar-index",
+  "crates/sangkar-telemetry",
+  "crates/sangkar-daemon",
+  "crates/sangkar-cli",
+  "crates/sangkar-boundary",
+]
+
+[workspace.package]
+version = "0.6.0-beta.1"
+edition = "2024"
+rust-version = "1.100.0"
+license = "MIT"
+
+# The nine DAG edges are declared ahead of the code that uses them (sangkar-boundary asserts them),
+# so cargo's unused-dependency lint would fail every build until the last module is filled.
+[workspace.lints.cargo]
+unused_dependencies = "allow"

@@ -1,0 +1,10 @@
+{
+  "args": [
+    "--paths",
+    "src/chain.ts",
+    "--depth",
+    "2"
+  ],
+  "stdout": "{\"status\":\"ok\",\"summary\":\"no changed files in the graph; 1 changed path could not be matched: nothing to impact\",\"read_status\":{\"generation\":\"g-bbdd3a\",\"indexed_at\":\"2026-11-24T04:44:47.488Z\",\"stale\":true,\"stale_reason\":\"the change set was given explicitly, so the working tree was not compared to the index\",\"stale_checked_at\":\"2026-11-24T04:44:49.410Z\",\"decisive\":false},\"coverage\":{\"complete\":false,\"indexed\":0,\"skipped\":0,\"failed\":0,\"unresolved_edges\":0,\"not_indexed\":[]},\"totals\":{\"impacted_total\":0,\"unresolved_material\":0,\"total_relation\":\"gte\"},\"truncated\":false,\"truncation_reason\":null,\"next\":null,\"next_tools\":[\"trace\",\"expand\"],\"payload\":{\"changed\":[],\"impacted\":[],\"unmatched_files\":[{\"path\":\"src/chain.ts\",\"reason\":\"not_indexed\"}],\"risk\":{\"score\":0,\"band\":\"low\",\"drivers\":[\"no dependents were found inside the expanded radius\",\"0 changed symbols span 0 files\"]},\"unresolved\":{\"total\":0,\"material\":0,\"buckets\":{\"builtin_stdlib\":0,\"external_package\":0,\"internal_module\":0,\"dynamic_property_call\":0,\"receiver_type_unknown\":0,\"ambiguous\":0}}}}\n",
+  "exit_code": 0
+}
