@@ -12,14 +12,15 @@ repository's `<repo>/.sangkar/config.json`, and usage records under `<dataDir>/t
 default, `SANGKAR_TELEMETRY=off` outranks both config files and disables it, and `sangkar telemetry` renders
 the offline HTML report they are read with. The suite is green: 938 tests across 59 files.
 
-A ninth plan is open: `rust-migration`, six phases and 73 tasks under `.ppm/rust-migration/`, in Phase 0. What
-it has added is `rust/`, a nine-crate Cargo workspace whose modules are mostly 1-byte stubs: the kernel
-modules that have landed, the store's `schema`/`migrations`/`migrate`, the `sangkar-boundary` DAG gate, the
-parity harness under `scripts/parity/`, the three fixture repositories and the captured goldens exist; the
-read path, the indexer, the tools and the daemon do not. `src/` is untouched and is still the published
-artifact, and neither tree is deleted before Phase 5. `docs/my-product/RUST-MIGRATION.md` §7 states each
-phase's gate; the three gaps below were measured on a graph the TypeScript indexer built, which is still the
-only implementation that can build one.
+A ninth plan is open: `rust-migration`, six phases and 73 tasks under `.ppm/rust-migration/`, in Phase 4
+(phases 0-4 are closed; the cutover is what is left). What it has added is `rust/`, a nine-crate Cargo
+workspace that now holds the kernel, the store and its publish protocol, the read path and domain, the
+seven tools with both surfaces, the indexer, the daemon with its reconciler, and telemetry through the
+report server; `sangkar-boundary` gates the crate DAG, the parity harness lives under `scripts/parity/`,
+and the three fixture repositories and the captured goldens are committed. `src/` is untouched and is
+still the published artifact, and neither tree is deleted before Phase 5. `docs/my-product/RUST-MIGRATION.md`
+§7 states each phase's gate; the three gaps below were measured on a graph the TypeScript indexer built,
+which — until the cutover — is still the only implementation the published artifact carries.
 
 Three things the tests do **not** catch, re-measured on 2026-11-23 from a fresh index of this tree
 (`index --data-dir /tmp/…`, 136 files): **1 951 nodes**, **11 739 edges** (7 309 `calls`, 1 815 `contains`,

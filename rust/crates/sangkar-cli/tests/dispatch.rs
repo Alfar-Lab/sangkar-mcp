@@ -245,18 +245,33 @@ fn every_reserved_name_reaches_its_own_module() {
         worker.stderr
     );
 
-    // The two whose module is a later task refuse by name: one line, the task that lands it, and no
+    // `telemetry` is a real module since TASK-054: a home with no telemetry directory still answers,
+    // on stdout, with the line naming the (empty) report it wrote.
+    let telemetry = machine.run_in(machine.home(), &["telemetry"]);
+    assert_eq!(
+        telemetry.code, 0,
+        "`telemetry` writes a report: {}",
+        telemetry.stderr
+    );
+    assert!(
+        telemetry.stdout.starts_with("wrote "),
+        "`telemetry` answers one line: {:?}",
+        telemetry.stdout
+    );
+
+    // The one whose module is a later task refuses by name: one line, the task that lands it, and no
     // invented protocol on stdout.
-    for (verb, task) in [("telemetry", "TASK-054"), ("daemon", "TASK-056")] {
-        let run = machine.run_in(machine.home(), &[verb]);
-        assert_eq!(run.code, 1, "`{verb}` refuses");
-        assert!(run.stdout.is_empty(), "`{verb}` writes nothing to stdout");
-        assert!(
-            run.stderr.contains(task),
-            "`{verb}` names {task}: {}",
-            run.stderr
-        );
-    }
+    let daemon = machine.run_in(machine.home(), &["daemon"]);
+    assert_eq!(daemon.code, 1, "`daemon` refuses");
+    assert!(
+        daemon.stdout.is_empty(),
+        "`daemon` writes nothing to stdout"
+    );
+    assert!(
+        daemon.stderr.contains("TASK-056"),
+        "`daemon` names TASK-056: {}",
+        daemon.stderr
+    );
 
     // `mcp` is a real module too, and the fourth of the group stopped being one: a client that
     // closes stdin before saying hello asked for nothing, so the server answers exit 0 rather than a

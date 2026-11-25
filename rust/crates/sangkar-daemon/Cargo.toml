@@ -12,6 +12,17 @@ sangkar-core = { path = "../sangkar-core" }
 sangkar-store = { path = "../sangkar-store" }
 sangkar-index = { path = "../sangkar-index" }
 sangkar-telemetry = { path = "../sangkar-telemetry" }
+# The loop's two termination signals and its interval: `signal::unix` is the only async surface the
+# lifecycle owns, and it is the same call `sangkar-cli/src/mcp.rs` installs its handlers with. `rt`
+# comes with `rt-multi-thread`, `select!` with `macros`, and `Notify` with `sync`; `process` and `io`
+# are left out because the daemon spawns through `std::process`. The feature set is `sangkar-cli`'s,
+# so no package enters `Cargo.lock` — `tokio` 1.54.1 already carries it.
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal", "sync", "time"] }
+# The `DaemonStatus` object `status --json` prints and the `daemon.state.json` the loop records:
+# `derive` for the shapes and compact JSON for the file. Both are pins `sangkar-core` carries, so
+# neither adds a package to `Cargo.lock`.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 
 [lints]
 workspace = true

@@ -19,11 +19,11 @@
 //! bootstrap (a fresh tree has no store for a tool call to answer from) and the tool is what a
 //! client calls, with identical arguments.
 //!
-//! Three verbs have no module yet — `telemetry` (TASK-054), `daemon` (TASK-056) and `worker`
-//! (TASK-046) — and each of those three arms refuses **honestly**: one line on stderr naming the
-//! task that implements it, [`EXIT_FAILURE`], and no invented protocol. Faking a surface here would
-//! hide the missing work behind a stream a client parses. `mcp` is the fourth of the group and no
-//! longer one of them: it serves the stdio session in [`crate::mcp`].
+//! One verb has no module yet — `daemon` (TASK-056) — and that arm refuses **honestly**: one line on
+//! stderr naming the task that implements it, [`EXIT_FAILURE`], and no invented protocol. Faking a
+//! surface here would hide the missing work behind a stream a client parses. The rest all answer:
+//! `mcp` serves the stdio session in [`crate::mcp`], `worker` is the run `index` spawns, and
+//! `telemetry` writes or serves the report in [`crate::telemetry_cmd`].
 //!
 //! # The composition root
 //!
@@ -228,15 +228,19 @@ fn line_without_name(argv: &[String], rest: &[String], named: bool) -> Vec<Strin
 ///
 /// `repo` is the machine registry and one tree's settings, a verb with no graph to load; `index` is
 /// the gate plus the run; `mcp` is the stdio session; `worker` is the run itself, the process
-/// `index` spawns. `telemetry` and `daemon` have no module in this phase, and each says which task
-/// lands it rather than pretending to answer.
+/// `index` spawns; `telemetry` writes or serves the report ([`crate::telemetry_cmd`]). `daemon` has
+/// no module yet, and says which task lands it rather than pretending to answer.
 fn run_verb(run: &mut Invocation<'_>, verb: Verb, verb_argv: &[String]) -> i32 {
     match verb {
         Verb::Repo => run_repo_cli(verb_argv, run.env, &run.cwd, run.stdout, run.stderr),
         Verb::Index => run_index(run, verb_argv),
         Verb::Mcp => run_mcp(run, verb_argv),
         Verb::Worker => run_worker_verb(run, verb_argv),
-        Verb::Telemetry => not_yet(run.stderr, "the telemetry verb", "TASK-054"),
+        // Named in full rather than imported: this is the one arm that reaches the module, and a
+        // `use` above would suggest the rest of the dispatch reads it too.
+        Verb::Telemetry => crate::telemetry_cmd::run_telemetry(
+            verb_argv, run.env, &run.cwd, run.stdout, run.stderr,
+        ),
         Verb::Daemon => not_yet(run.stderr, "the daemon verb", "TASK-056"),
     }
 }

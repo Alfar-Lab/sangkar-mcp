@@ -17,3 +17,4 @@ pub mod render;
 pub mod repo;
 pub mod route;
 pub mod store_lifecycle;
+pub mod telemetry_cmd;

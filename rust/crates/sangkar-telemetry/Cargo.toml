@@ -7,6 +7,24 @@ license.workspace = true
 
 [dependencies]
 sangkar-core = { path = "../sangkar-core" }
+# The two a record needs to exist at all: `Serialize` for the field order the parity bar compares
+# byte for byte, and compact JSON with `preserve_order` for the counts maps, whose insertion order is
+# part of the line (`RUST-MIGRATION.md` §5). No package enters `Cargo.lock`: both are pins
+# `sangkar-core` already carries.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+# `--since` needs a calendar, not a clock: UTC midnight of a day, and a day count subtracted from an
+# injected `now`. `chrono` is already a package in `Cargo.lock` (pulled by `rmcp`), so this edge adds
+# no `[[package]]` block — only the line that records the edge; the default features stay off so
+# nothing here can read a clock or a local time zone.
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+# The report listener: `Bun.serve` in `src/shared/telemetry/serve.ts` is one route that re-renders a
+# page per request, and this crate has no async runtime, so a blocking server on its own thread is
+# the shape that fits rather than a `hyper` service stack (`RUST-MIGRATION.md` §5 names both). No
+# feature is enabled: the crate's only features are TLS, and a loopback report has no certificate.
+# It brings three packages of its own (`ascii`, `chunked_transfer`, `httpdate`); the `log` it also
+# depends on is already a package in `Cargo.lock`, so this edge adds no `[[package]]` block for it.
+tiny_http = "0.12"
 
 [lints]
 workspace = true
