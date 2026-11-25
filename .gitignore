@@ -5,9 +5,12 @@
 codebase-memory-mcp/
 code-review-graph/
 
-# Installed dependencies and build output
+# Installed dependencies and build output. `dist/` is where the release workflow assembles the
+# tarballs. `rust/.gitignore` already holds `/target`; repeated here so the 12 GB cargo directory
+# stays out of the index even if that file is ever replaced.
 node_modules/
 dist/
+/rust/target/
 
 # The npm platform package's binary: `rust/scripts/package.sh` fills it, the layout is committed
 /npm/*/bin/sangkar

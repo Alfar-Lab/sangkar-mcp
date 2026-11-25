@@ -1,13 +1,19 @@
 # Parity harness: fixtures, goldens, comparator
 
-Three fixture repositories, a checked-in bank of the TypeScript CLI's answers, and the structural
-comparator that judges the Rust port against them. While `src/` exists it is the oracle; after phase
-5 deletes it, `rust/tests/golden/**` is the only specification of what the seven tools must answer.
+> **Retired capture harness.** `scripts/parity/*.ts` was TypeScript that imported the `src/` tree; phase 5
+> deleted that tree, so the recorder can no longer run. What remains — and what the suite uses — is the
+> committed bank under `rust/tests/golden/**` and `rust/tests/vectors/**`, replayed by
+> `cargo test -p sangkar-cli --test goldens` against this binary's own index. Re-capture is no longer
+> possible: a golden that disagrees means the Rust side is wrong.
+
+Three fixture repositories, a checked-in bank of the retired TypeScript CLI's answers, and the structural
+comparator that judges the Rust port against them. `rust/tests/golden/**` is the only specification of what
+the seven tools must answer.
 
 ```
 rust/tests/parity/fixtures/     the three trees (this repo's own index ignores them, see .sangkarignore)
 rust/tests/golden/<fixture>/    57 captured answers: {args, stdout, exit_code}
-scripts/parity/capture-goldens.ts   recaptures them from bin/sangkar.ts
+scripts/parity/capture-goldens.ts   the retired recorder (TypeScript; it imported the deleted src tree)
 scripts/parity/compare.py           structural comparison of two goldens
 rust/crates/sangkar-cli/tests/goldens.rs  the same comparison, as a cargo test against the binary
 ```
@@ -33,8 +39,11 @@ Two details are deliberate:
 
 ## Capturing
 
+The recorder is retired with the TypeScript tree — the banner at the top is the state of the world. What
+follows is the record of how the committed bank was made, not an instruction:
+
 ```sh
-~/.bun/bin/bun run scripts/parity/capture-goldens.ts
+~/.bun/bin/bun run scripts/parity/capture-goldens.ts   # retired: needs the deleted src/ tree
 ```
 
 The script runs `<bun> run bin/sangkar.ts` from the repository root with `SANGKAR_HOME` under a temp
@@ -251,13 +260,15 @@ relaxed in the test:
 
 ## Recapturing
 
+There is no recapture any more: the recorder was TypeScript and the tree it imported is gone. Replay is the
+only direction that runs:
+
 ```sh
-~/.bun/bin/bun run scripts/parity/capture-goldens.ts
 cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test goldens
 ```
 
-A golden captured before a payload field existed is stale, and the only correct response is a
-recapture. What is never correct is editing a golden to match the port: `stdout` is byte-for-byte
+A golden captured before a payload field existed is stale, and the only response left is to treat the
+golden as right and the port as wrong. What is never correct is editing a golden to match the port: `stdout` is byte-for-byte
 what the TypeScript wrote, and a hand-edited oracle proves nothing. Mutating a *copy* is how the
 harness's own bite is demonstrated —
 

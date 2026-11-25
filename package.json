@@ -4,7 +4,6 @@
   "description": "Read-only MCP server and CLI over one repository's call graph, backed by SQLite.",
   "license": "MIT",
   "author": "Aldi Fahluzi",
-  "type": "module",
   "bin": {
     "sangkar": "bin/sangkar.js"
   },
@@ -13,9 +12,6 @@
     "agent",
     "README.md"
   ],
-  "imports": {
-    "#shared/*": "./src/shared/*"
-  },
   "engines": {
     "node": ">=18"
   },
@@ -41,20 +37,7 @@
   "scripts": {
     "release:beta": "npm publish --tag beta"
   },
-  "dependencies": {
-    "@modelcontextprotocol/sdk": "1.32.2",
-    "@toon-format/toon": "4.4.0",
-    "drizzle-orm": "0.45.4",
-    "tree-sitter-wasms": "0.1.13",
-    "web-tree-sitter": "0.27.2"
-  },
   "optionalDependencies": {
     "sangkar-mcp-linux-x64-gnu": "0.6.0-beta.1"
-  },
-  "devDependencies": {
-    "typescript": "^5.9",
-    "@types/bun": "latest",
-    "@biomejs/biome": "^2",
-    "drizzle-kit": "0.31.11"
   }
 }

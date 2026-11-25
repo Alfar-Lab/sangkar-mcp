@@ -549,7 +549,7 @@ fn the_repositorys_sangkarignore_keeps_the_parity_fixtures_out_of_a_walk() {
         result
             .files
             .iter()
-            .any(|file| file.path == "src/indexer/discover.ts"),
+            .any(|file| file.path == "rust/crates/sangkar-index/src/discover.rs"),
         "and indexed the port's source"
     );
 }

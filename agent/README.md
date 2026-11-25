@@ -47,8 +47,11 @@ the repository at startup:
 sangkar mcp --repo-root /path/to/repo
 ```
 
-`--data-dir /path/to/dir` is the optional second flag. When `sangkar` is not on `PATH`, run the
-script through Bun instead: `~/.bun/bin/bun run /path/to/bin/sangkar.ts mcp`.
+`--data-dir /path/to/dir` is the optional second flag. When `sangkar` is not on `PATH`, register the
+npm launcher instead: `npx sangkar-mcp mcp --repo-root /path/to/repo` resolves the platform package
+and execs the native binary with the same arguments and exit code. That binary is Linux x64 in this
+release; the launcher is Node.js >= 18 and exits 70 with a one-line refusal on any other platform,
+naming the version to pin for the TypeScript build.
 
 | Client | Registration |
 |---|---|
@@ -58,13 +61,14 @@ script through Bun instead: `~/.bun/bin/bun run /path/to/bin/sangkar.ts mcp`.
 | Pi | `pi mcp add sangkar -- sangkar mcp`, or a `mcpServers` entry in `~/.pi/agent/mcp.json` |
 | Any `mcpServers` client | `{"mcpServers": {"sangkar": {"command": "sangkar", "args": ["mcp"]}}}` |
 
-The README's [MCP](../README.md#mcp) section has the JSON form with `--repo-root` and
+The README's [MCP](../README.md#mcp--skill) section has the JSON form with `--repo-root` and
 `--data-dir`, including the two-entry case for a linked worktree. One repository is one server
 entry — a tool call never takes a project argument.
 
 ## Keeping it true
 
-`SKILL.md` restates what `src/tools/*/manifest.ts` declares: argument names, defaults, enum values,
-and the budget ceilings. `src/prompts/INSTRUCTIONS.md` is the in-protocol version of the same advice. When
+`SKILL.md` restates what `rust/crates/sangkar-tools/src/<tool>/manifest.rs` declares: argument names,
+defaults, enum values, and the budget ceilings. `rust/crates/sangkar-core/assets/INSTRUCTIONS.md` is
+the in-protocol version of the same advice. Both live in the repository, not in this package. When
 a manifest changes, the skill changes in the same commit, or an agent is told about a tool that no
 longer answers that way.

@@ -336,6 +336,15 @@ fn declaration_name(node: Node<'_>, source: &[u8]) -> Option<String> {
 
 /// A declaration's header: its text up to the body, so a multi-line signature keeps its own rows.
 ///
+/// A body on the signature's own row cuts that row at the body's **absolute** column in the file
+/// line, not at an offset measured from the node, because that is the index the TypeScript slices
+/// with: `signatureOf` writes `row.slice(0, body.startPosition.column)` over the node's first row.
+/// An indented declaration therefore keeps its header whole — the body's column falls past the end
+/// of a row that started later in the line — and an unindented one is cut where that column lands.
+/// The quirk is the original's, and the goldens captured its output; reproducing it needs the same
+/// column, and the two implementations then agree byte for byte on this payload field.
+/// `rust/tests/golden` is what proves it.
+///
 /// The cap is [`SIGNATURE_CAP`] characters after the whitespace collapse, which is the TypeScript's
 /// `clean(rows.join(" "), SIGNATURE_CAP)`. Characters, not UTF-16 code units: a cap that could cut
 /// a surrogate pair in half is a defect, not a parity requirement.
@@ -344,27 +353,23 @@ fn signature_of(node: Node<'_>, source: &[u8]) -> Option<String> {
     let Some(body) = node.child_by_field_name("body") else {
         return text_or_null(clean(text.split('\n').next().unwrap_or_default()));
     };
-    let body_row = body
-        .start_position()
-        .row
-        .saturating_sub(node.start_position().row);
+    let body_at = body.start_position();
+    let body_row = body_at.row.saturating_sub(node.start_position().row);
     let mut rows: Vec<&str> = text.split('\n').take(body_row.max(1)).collect();
     if body_row == 0
         && let Some(first) = rows.first_mut()
     {
         // The body starts on the signature's own row (`area() { return 1; }`), so the signature ends
-        // where the body begins. A byte column only equals a character index on ASCII, so a row with
-        // anything outside printable ASCII keeps its whole text rather than a cut inside a
-        // character.
+        // where the body begins, at the column the body holds in the file line. A byte column only
+        // equals a character index on ASCII, so a row with anything outside printable ASCII keeps
+        // its whole text rather than a cut inside a character.
         let row = *first;
         if row
             .bytes()
             .all(|byte| byte.is_ascii_graphic() || byte == b' ')
+            && let Some(head) = row.get(..body_at.column)
         {
-            let cut = body.start_byte().saturating_sub(node.start_byte());
-            if let Some(head) = row.get(..cut) {
-                *first = head;
-            }
+            *first = head;
         }
     }
     text_or_null(clean_capped(&rows.join(" "), SIGNATURE_CAP))

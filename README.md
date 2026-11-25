@@ -11,35 +11,45 @@ one.
 
 ### Requirements
 
-- **Bun 1.4.4 or newer.** This is a Bun program — `bun:sqlite`, `bun build`, `Bun.spawn` — so Node
-  cannot run it. The package ships TypeScript and the `sangkar` binary runs under Bun through its
-  shebang, so the requirement is not optional.
+- **Linux x64 with glibc 2.35 or newer** — the floor is Debian 12, Ubuntu 22.04+ and Fedora 36+.
+  `sangkar` is one native binary and `sangkar-mcp-linux-x64-gnu` is the only platform package there
+  is. **macOS and Windows stay on the last TypeScript release until their platform ships:** the
+  launcher refuses with one line naming the platform it wanted, the platform that is published and the
+  version to pin — `sangkar-mcp@0.6.0-beta.1`, the build those platforms still install, which runs on
+  Bun.
+- **Node 18 or newer, for the launcher only.** The npm package is `bin/sangkar.js`: it resolves the
+  platform package, execs the binary, and forwards argv and the exit code. The server, the indexer, the
+  daemon and the report are that binary — no Bun, no JavaScript engine, and no `node_modules` needed to
+  index.
 - Installing creates no database. The first run writes one settings file, `<home>/config.json` beside
-  the registry, and nothing else outside Bun's global directory. Reading a graph needs no network, no
-  server and no index step: the daemon keeps it fresh, the server only reads.
+  the registry, and nothing else outside the installation's own home. Reading a graph needs no network,
+  no server and no index step: the daemon keeps it fresh, the server only reads.
 
 ### Install
 
 ```sh
-bun add -g sangkar-mcp@beta   # or: npm i -g sangkar-mcp@beta
+npm i -g sangkar-mcp@beta
 ```
 
 Pin `@beta` rather than the bare name: `latest` is a moving target, because npm created a
-`0.0.0-stage` holding version that took the tag when the name was first claimed. Today `beta` serves
-`0.5.0-beta.1`. `0.6.0-beta.1` is tagged and released on GitHub and reaches the registry on the next
-publish, which needs the maintainer's OTP. Before it lands:
-
-```sh
-bun install -g github:Alfar-Lab/sangkar-mcp#v0.6.0-beta.1
-```
+`0.0.0-stage` holding version that took the tag when the name was first claimed — `npm view sangkar-mcp
+dist-tags` still shows `latest: 0.1.0-beta.0`. `beta` serves `0.6.0-beta.1`, the last build of the
+TypeScript implementation: that is what macOS, Windows and anything older than glibc 2.35 install
+today, and it needs Bun. The native packages — `sangkar-mcp` as the launcher and
+`sangkar-mcp-linux-x64-gnu` as the binary — are not on the registry yet: they need the maintainer's
+OTP, and they go out under a new number because `0.6.0-beta.1` is spent.
 
 ### From a checkout
 
 ```sh
-bun install
-bun link                            # puts `sangkar` on PATH, and touches nothing else
-bun run bin/sangkar.ts status       # or skip bun link: the same program, invoked directly
+cd rust
+cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu
+./target/x86_64-unknown-linux-gnu/release/sangkar status --repo-root /path/to/repo
 ```
+
+The workspace pins its toolchain in `rust/rust-toolchain.toml`. `bash rust/scripts/package.sh`, run
+from the repository root, does the same build and lays it out as the npm platform package — stripped, in
+`npm/linux-x64-gnu/bin/sangkar`, which is the path the launcher execs.
 
 ### First index
 
@@ -211,8 +221,8 @@ A linked worktree is a second tree with a second database, so a client registers
 {
   "mcpServers": {
     "sangkar-app": {
-      "command": "~/.bun/bin/bun",
-      "args": ["run", "/path/to/bin/sangkar.ts", "mcp",
+      "command": "sangkar",
+      "args": ["mcp",
                "--repo-root", "/work/app", "--data-dir", "/work/app/.sangkar"]
     }
   }
@@ -281,7 +291,8 @@ sangkar <tool> [arguments] [global flags] — the name is the first token that i
 ## License
 
 MIT — see [LICENSE](LICENSE). The grant covers the package as published, including the migration SQL
-it ships; `tree-sitter-wasms`, `web-tree-sitter`, `drizzle-orm`, `@toon-format/toon` and the MCP SDK
+compiled into the binary. `rusqlite` and `libsqlite3-sys` (MIT, with SQLite itself in the public
+domain), the `tree-sitter` and grammar crates (MIT), `rmcp` (Apache-2.0) and `serde_toon_format` (MIT)
 keep their own licenses.
 
 ### Support Me

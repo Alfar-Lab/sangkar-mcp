@@ -2,7 +2,7 @@
 name: use-sangkar-mcp
 description: "Answer code-structure questions from an indexed call graph instead of grepping: who calls this, what does this call, what does my change reach, is it tested, does it exist at all. Use when the repository is indexed by sangkar (MCP tools status, summary, trace, search, impact, expand, index — each takes `repo` to name a registered repository — or the sangkar CLI): callers, callees, call chain, dependencies, impact analysis, blast radius, risk before an edit or merge, test gaps, or an absence claim. A background daemon keeps the graph fresh, not the server, so read read_status before trusting an answer."
 license: MIT
-compatibility: sangkar MCP server over a registered repository (or one named with --repo-root), or the sangkar CLI on PATH. Bun 1.4.4+.
+compatibility: sangkar MCP server over a registered repository (or one named with --repo-root), or the sangkar CLI on PATH. Requires Linux x64 in the first Rust release; Node.js >=18 for the launcher shim only; the server is a native binary with no interpreter.
 ---
 
 # sangkar: four questions, seven tools, every registered repository

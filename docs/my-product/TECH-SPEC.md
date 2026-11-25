@@ -3,16 +3,25 @@
 **Sources compared throughout:** **CRG** = [tirth8205/code-review-graph](https://github.com/tirth8205/code-review-graph) — Python MCP graph server, 2.4.0, observed at commit `bbdda4b9e4b4` (branch `staging`). **CBM** = [DeusData/codebase-memory-mcp](https://github.com/DeusData/codebase-memory-mcp) — C/Go MCP graph server, `dev`, 164 grammars.
 
 Implementation shape for the server described in `DESIGN.md`, `TOOLS-SPEC.md` and `DATABASE.md`.
-Runtime: **Bun + TypeScript**, strict module isolation, one module per tool.
+Runtime: **one native Rust binary**, built from the nine-crate workspace under `rust/` (toolchain
+1.100.0, edition 2024) and shipped through npm as a platform package plus a Node launcher (§15). No
+Bun and no TypeScript: the server, the indexer, the daemon and the report all run inside that binary.
+SQLite arrives through `rusqlite` with the engine bundled, so the binary links no system
+`libsqlite3`; `tree-sitter` and the eleven grammar crates are compiled in, so there is no WASM
+grammar payload and indexing needs no `node_modules`. Strict module isolation holds at crate
+granularity — one crate per layer, one directory per tool (§3).
 
-**Status:** proposal, nothing implemented. Every runtime claim in §1 was probed on this machine — the
-probe commands are given so they can be re-run.
+**Status:** implemented. The binary answers the seven tools over stdio and over the CLI, runs the
+indexer, the daemon and the telemetry report, and is the artifact the npm packages carry. §1 records
+the probes the design was decided on; the port and its crate map are `RUST-MIGRATION.md`.
 
 ---
 
 ## 1. Verified runtime baseline
 
-Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
+Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`) on the TypeScript runtime this design was
+decided on: the table is that era's record, and each row states a rule the shipped binary still has to
+satisfy. The port is `RUST-MIGRATION.md`.
 
 | Capability | Result | Consequence for this design |
 |---|---|---|
@@ -37,6 +46,10 @@ Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
 ---
 
 ## 2. Repository layout
+
+The tree below is the TypeScript layout the module rules were written against; the shipped workspace is
+`rust/`, nine crates, and `RUST-MIGRATION.md` maps each module to the crate that now holds it. §3
+states the rule in the form the code enforces today.
 
 ```
 <name>/
@@ -101,15 +114,27 @@ Probed with `bun 1.4.4` (`bun` on `PATH`, `~/.bun/bin/bun`).
 
 ## 3. The module system
 
-Three layers with a hard directional rule. "Module" below means a program unit with a `package.json`
-`#`-specifier; only `shared` gets one.
+Nine crates with a hard directional rule, asserted in code rather than left to convention:
+`rust/crates/sangkar-boundary/src/lib.rs` holds the `DAG` table — for every crate, the `sangkar-*`
+crates it may depend on — and `cargo test -p sangkar-boundary` fails when a manifest declares an edge
+the table does not allow. "Module" below means one crate; a tool is one directory inside
+`sangkar-tools`.
 
-| Layer | May import | May **not** import | Why |
+| Layer | May depend on | May **not** depend on | Why |
 |---|---|---|---|
-| `shared` | `bun:*`, `node:*`, third-party | anything from `tools/` or `indexer/` | a kernel that depends on a caller is not a kernel; it would also create cycles |
-| `tools/<name>` | `shared` only | any other `tools/<other>`, `indexer/` | this is the rule the user asked for: tools are private |
-| `indexer` | `shared` only | `tools/` | the writer must not depend on the reader; tools trigger it by **process**, never by import |
-| `src/index.ts` (root) | everything, explicitly | — | the composition root is the one place that knows all modules |
+| `sangkar-core` (config, log, errors, envelope, budget, cursor, paths, runtime) | third-party only | every other `sangkar-*` crate | a kernel that depends on a caller is not a kernel; it would also create cycles |
+| `sangkar-store` (pragmas, migrations, publish, lock, `read/*`) | `sangkar-core` | `sangkar-domain`, `sangkar-tools`, `sangkar-index`, `sangkar-telemetry`, `sangkar-daemon`, `sangkar-cli` | `rusqlite` is this crate's dependency alone, so no other crate can open a connection |
+| `sangkar-domain` (resolve, neighbors, coverage, risk, diff) | `sangkar-core`, `sangkar-store` | `sangkar-tools`, `sangkar-index`, `sangkar-daemon`, `sangkar-cli` | shaping policy reads the graph and writes nothing |
+| `sangkar-tools` (one directory per tool) | `sangkar-core`, `sangkar-store`, `sangkar-domain` | `sangkar-index`, `sangkar-daemon`, `sangkar-cli` | tools are private: no tool names another |
+| `sangkar-index` (the writer) | `sangkar-core`, `sangkar-store`, `sangkar-domain` | `sangkar-tools`, `sangkar-daemon`, `sangkar-cli` | the writer must not depend on the reader; tools trigger it by **process**, never by import |
+| `sangkar-telemetry` | `sangkar-core` | everything else | usage recording is an append to one file, not a second kernel |
+| `sangkar-daemon` (watcher, report server) | `sangkar-core`, `sangkar-store`, `sangkar-index`, `sangkar-telemetry` | `sangkar-tools`, `sangkar-domain`, `sangkar-cli` | a daemon that named the cli could not outlive it |
+| `sangkar-cli` (the `sangkar` binary, composition root) | every crate above | — | the composition root is the one crate that knows all modules |
+
+The same crate also enforces two source rules the TypeScript tree enforced with tests: no module
+prints to stdout outside the protocol, and `rusqlite` appears only in `sangkar-store`. §4.1 and §4.2
+record the resolver map and the boundary test the same rules were first enforced with; the manifest
+scan replaces both.
 
 ### 3.1 Why one module per tool
 
@@ -123,14 +148,16 @@ Three layers with a hard directional rule. "Module" below means a program unit w
 
 ### 3.2 The cost, stated honestly
 
-Cross-tool sharing now has nowhere to go except `shared`, which can rot into a god module. §5 draws the
-line and §4.3 makes promotion a deliberate, reviewable act.
+Cross-tool sharing now has nowhere to go except the kernel crates — `sangkar-core`, `sangkar-store`,
+`sangkar-domain` — which can rot into a god crate. §5 draws the line and §4.3 makes promotion a
+deliberate, reviewable act.
 
 ---
 
 ## 4. Enforcement
 
-Three mechanisms; the first two are verified on Bun 1.4.4.
+Three mechanisms; the first two were verified on Bun 1.4.4, on the TypeScript tree, and the rules they
+enforced are what `sangkar-boundary`'s manifest scan checks today (§3).
 
 ### 4.1 Resolver map — the boundary for `#` specifiers
 
@@ -430,20 +457,21 @@ read-only handle held by a session or a publish by the one worker that ran for t
 
 ## 9. Parser strategy
 
-The single riskiest dependency. CRG's stack (`tree-sitter-language-pack`, native `.so` per language) is
-**PyPI-only** and cannot be reused here.
+The single riskiest dependency. The shipped implementation compiles `tree-sitter` 0.27 and eleven
+grammar crates into the binary — option C below: a grammar is code, there is no WASM payload, and
+indexing needs no `node_modules`. CRG's stack (`tree-sitter-language-pack`, native `.so` per language)
+is **PyPI-only** and cannot be reused here.
 
 | Option | Version | Pros | Cons |
 |---|---|---|---|
-| **A. `web-tree-sitter` + `tree-sitter-wasms`** | 0.27.2 / 0.1.13 | pure WASM: no native build, works on any platform Bun supports; ~40 grammars in the bundle | ~2–3× slower than native; grammar set is fixed by the bundle |
-| **B. `@vscode/tree-sitter-wasm`** | 0.3.1 | maintained by VS Code, curated, versioned together | fewer languages than A |
-| C. native `tree-sitter` node bindings | — | fastest | N-API per platform, rebuild on every Bun upgrade; unverified on Bun 1.4.4 |
+| A. `web-tree-sitter` + `tree-sitter-wasms` | 0.27.2 / 0.1.13 | pure WASM: no native build | ~2–3× slower than native; grammar set fixed by the bundle; a WASM payload in the artifact |
+| B. `@vscode/tree-sitter-wasm` | 0.3.1 | maintained by VS Code, curated, versioned together | fewer languages than A |
+| **C. the `tree-sitter` grammar crates, compiled in** — shipped | `tree-sitter` 0.27, grammars 0.23–0.25 | fastest; no runtime load and no payload beyond the binary | rebuild on every toolchain move; the grammar set is fixed at build time |
 | D. regex/heuristic extractors | — | zero deps | recall collapse; rejected |
 
-**Recommendation: A**, with B as fallback for any grammar A lacks. Keep the language layer *data*, copied
-from CRG's mechanism: an extension map plus four node-type lists per language
-(`class`, `function`, `import`, `call`) — the node-vs-edge decision stays a table lookup, so adding a
-language is a data change, not a code change.
+**Recommendation: C**, with the language layer still *data*: an extension map plus four node-type lists
+per language (`class`, `function`, `import`, `call`) — the node-vs-edge decision stays a table lookup,
+so adding a language is a data change, not a code change.
 
 v1 language set (12): python, typescript, tsx, javascript, go, java, rust, c, cpp, csharp, php, ruby —
 plus `.sangkar/languages.toml` for user additions (`GRAPH-MODEL.md` rules: built-ins win, capped count).
@@ -570,30 +598,27 @@ protect, and the only ones with an external ground truth to compare against.
 
 ## 13. Tooling
 
-```json
-{
-  "scripts": {
-    "mcp":        "bun run bin/sangkar.ts",
-    "index":      "bun run bin/sangkar.ts index",
-    "dev":        "bun --watch run bin/sangkar.ts",
-    "test":       "bun test",
-    "typecheck":  "tsc --noEmit",
-    "lint":       "biome check src tests",
-    "build":      "bun build --compile bin/sangkar.ts --outfile dist/sangkar",
-    "db:generate": "drizzle-kit generate",
-    "db:drift":    "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
-    "db:parity":   "bun test tests/schema-parity.test.ts"
-  }
-}
+```sh
+# from the repository root
+(cd rust && cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu)
+bash rust/scripts/package.sh          # the same build, stripped, laid out as the npm platform package
+(cd rust && cargo fmt --all --check)
+(cd rust && cargo clippy --workspace --all-targets -- -D warnings)
+(cd rust && cargo test --workspace)   # 978 passed, 0 failed, 1 ignored
+(cd rust && cargo test -p sangkar-cli --test goldens)   # 57 compared (57 identical)
+npm pack --dry-run                    # the parent tarball; the platform one from npm/<key>/
 ```
 
-- `tsconfig.json`: `strict`, `noUncheckedIndexedAccess`, `exactOptionalPropertyTypes`,
-  `verbatimModuleSyntax`, `paths` mapping `#shared` for the editor (Bun uses `package.json#imports`).
-- Biome for style/format only. **The boundary is §4, not the linter** — a rule that lives in review is not
-  a rule.
-- `drizzle-orm@0.45.4` is a runtime dependency; `drizzle-kit@0.31.11` is a **devDependency** and is never
-  shipped (it does not affect the compiled binary, §5.4.1).
-- CI: `typecheck` → `boundary` → `test` → `budget` → `db:drift` → `db:parity` → integration on the fixture.
+- `rust/rust-toolchain.toml` pins the toolchain — channel 1.100.0 with `rustfmt` and `clippy`; `rust/Cargo.toml`
+  pins `resolver = "3"` and `edition = "2024"`. `rust/Cargo.lock` is committed and every release build
+  passes `--locked`.
+- Formatting and lints are `rustfmt` and `clippy`, and neither is the boundary. **The boundary is §3,
+  enforced by `sangkar-boundary`** — a rule that lives in review is not a rule.
+- `rusqlite` is the only database dependency and lives in `sangkar-store` alone; `tree-sitter` and the
+  grammar crates live in `sangkar-index` alone. Both are source rules the boundary crate checks.
+- CI: `.github/workflows/ci.yml` runs `cargo fmt --check --all`, `cargo clippy --workspace --all-targets --
+  -D warnings` and `cargo test --workspace` — the last includes the golden replay.
+  `.github/workflows/release.yml` runs `package.sh` on `ubuntu-22.04` and asserts the `GLIBC_*` ceiling.
 
 ## 14. Performance budgets
 
@@ -610,15 +635,71 @@ From `DATABASE.md` §9, restated as CI gates:
 
 ## 15. Distribution
 
-| Option | Size | Rebuild per platform | Notes |
-|---|---|---|---|
-| `bun build --compile` | **104 MB measured** for hello-world; + ~1–3 MB per WASM grammar → estimate 130–160 MB | yes | single file, no Bun on the user's machine |
-| npm package + `#!/usr/bin/env bun` | small | no | requires Bun installed (102 MB itself) |
-| `bun install -g` from git | small | no | same requirement |
+One native binary, one platform package, one launcher. Every size below was measured on
+`x86_64-unknown-linux-gnu` with toolchain 1.100.0 on 2026-11-25, by the command quoted beside it.
 
-**Recommendation: ship the npm package first, add the compiled binary once the grammar set is fixed** —
-compiling 40 WASM grammars into a binary is the step that makes the artifact large, and the language set
-is still an open question (§9, 12 languages in v1).
+| Piece | Path | Size, measured | Command |
+|---|---|---|---|
+| release binary, as cargo leaves it | `rust/target/x86_64-unknown-linux-gnu/release/sangkar` | 34,416,888 bytes (33M) | `ls -l` |
+| binary as published, stripped | `npm/linux-x64-gnu/bin/sangkar` | 31,056,160 bytes (30M) | `ls -l` |
+| platform package `sangkar-mcp-linux-x64-gnu` | `npm/linux-x64-gnu/` — `package.json` and `bin/sangkar`, nothing else | 6.3 MB packed, 31.1 MB unpacked, 2 files | `npm pack --dry-run` |
+| parent package `sangkar-mcp` | repository root — launcher, `package.json`, `README.md`, `LICENSE`, `agent/` | 18.2 kB packed, 46.7 kB unpacked, 7 files | `npm pack --dry-run` |
+
+`strip` is the only difference between the first two rows: it drops 3,360,728 bytes of symbols and
+changes no behaviour. `ldd` on the stripped binary lists `libc`, `libm`, `libgcc_s` and the dynamic
+loader, and nothing of its own — no `libsqlite3`, no tree-sitter library: the SQLite engine and the
+eleven grammar crates are inside the file.
+
+**One platform, by design.** `npm/linux-x64-gnu/package.json` declares `os: ["linux"]` and
+`cpu: ["x64"]`, so npm installs it on exactly that pair and skips it everywhere else, which is why the
+parent names it in `optionalDependencies` rather than `dependencies`. `sangkar-mcp-linux-x64-gnu` is
+the only platform package; the launcher's table has one entry.
+
+**The glibc floor is 2.35, and the release image decides it.** `.github/workflows/release.yml` builds
+on `ubuntu-22.04`, so the linker may not use a symbol version newer than that image's glibc — 2.35,
+which is Debian 12, Ubuntu 22.04+ and Fedora 36+. The workflow enforces the promise instead of assuming
+it: it reads the highest `GLIBC_x.y` symbol version out of the shipped binary and fails the release
+when that is above 2.35. A build on a newer machine inherits that machine's libc — this checkout builds
+`GLIBC_2.39` (`objdump -T npm/linux-x64-gnu/bin/sangkar | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1`),
+so a developer build runs here and on nothing older; only the workflow's build carries the 2.35
+promise.
+
+**The launcher is Node, not `sh`.** `bin/sangkar.js` is CommonJS, has no dependencies, and does one
+thing: resolve `<platform package>/package.json` from the install, spawn `bin/sangkar` with the caller's
+argv, forward its exit code, and refuse anything else with one stderr line. Node rather than a POSIX
+shell script for three reasons. The lookup has to go through Node's resolver, because that is the only
+thing that knows where npm, pnpm or a global install put the platform package; a shell script would
+have to guess `node_modules` paths. npm installs a `bin` entry as a per-platform shim, and on Windows
+that is a `.cmd`/`.ps1` wrapper only a `.js` or `.exe` target survives — a `sh` script would have to be
+rewritten for the very platform whose refusal it exists to print. And Node is already implied by npm
+itself (`engines: node >= 18` adds nothing a user of npm did not already have), while its stdlib gives
+signal forwarding and exit-code propagation without a dependency. The binary itself uses no Node: the
+launcher is the only JavaScript in the package.
+
+**Refusal is a feature.** With no platform package — macOS, Windows, 32-bit, musl — the launcher prints
+one line and exits 70 (`EX_SOFTWARE`), so a script fails at once instead of at the first tool call. The
+line names the key it wanted, the platform that is published, and the version to pin:
+
+```text
+sangkar: no native binary for "linux:x64"; the only published platform is linux x64 (sangkar-mcp-linux-x64-gnu); pin sangkar-mcp@0.6.0-beta.1 to stay on the TypeScript build
+```
+
+(That sample is what this machine prints when the optional install was skipped; a macOS caller sees its
+own key in the first slot.)
+
+**Adding a second platform is three additions and no rewrite:**
+
+1. one row in the root `package.json`'s `optionalDependencies` — `"sangkar-mcp-<key>": "<version>"`.
+   `rust/scripts/package.sh` refuses to build when that row and `package.json`'s `version` disagree, so
+   the two packages cannot ship different versions;
+2. one `npm/<key>/` directory copied from `npm/linux-x64-gnu/`: its `package.json` names that platform's
+   `os`/`cpu`, and its `bin/sangkar` is left to the build and stays gitignored;
+3. one job in `.github/workflows/release.yml` with that platform's `runs-on` image, `TARGET`, `KEY` and
+   `PACKAGE`. The image sets that platform's libc floor, and the job's `objdump` assertion is what keeps
+   the promise in the release notes honest.
+
+The launcher's `PLATFORMS` table takes the matching one-line entry (`"darwin:arm64":
+"sangkar-mcp-darwin-arm64"`); it is a table, not a code path.
 
 ## 16. Spikes, in order
 
@@ -635,6 +716,9 @@ S2 is the long pole and gates all extractor work; S3 gates `trace`, `summary` an
 gates the watcher. Do them in that order — none of the seven tools should be written before S2 and S3 pass.
 
 ## 17. Open questions
+
+These are the TypeScript design's open questions, kept because the answers have to outlive the runtime
+they were asked on; `RUST-MIGRATION.md` records which ones the port settled and how.
 
 1. **MCP SDK vs hand-rolled protocol.** `@modelcontextprotocol/sdk` 1.32.2 is TS-first and works on Bun;
    a hand-rolled stdio loop is ~200 lines and removes a dependency that historically breaks majors

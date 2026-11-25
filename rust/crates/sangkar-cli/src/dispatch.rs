@@ -19,11 +19,11 @@
 //! bootstrap (a fresh tree has no store for a tool call to answer from) and the tool is what a
 //! client calls, with identical arguments.
 //!
-//! One verb has no module yet — `daemon` (TASK-056) — and that arm refuses **honestly**: one line on
-//! stderr naming the task that implements it, [`EXIT_FAILURE`], and no invented protocol. Faking a
-//! surface here would hide the missing work behind a stream a client parses. The rest all answer:
-//! `mcp` serves the stdio session in [`crate::mcp`], `worker` is the run `index` spawns, and
-//! `telemetry` writes or serves the report in [`crate::telemetry_cmd`].
+//! Every verb has a module behind it, and every arm reaches it: `mcp` serves the stdio session in
+//! [`crate::mcp`], `worker` is the run `index` spawns, `telemetry` writes or serves the report in
+//! [`crate::telemetry_cmd`], and `daemon` is the one arm that crosses a crate boundary — the four
+//! subcommands are [`sangkar_daemon::cli`]'s, handed the line, the home and the two command lines
+//! this process resolved.
 //!
 //! # The composition root
 //!
@@ -49,6 +49,7 @@
 //! no fourth code: the missing-interpreter preflight this binary never had is gone, and what is left
 //! of it is the npm launcher shim's own failure, outside this crate.
 
+use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 use std::sync::LazyLock;
@@ -228,8 +229,8 @@ fn line_without_name(argv: &[String], rest: &[String], named: bool) -> Vec<Strin
 ///
 /// `repo` is the machine registry and one tree's settings, a verb with no graph to load; `index` is
 /// the gate plus the run; `mcp` is the stdio session; `worker` is the run itself, the process
-/// `index` spawns; `telemetry` writes or serves the report ([`crate::telemetry_cmd`]). `daemon` has
-/// no module yet, and says which task lands it rather than pretending to answer.
+/// `index` spawns; `telemetry` writes or serves the report ([`crate::telemetry_cmd`]); `daemon`
+/// hands the whole line to [`sangkar_daemon::cli`], which owns the four subcommands.
 fn run_verb(run: &mut Invocation<'_>, verb: Verb, verb_argv: &[String]) -> i32 {
     match verb {
         Verb::Repo => run_repo_cli(verb_argv, run.env, &run.cwd, run.stdout, run.stderr),
@@ -241,7 +242,9 @@ fn run_verb(run: &mut Invocation<'_>, verb: Verb, verb_argv: &[String]) -> i32 {
         Verb::Telemetry => crate::telemetry_cmd::run_telemetry(
             verb_argv, run.env, &run.cwd, run.stdout, run.stderr,
         ),
-        Verb::Daemon => not_yet(run.stderr, "the daemon verb", "TASK-056"),
+        // The four subcommands, the pid file and the report server all belong to that crate; this
+        // arm supplies what only this process can resolve — the configuration and the streams.
+        Verb::Daemon => run_daemon(run, verb_argv),
     }
 }
 
@@ -313,16 +316,50 @@ fn run_mcp(run: &mut Invocation<'_>, verb_argv: &[String]) -> i32 {
     crate::mcp::serve(surface)
 }
 
-/// What a verb with no module answers today: one line naming the task, [`EXIT_FAILURE`], no stdout.
+/// The `daemon` verb: [`sangkar_daemon::cli::run_daemon_cli`], over the home this process resolved.
 ///
-/// This is not a stub of the surface — there is no protocol here to be wrong about. A script that
-/// called `sangkar daemon` and got a plausible-looking answer would believe a daemon replied.
-fn not_yet(err: &mut dyn std::io::Write, what: &str, task: &str) -> i32 {
-    let _ = writeln!(
-        err,
-        "sangkar: {what} is not implemented in this binary yet; {task} lands it"
-    );
-    EXIT_FAILURE
+/// The module reads no environment of its own, so everything ambient is resolved here: the home comes
+/// from the same [`load`] the neighbouring verbs call, because the pid file, the log, the state file
+/// and the registry all live in it and a second opinion about which home that is would address a
+/// daemon the operator does not have. The subcommands are the module's, including the `--help` block
+/// and every refusal, so nothing about its surface is restated here.
+fn run_daemon(run: &mut Invocation<'_>, verb_argv: &[String]) -> i32 {
+    let config = match load(run, verb_argv) {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    let command = match daemon_command() {
+        Ok(command) => command,
+        Err(error) => return failure_refusal(run.stderr, &error, EXIT_FAILURE),
+    };
+    sangkar_daemon::cli::run_daemon_cli(sangkar_daemon::cli::DaemonInvocation {
+        argv: verb_argv,
+        home: &config.home,
+        command,
+        worker_cmd: config.worker_cmd.clone(),
+        // `None` is the daemon's own report server: the same page `telemetry --serve` renders, over
+        // this home's registry. A substitute would be a test's, and no test reaches this arm.
+        report: None,
+        stdout: &mut *run.stdout,
+        stderr: &mut *run.stderr,
+    })
+}
+
+/// The command line `daemon start` spawns: this executable, told to run the daemon in the foreground.
+///
+/// Resolved exactly as [`config::worker_cmd`] resolves the worker — never the literal `sangkar`, which
+/// is a name on some `PATH` and not necessarily this binary — so a `start` under any path spawns the
+/// build that asked for it. A `daemon run` child writes its lines to stderr, which is the file
+/// `start` points at its log.
+fn daemon_command() -> Result<Vec<OsString>, AppError> {
+    let exe = std::env::current_exe().map_err(|error| {
+        AppError::internal(format!("cannot resolve the current executable: {error}"))
+    })?;
+    Ok(vec![
+        exe.into_os_string(),
+        OsString::from("daemon"),
+        OsString::from("run"),
+    ])
 }
 
 /// The `index` verb: the gate first, then the run, then the registration a successful run earns.

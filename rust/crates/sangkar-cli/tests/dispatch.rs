@@ -259,18 +259,59 @@ fn every_reserved_name_reaches_its_own_module() {
         telemetry.stdout
     );
 
-    // The one whose module is a later task refuses by name: one line, the task that lands it, and no
-    // invented protocol on stdout.
-    let daemon = machine.run_in(machine.home(), &["daemon"]);
-    assert_eq!(daemon.code, 1, "`daemon` refuses");
-    assert!(
-        daemon.stdout.is_empty(),
-        "`daemon` writes nothing to stdout"
-    );
-    assert!(
-        daemon.stderr.contains("TASK-056"),
-        "`daemon` names TASK-056: {}",
+    // `daemon` is a real module since TASK-067, and the arm hands it the home this machine names.
+    // An untouched home answers the daemon's own line — not a refusal, and nothing about a task —
+    // and `--json` is the one flag that changes an answer.
+    let daemon = machine.run_in(machine.home(), &["daemon", "status"]);
+    assert_eq!(
+        daemon.code, 1,
+        "`daemon status` on a home with no pid file is not running: {}",
         daemon.stderr
+    );
+    assert_eq!(daemon.stdout, "not running\n", "the daemon's own line");
+    assert!(
+        !daemon.stderr.contains("not implemented") && !daemon.stderr.contains("TASK-"),
+        "`daemon` is no longer a refusal naming a task: {}",
+        daemon.stderr
+    );
+    let json = machine.run_in(machine.home(), &["daemon", "status", "--json"]);
+    assert_eq!(json.code, 1, "the code follows the status it printed");
+    assert_eq!(
+        json.stdout.lines().count(),
+        1,
+        "`--json` is one object line: {:?}",
+        json.stdout
+    );
+    let status: Value = serde_json::from_str(&json.stdout).expect("the answer is one JSON object");
+    assert!(status["pid"].is_null(), "no pid file, no pid: {status}");
+    assert_eq!(
+        status["repositories"].as_array().map(Vec::len),
+        Some(0),
+        "a home with no registry has no row: {status}"
+    );
+
+    // The pid file *is* what the module reads, and it reads the one in this home: a live file here is
+    // what makes `status` say running and exit 0, which is the evidence that the verb reached its own
+    // module with the resolved home rather than merely not crashing. Written by the test and only
+    // read by `status` — a daemon this suite started would outlive it.
+    fs::write(
+        machine.home().join("daemon.pid"),
+        format!(
+            r#"{{"pid":{},"startedAt":"1970-01-01T00:00:00.000Z"}}"#,
+            std::process::id()
+        ),
+    )
+    .expect("write a live pid file");
+    let running = machine.run_in(machine.home(), &["daemon", "status"]);
+    assert_eq!(
+        running.code, 0,
+        "a live pid file is a running daemon: {}",
+        running.stderr
+    );
+    assert_eq!(
+        running.stdout,
+        format!("running, pid {}\n", std::process::id()),
+        "the daemon's own status line, from this home's pid"
     );
 
     // `mcp` is a real module too, and the fourth of the group stopped being one: a client that

@@ -2,7 +2,7 @@
 name: build-n-deploy
 description: "Cut a sangkar-mcp release from version choice to deployment: pick the SemVer bump under the house standard, write the version into both files, sync README.md with what shipped, run the preflight, commit, tag v[MAJOR].[MINOR].[PATCH]-[TAG].[ITERATION], push and publish the GitHub Release, then hand the maintainer the npm publish command that needs their OTP. Use when asked to release, deploy, bump a version, cut a tag, sync or refresh the README before a release, write release notes, deploy to GitHub, or publish sangkar-mcp to npm."
 license: MIT
-compatibility: Bun 1.4.4+ on PATH as `bun` (~/.bun/bin/bun), git, a `gh` CLI logged in to Alfar-Lab/sangkar-mcp, npm logged in as the package owner with 2FA. Never runs `npm publish` itself — that step belongs to the maintainer.
+compatibility: cargo 1.100.0 (the workspace pins it in rust/rust-toolchain.toml), Node 18+ as `node`, git, a `gh` CLI logged in to Alfar-Lab/sangkar-mcp, npm logged in as the package owner with 2FA. Never runs `npm publish` itself — that step belongs to the maintainer.
 ---
 
 # build-n-deploy
@@ -65,15 +65,25 @@ choose the next one, do not reuse it.
 The version lives twice and nothing binds the copies:
 
 - `package.json` → `"version"`
-- `src/index.ts` → `const SERVER_VERSION = "…"` (≈ line 141)
+- `rust/Cargo.toml` → `[workspace.package] version`, which every crate inherits through
+  `version.workspace = true`
 
-`SERVER_VERSION` is what the MCP `initialize` answer reports and what telemetry records, so a release
-that bumps only `package.json` ships a server that lies about itself. Bump both in the release commit,
-then confirm there is no third copy:
+The binary carries no hand-written version constant: `sangkar-core`'s `server_version()` returns
+`env!("CARGO_PKG_VERSION")`, which is what the MCP `initialize` answer reports and what telemetry
+records. A release that bumps only `package.json` therefore ships a server that lies about itself. Bump
+both in the release commit, then find every other copy of the number (substitute the one you are
+cutting):
 
 ```sh
-grep -rn "0\.[0-9]*\.[0-9]*" --include='*.ts' --include='*.json' src package.json
+grep -n '"version"\|^version' package.json rust/Cargo.toml npm/linux-x64-gnu/package.json
+grep -rn '0\.6\.0-beta\.1' --include='*.toml' --include='*.json' --include='*.rs' \
+  package.json rust/Cargo.toml rust/crates npm/linux-x64-gnu/package.json
 ```
+
+`npm/linux-x64-gnu/package.json` is generated, not edited: `rust/scripts/package.sh` rewrites it from
+the root one and refuses when `optionalDependencies` pins the platform package at another version. The
+second grep also prints the telemetry fixtures that hardcode the current `server_version`, and the
+preflight in step 5 is what tells you one was missed.
 
 ## 4. Sync `README.md` with what shipped
 
@@ -86,17 +96,17 @@ Release, reads the README first.
 ```sh
 LAST=$(git describe --tags --abbrev=0)
 git log --oneline "$LAST"..HEAD
-git diff --stat "$LAST"..HEAD -- bin src package.json
+git diff --stat "$LAST"..HEAD -- rust package.json bin npm
 ```
 
 | If this moved | Re-read this README section |
 |---|---|
-| `bin/sangkar.ts`, `src/shared/cli/**`, any tool `manifest.ts` | `README.md` §CLI, §MCP & Skill — names, order, defaults, the `budget` sentence |
-| `src/daemon/**`, `src/shared/registry.ts`, `src/shared/repo-config.ts` | `README.md` §MCP & Skill — the registry and daemon block |
-| `src/shared/config.ts`, a `SANGKAR_*` variable, `--data-dir` | `README.md` §Environment, §Where the data lives |
-| `src/shared/store/**`, `migrations/**`, a table or an index | `README.md` §Where the data lives; `docs/maintainers.md` §Distribution |
-| `src/shared/telemetry/**` | `README.md` §MCP & Skill (the report verb), §Environment (`SANGKAR_TELEMETRY`) |
-| `package.json` scripts, the `bun build` flags, `files` | `docs/maintainers.md` §Checks, §Distribution, §Publishing to npm |
+| `rust/crates/sangkar-cli/src/args.rs`, `dispatch.rs`, `render.rs`, a tool directory under `rust/crates/sangkar-tools/src/` | `README.md` §CLI, §MCP & Skill — names, order, defaults, the `budget` sentence |
+| `rust/crates/sangkar-daemon/**`, `rust/crates/sangkar-cli/src/repo.rs` | `README.md` §MCP & Skill — the registry and daemon block |
+| config resolution in `rust/crates/sangkar-core/**`, a `SANGKAR_*` variable, `--data-dir` | `README.md` §Environment, §Where the data lives |
+| `rust/crates/sangkar-store/**`, its `migrations/`, a table or an index | `README.md` §Where the data lives; `docs/maintainers.md` §Distribution |
+| `rust/crates/sangkar-telemetry/**` | `README.md` §MCP & Skill (the report verb), §Environment (`SANGKAR_TELEMETRY`) |
+| `package.json`, `rust/scripts/package.sh`, `rust/Cargo.toml`'s version | `docs/maintainers.md` §Checks, §Distribution, §Publishing to npm |
 | anything in this release at all | `README.md` §Install — the version it names |
 
 **Re-check the pinned facts by running them, not by reading them:**
@@ -105,18 +115,19 @@ git diff --stat "$LAST"..HEAD -- bin src package.json
 grep -n '0\.[0-9]\+\.[0-9]\+' README.md      # every version string must name an installable version
 grep -n 'beta\|latest' README.md             # every dist-tag sentence
 npm view sangkar-mcp dist-tags               # the truth those sentences must match
+npm view sangkar-mcp-linux-x64-gnu dist-tags # whether the platform package is on the registry yet
 grep -n 'seven \|eleven \|58 \|903 ' README.md   # counts written in prose
-bun run bin/sangkar.ts --help                # compare against the `## CLI usage` block
-bun run bin/sangkar.ts daemon --help         # and each verb the README demonstrates
-bun test 2>&1 | tail -3                      # the count the README quotes, if it quotes one
+(cd rust && cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu)
+./rust/target/x86_64-unknown-linux-gnu/release/sangkar --help         # against the CLI blocks
+./rust/target/x86_64-unknown-linux-gnu/release/sangkar daemon --help   # and each verb the README shows
+(cd rust && cargo test -p sangkar-cli --test goldens -- --nocapture 2>&1 | grep compared)
 ```
 
 What those checks enforce:
 
-- A version string in the README must be one a reader can install today. Before the npm publish that
-  is the tag being cut (`bun install -g github:Alfar-Lab/sangkar-mcp#v$V`) or the previous `beta`;
-  after the publish it is `beta` itself. The previous release's number left behind in prose is the
-  defect this step exists for.
+- A version string in the README must be one a reader can install today: the `beta` tag's version, or a
+  number the registry already serves. The previous release's number left behind in prose is the defect
+  this step exists for; so is a number that only exists in a checkout.
 - A verb, tool name, payload key or default in prose is wrong the moment the code disagrees with it.
   Fix the text; do not soften it with "currently" or "approximately".
 - The README's shape is a contract too: `## sangkar-mcp`, `## Installation & Requirements` (its `###`
@@ -133,18 +144,28 @@ under the same `.agents/prompts/rules.md` rule.
 
 ## 5. Preflight
 
-`bun` is on `PATH` on the maintainer's machine, so the preflight is the bare command; export it only in a
-stripped shell that has no profile:
+The workspace pins its toolchain in `rust/rust-toolchain.toml`, so `cargo` on `PATH` is enough; export
+`$HOME/.cargo/bin` only in a shell that has no profile:
 
 ```sh
-bun run typecheck && bun run lint && bun run test && bun run db:drift
+export PATH="$HOME/.cargo/bin:$PATH"
+(cd rust && cargo fmt --all --check)
+(cd rust && cargo clippy --workspace --all-targets -- -D warnings)
+(cd rust && cargo test --workspace)                    # 978 passed, 0 failed, 1 ignored
+(cd rust && cargo test -p sangkar-cli --test goldens)  # 57 compared (57 identical)
 ```
 
-Add when the change touches what they guard:
+The golden suite is the release's real gate: `rust/tests/golden/**` and `rust/tests/vectors/**` hold the
+answers captured while the TypeScript implementation still answered them, and the test replays every one
+against the binary cargo just built. A count below 57, or one difference, is a red preflight.
 
-- `bun run acceptance` — budgets, latency, the prepared-statement path.
-- `bun test tests/binary-smoke.test.ts` — `bin/`, packaging, migrations shipped in the binary. It
-  builds `dist/sangkar` itself.
+Add when the change touches packaging:
+
+```sh
+(cd rust && cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu)
+npm pack --dry-run                            # parent: 7 files
+cd npm/linux-x64-gnu && npm pack --dry-run    # platform: 2 files
+```
 
 A red preflight is not a release. Report the failure and stop; do not lower an assertion, skip a
 file or tag anyway.
@@ -180,64 +201,53 @@ Non-empty output means the number is taken — stop and go back to step 2. Never
 
 ## 8. Publish the GitHub Release
 
-```sh
-gh release create "v$V" --title "v$V — <one phrase naming what the release delivers>" \
-  --prerelease --notes-file /tmp/notes.md
-```
-
-`--prerelease` for any `-alpha.N` / `-beta.N` / `-rc.N` tag; drop it only for a stable version.
-Repository `Alfar-Lab/sangkar-mcp`, remote over ssh, `gh` account `alfahluzi`.
-
-Notes follow the shape of `v0.2.0-beta.2`:
-
-```markdown
-## <the one sentence this release delivers>
-
-<The failure or gap it closes, with the command output a user saw if there is one. Name the
-previous version it regresses from.>
-
-### What changed
-
-- `path/to/file.ts`: what moved and by how much, and why that number.
-- `tests/x.test.ts`: the assertion that now holds, and that it fails on the old code.
-
-<A paragraph naming what did NOT move — the invariants: tables, ledger, publish protocol, cursor
-wire format.>
-
-### Notes
-
-- npm state: which version the `beta` tag serves, and the install line to use until the publish
-  lands (`bun install -g github:Alfar-Lab/sangkar-mcp#v$V`).
-- Verified on this tag: the checks you ran, with their numbers.
-```
-
-Verify what the world now sees, then move on:
+Pushing the tag is the release: `.github/workflows/release.yml` builds the binary on `ubuntu-22.04`,
+asserts that its highest `GLIBC_*` symbol version is at most the 2.35 in its `GLIBC_FLOOR`, attaches
+`sangkar-$V-x86_64-unknown-linux-gnu.tar.gz` (the stripped binary) and
+`sangkar-mcp-linux-x64-gnu-$V.tgz` (the platform package), and creates the Release with `prerelease`
+set from the tag itself — a `-` in the name means prerelease. No `gh release create`, no asset uploaded
+by hand.
 
 ```sh
-gh release view "v$V" --json tagName,isPrerelease,url
+gh run watch                                  # the run the tag in step 7 started
+gh release view "v$V" --json tagName,isPrerelease,url,assets
 ```
 
-## 9. npm — print this, do not run it
+These run after the tag exists; there is nothing to watch before it. The Release body lives in
+`release.yml`'s `body:` — it names the glibc floor and the publish order, so it moves with this
+procedure, not with one release. To correct a body after the fact, `gh release edit`; never delete the
+tag.
 
-Stop here and give the maintainer exactly these lines, `$V` expanded:
+A `workflow_dispatch` run on a branch builds and uploads the same artifacts without creating a Release,
+which is how to rehearse the build.
+
+## 9. npm — print these two, do not run them
+
+Stop here and give the maintainer exactly these lines, in this order, `$V` expanded:
 
 ```sh
-npm pack --dry-run                                   # tarball: bin, src, agent, README.md (+ LICENSE)
-npm publish --tag beta --otp=<six digits>            # or: bun run release:beta -- --otp=<code>
+npm pack --dry-run                                              # parent: 7 files, 46.7 kB unpacked
+(cd npm/linux-x64-gnu && npm pack --dry-run)                    # platform: 2 files, 31.1 MB unpacked
+(cd npm/linux-x64-gnu && npm publish --tag beta --otp=<six digits>)   # 1. the platform package
+npm publish --tag beta --otp=<six digits>                       # 2. the launcher
 ```
 
-For a stable release the tag is `--tag latest`.
+For a stable release both tags are `--tag latest`.
 
-Why each line is not optional:
+**The platform package goes first.** The parent is only a launcher: `bin/sangkar.js` resolves
+`sangkar-mcp-linux-x64-gnu/package.json` from the install and exits 70 when that lookup finds nothing.
+Publishing the parent first advertises an install that cannot start a server for as long as the
+platform package is missing. `docs/maintainers.md` §Distribution states the same order.
 
-- **`--tag beta` is mandatory.** npm 11 ignores `publishConfig.tag`; without the flag a prerelease
-  takes `latest`, which is the one tag a `0.x` pre-release must never hold. `latest` already sits on
-  a pre-release (`0.1.0-beta.0`, left there by the staged-publish flow that first claimed the name),
-  so an untagged install is a moving target and `sangkar-mcp@beta` is the address to advertise.
-- **If npm prints `bin[sangkar] script name bin/sangkar.ts was invalid and removed`, it is
-  cosmetic.** npm rewrites the field to strip a leading `./`; the entry survives. With the canonical
-  `bin/sangkar.ts` written in `package.json` the warning no longer appears, which
-  `npm publish --dry-run` proves.
+Why the rest is not optional:
+
+- **`--tag` is mandatory.** npm 11 refuses outright without it — `You must specify a tag using --tag
+  when publishing a prerelease version` — and a publish that lands without it takes `latest`, which a
+  `0.x` pre-release must never hold. `latest` still sits on `0.1.0-beta.0`, left there when the name
+  was first claimed, so `sangkar-mcp@beta` is the address to advertise.
+- **Nothing is printed about `bin`.** The field is `"sangkar": "bin/sangkar.js"`, which npm accepts as
+  written; `npm publish --tag beta --dry-run` in either directory prints the file list and stops
+  without publishing.
 - **Without an OTP nothing publishes:** `E403 … Two-factor authentication or granular access token
   with bypass 2fa enabled is required`.
 
@@ -249,9 +259,10 @@ runs it, or supplies a granular token with 2FA bypass in their own `~/.npmrc`.
 After the maintainer reports success:
 
 ```sh
-npm view sangkar-mcp dist-tags                 # beta moved; latest unchanged for a pre-release
+npm view sangkar-mcp dist-tags                    # beta moved; latest unchanged for a pre-release
 npm view "sangkar-mcp@$V" version
-bun add -g "sangkar-mcp@$V" && sangkar status  # from a checkout-free shell
+npm view sangkar-mcp-linux-x64-gnu dist-tags      # the platform package is on the registry
+npm i -g "sangkar-mcp@$V" && sangkar status       # from a shell with no checkout
 ```
 
 If `dist-tags` shows a pre-release on `latest`, say so plainly and ask the maintainer to run
@@ -278,6 +289,7 @@ keeps the line that was true when it was cut; `main` carries the one that is tru
 - Tag a release whose `## Install` still names the previous version, or whose verb and tool list
 disagrees with `--help`. That is step 4, and it is not optional.
 - Bump one version copy and not the other.
+- Publish the parent before the platform package, or publish only one of them.
 - Publish with `latest` while the version is a pre-release or `MAJOR` is 0.
 - Force-push `main` or a tag without explicit approval from the maintainer.
 - Touch `.ppm/*/tasks/*.json` while cutting a release.

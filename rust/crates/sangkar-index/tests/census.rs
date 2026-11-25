@@ -35,9 +35,13 @@
 //! one `unresolved.evidence_kind` bucket, which the golden explains. An allowance that no longer
 //! applies fails as well: a stale allowance is a false statement about the port.
 //!
-//! Finally the TypeScript binary answers `status` from the Rust-built database, and
+//! Finally `sangkar status` answers from the Rust-built database as a separate process, and
 //! `read_status.generation`, `coverage.indexed` and `coverage.unresolved_edges` are checked against
-//! the same file's census — the cross-implementation readability proof, run rather than assumed.
+//! the same file's census — the reader-versus-census half of the readability proof, run rather than
+//! assumed. Its cross-implementation half retired with the TypeScript tree in phase 5: while
+//! `bin/sangkar.ts` existed a *TypeScript* server read the Rust-built file, and one implementation
+//! cannot make that claim about itself. The surviving half still measures something a compile
+//! cannot: the reader a tool holds agrees with the census the writer was held to, on one file.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::ffi::OsStr;
@@ -75,9 +79,8 @@ const ABSENT: &str = "<absent>";
 // Where everything lives
 // ---------------------------------------------------------------------------------------------
 
-/// The repository, the goldens and the fixtures, resolved once.
+/// The goldens and the fixtures, resolved once from the repository this crate sits in.
 struct Layout {
-    repo: PathBuf,
     goldens: PathBuf,
     fixtures: PathBuf,
 }
@@ -97,7 +100,6 @@ impl Layout {
         Self {
             fixtures: repo.join("rust/tests/parity/fixtures"),
             goldens,
-            repo,
         }
     }
 
@@ -713,20 +715,8 @@ impl Report {
 }
 
 // ---------------------------------------------------------------------------------------------
-// The cross-implementation readability proof
+// The readability proof
 // ---------------------------------------------------------------------------------------------
-
-/// The `bun` the capture used, overridable for a machine that keeps it elsewhere.
-fn bun() -> PathBuf {
-    std::env::var_os("SANGKAR_PARITY_BUN").map_or_else(
-        || {
-            let home =
-                std::env::var_os("HOME").map_or_else(|| PathBuf::from("/root"), PathBuf::from);
-            home.join(".bun/bin/bun")
-        },
-        PathBuf::from,
-    )
-}
 
 /// One finished child: the code it exited with, and the two streams exactly as written.
 struct Ran {
@@ -737,7 +727,7 @@ struct Ran {
 
 /// Run `program` in `cwd`, on a machine that carries only the variables this suite sets. Every
 /// inherited `SANGKAR_*` is dropped first: a stray `SANGKAR_HOME` would point the run at this
-/// developer's registry, and `PATH`/`HOME` survive because `bun` needs them.
+/// developer's registry, and `PATH`/`HOME` survive because a child process expects them.
 fn run(program: &OsStr, args: &[String], cwd: &Path, env: &[(&str, &str)]) -> Ran {
     let mut command = Command::new(program);
     command.args(args).current_dir(cwd);
@@ -771,30 +761,39 @@ struct Answer {
     unresolved: i64,
 }
 
-/// Ask the TypeScript binary to `status` the database the Rust worker published.
+/// The `sangkar` binary this workspace built, found beside the artifacts of the run that is testing
+/// it.
 ///
-/// This is the phase's promise in one call: a *TypeScript* server serving a *Rust-built* graph. The
-/// envelope is the evidence — a non-null `read_status.generation` means the reader resolved `meta`
-/// and the generation row, and `coverage.indexed`/`coverage.unresolved_edges` mean it counted the
-/// same rows the census did.
-fn status(layout: &Layout, archive_root: &Path, data_dir: &Path, home: &Path) -> Answer {
-    let bun = bun();
-    assert!(
-        bun.exists(),
-        "census: {} does not exist; the status proof needs bun (set SANGKAR_PARITY_BUN)",
-        bun.display()
-    );
-    let entry = layout.repo.join("bin/sangkar.ts");
-    assert!(
-        entry.exists(),
-        "census: {} is gone; while bin/sangkar.ts exists it is the oracle, so this proof has \
-         nothing to answer from — delete the proof with the TypeScript tree in phase 5",
-        entry.display()
-    );
+/// `CARGO_BIN_EXE_sangkar` exists only for tests of the crate that declares the binary, and this
+/// suite belongs to `sangkar-index`. The profile directory holding this test binary holds the CLI
+/// too, so the nearest ancestor with a `sangkar` file beside it is the one `cargo test` just built.
+fn sangkar_binary() -> PathBuf {
+    let exe = std::env::current_exe().expect("census: the test binary has a path");
+    exe.ancestors()
+        .filter_map(Path::parent)
+        .map(|dir| dir.join("sangkar"))
+        .find(|candidate| candidate.is_file())
+        .unwrap_or_else(|| {
+            panic!(
+                "census: no `sangkar` binary beside {}; the status proof runs the CLI this \
+                 workspace builds, so run `cargo test --workspace` (or `cargo build -p \
+                 sangkar-cli` first)",
+                exe.display()
+            )
+        })
+}
 
+/// Ask `sangkar status` — a separate process, from the bytes this workspace built — what it reads
+/// from the database the Rust worker published.
+///
+/// The envelope is the evidence: a non-null `read_status.generation` means the reader resolved
+/// `meta` and the generation row, and `coverage.indexed`/`coverage.unresolved_edges` mean it
+/// counted the same rows the census did. The cross-implementation half of this proof (a TypeScript
+/// server reading a Rust-built graph) retired with the TypeScript tree in phase 5; what is left
+/// still runs the reader a tool runs, against the file the gate above just judged.
+fn status(archive_root: &Path, data_dir: &Path, home: &Path) -> Answer {
+    let program = sangkar_binary();
     let args: Vec<String> = vec![
-        "run".to_owned(),
-        "bin/sangkar.ts".to_owned(),
         "status".to_owned(),
         "--json".to_owned(),
         "--repo-root".to_owned(),
@@ -804,9 +803,9 @@ fn status(layout: &Layout, archive_root: &Path, data_dir: &Path, home: &Path) ->
     ];
     let home_text = home.display().to_string();
     let ran = run(
-        bun.as_os_str(),
+        program.as_os_str(),
         &args,
-        &layout.repo,
+        archive_root,
         &[
             ("SANGKAR_HOME", home_text.as_str()),
             ("SANGKAR_CURSOR_KEY", FIXED_CURSOR_KEY),
@@ -855,8 +854,9 @@ fn gate(fixture: &str) {
     let golden_path = layout.golden(fixture);
     assert!(
         golden_path.exists(),
-        "census: {} is missing; capture it with `~/.bun/bin/bun run scripts/parity/census.ts \
-         --capture {fixture} --rust-sqlite-version <select sqlite_version() of a rust build>`",
+        "census: {} is missing; the committed golden is this suite's only oracle, so restore it \
+         (`git checkout -- rust/tests/golden/census/{fixture}.ts.json`) rather than recapturing — \
+         the TypeScript capture script retired with `src/` and cannot be re-run",
         golden_path.display()
     );
     let golden: Value = serde_json::from_str(
@@ -961,12 +961,12 @@ fn gate(fixture: &str) {
         .unwrap_or_default();
     report.print(fixture);
 
-    let answer = status(&layout, &archive_root, &data_dir, &home);
+    let answer = status(&archive_root, &data_dir, &home);
     let unresolved = observed
         .get("unresolved")
         .and_then(Value::as_i64)
         .unwrap_or(-1);
-    println!("--- {fixture}: TypeScript status over the rust-built database");
+    println!("--- {fixture}: sangkar status over the rust-built database");
     println!("  exit                       0");
     println!("  read_status.generation     {}", answer.generation);
     println!(

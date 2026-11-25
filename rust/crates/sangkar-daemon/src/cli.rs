@@ -65,7 +65,7 @@ const USAGE: &str = "usage: sangkar daemon [run|start|stop|status] [--port <n>] 
   status  one header line, then one line per registered repository
   --port <n>     the report server's port (default: config.json's daemon.port, else 7317; 0 picks a free port)
   --host <addr>  the address to bind (default: config.json's daemon.host, else 127.0.0.1; loopback only)
-  --repo-root, --data-dir and --json are accepted by every subcommand and change nothing here
+  --repo-root and --data-dir are accepted by every subcommand and change nothing here; --json prints status as one JSON object line, and --port/--host still belong to \"run\"
   --port and --host belong to \"run\"; start passes neither, so it binds the same defaults";
 
 /// Everything one `sangkar daemon …` call needs, with no environment read of its own.

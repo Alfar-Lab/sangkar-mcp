@@ -176,8 +176,11 @@ Installed '$NAME'. Register the server once per client so the tools exist at all
   opencode: add {"mcp":{"sangkar":{"type":"local","command":["sangkar","mcp"]}}} to opencode.json
   pi:     pi mcp add sangkar -- sangkar mcp
 
-Replace 'sangkar' with '<repo>/bin/sangkar.ts' and run it through bun when it is not on PATH:
-  ~/.bun/bin/bun run /path/to/bin/sangkar.ts mcp
+When 'sangkar' is not on PATH, register the npm launcher instead; it resolves the platform package
+and execs the native binary with the same arguments and exit code:
+  npx sangkar-mcp mcp --repo-root /path/to/repo
+That binary is Linux x64 in this release; the launcher is Node.js >= 18 and exits 70 with a one-line
+refusal on any other platform, naming the version to pin for the TypeScript build.
 The repository is bound at startup, so registrations for two worktrees are two server entries,
 each with its own --repo-root and --data-dir.
 EOF

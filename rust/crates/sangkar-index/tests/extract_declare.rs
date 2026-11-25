@@ -402,7 +402,9 @@ fn a_tsx_method_lives_inside_its_class() {
     let method = node(&result, "src/panel.tsx::Panel.render");
     assert_eq!(method.kind, "method");
     assert_eq!(method.name, "render");
-    assert_eq!(method.signature.as_deref(), Some("render()"));
+    // The body starts on the declaration's own row, and the header is cut at the body's column in
+    // the file line — past the end of this indented row — so the brace stays.
+    assert_eq!(method.signature.as_deref(), Some("render() {"));
     assert_eq!(parent_of(&result, "src/panel.tsx::Panel.render"), class.qn);
     // TSX has no `fileModule` rule, so there is no module node between the file and the class.
     assert!(!result.nodes.iter().any(|node| node.kind == "module"));
@@ -422,7 +424,7 @@ fn typescript_binds_the_aliased_name_of_an_import() {
     assert_eq!(outline.kind, "function");
     assert_eq!(
         outline.signature.as_deref(),
-        Some("function outline(width: number): void")
+        Some("function outline(width: number): void {")
     );
 }
 
@@ -435,7 +437,7 @@ fn java_declares_a_class_with_a_method_and_imports_its_name() {
     );
     let put = node(&result, "src/main/java/app/Box.java::Box.put");
     assert_eq!(put.kind, "method");
-    assert_eq!(put.signature.as_deref(), Some("void put(String value)"));
+    assert_eq!(put.signature.as_deref(), Some("void put(String value) {"));
     assert_eq!(
         parent_of(&result, "src/main/java/app/Box.java::Box.put"),
         "src/main/java/app/Box.java::Box"
@@ -478,7 +480,7 @@ fn rust_declares_a_struct_and_a_function_and_imports_a_module() {
     assert_eq!(paint.kind, "function");
     assert_eq!(
         paint.signature.as_deref(),
-        Some("pub fn paint(&self) -> u8")
+        Some("pub fn paint(&self) -> u8 {")
     );
     assert_eq!(
         parent_of(&result, "src/lib.rs::paint"),

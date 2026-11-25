@@ -1,5 +1,0 @@
-# Bun's default discovery walks the whole tree, which now contains the two
-# reference clones under .gitignore (`code-review-graph/`, `codebase-memory-mcp/`).
-# Their suites are not ours; confine discovery to our own tests.
-[test]
-root = "tests"
