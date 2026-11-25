@@ -9,6 +9,13 @@ license.workspace = true
 sangkar-core = { path = "../sangkar-core" }
 sangkar-store = { path = "../sangkar-store" }
 sangkar-domain = { path = "../sangkar-domain" }
+# The extractor's `is_test` predicate applies the language row's `testFileRegex`, which the TypeScript
+# table held as a `RegExp` builtin. `regex` is its Rust counterpart and is already in the build graph
+# (`tree-sitter` depends on it), so this manifest edge adds no crate to the lock. `serde_json` is the
+# pin `sangkar-core` already builds with, needed because `node.props` is JSON text in the schema.
+regex = "1.13"
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.11"
 tree-sitter = "0.27"
 tree-sitter-python = "0.25"
 tree-sitter-typescript = "0.23"

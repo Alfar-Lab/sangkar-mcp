@@ -1,0 +1,83 @@
+{
+  "fixture": "broken",
+  "source": "bin/sangkar.ts index --mode full --force",
+  "rust_sqlite_version": "3.54.1",
+  "allowed_delta": [],
+  "census": {
+    "sqlite_version": "3.53.4",
+    "generation": {
+      "seq": 1,
+      "mode": "full",
+      "status": "published"
+    },
+    "files": 5,
+    "nodes": 8,
+    "edges": 7,
+    "unresolved": 0,
+    "per_language": {
+      "typescript": {
+        "files": 5,
+        "nodes": 8,
+        "edges": 7,
+        "unresolved": 0
+      }
+    },
+    "nodes_by_kind": {
+      "file": 5,
+      "function": 3
+    },
+    "nodes_by_language": {
+      "typescript": 8
+    },
+    "edges_by_kind_tier": {
+      "calls:extracted": 2,
+      "contains:extracted": 3,
+      "imports:extracted": 2
+    },
+    "unresolved_by_kind": {},
+    "not_indexed_by_reason": {
+      "binary": 1
+    },
+    "duplicate_name": null,
+    "order": {
+      "node_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "edge_ids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "node_fts_state_rowids": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "entry_point_ids": [],
+      "hotspot_ids": [
+        4,
+        5,
+        1,
+        2,
+        6
+      ],
+      "duplicate_name_ids": []
+    }
+  }
+}

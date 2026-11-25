@@ -58,6 +58,20 @@ Treat the three below as the open work:
 `parser-parity.test.ts` also deliberately does not gate total edge count against CRG (130 044 vs 62 536 on
 the shared corpus) because the edge taxonomies differ. If you add edge kinds, decide whether to gate them.
 
+One grammar substitution is **measured**, not assumed, and it is the only allowance the Rust census
+golden carries: `base.Deposit(amount)` at `rust/tests/parity/fixtures/polyglot/src/Account.cs:22`. The wasm
+`tree-sitter-c_sharp.wasm` bundle parses `base` as the named node `base_expression`, which is in neither
+`NAME_TYPES` nor `CHAIN_TYPES`, so `calleeSite` returns null and the TypeScript records the site as
+`dynamic` with `raw_target: "base.Deposit"`; `tree-sitter-c-sharp` 0.24.0 — the crate the Rust binary
+links — makes `base` an anonymous token, so the Rust name chain sees one identifier and records
+`receiver_type_unknown` with `raw_target: "Deposit"`. One unresolved site moves bucket, which is why
+`rust/tests/golden/census/*.ts.json` names that grammar pair in `allowed_delta`
+(`unresolved_by_kind`: `dynamic` −1, `receiver_type_unknown` +1); the 26-row total, every node and edge
+count and all six ordered sequences agree. Apart from it, Phase 3's census gate is delta-free on the
+polyglot and broken fixtures — 0 of 92 and 0 of 27 keys differ. Both implementations also leave
+`node_metrics.is_entry` at 0, so `entryPoints` answers empty on either side: the census pins that
+agreement, not an ordering, and it stays a product gap no parity test can close.
+
 ## Future works
 
 The three gaps above are the product work. One item sits outside them:

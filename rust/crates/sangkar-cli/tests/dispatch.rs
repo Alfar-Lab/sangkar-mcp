@@ -214,13 +214,40 @@ fn every_reserved_name_reaches_its_own_module() {
         index.stderr
     );
 
-    // The three whose module is a later task refuse by name: one line, the task that lands it, and
-    // no invented protocol on stdout.
-    for (verb, task) in [
-        ("worker", "TASK-046"),
-        ("telemetry", "TASK-054"),
-        ("daemon", "TASK-056"),
-    ] {
+    // `worker` is a real module since TASK-046: it is the run itself, the process `index` spawns.
+    // On a tree with nothing to index it still publishes (an empty graph is an answer), so the exit
+    // is 0 and its report is log lines on stderr — stdout stays empty, because its caller either
+    // renders its own answer or is a session whose stdout carries a protocol.
+    let worker_root = machine.tree("worker-tree").display().to_string();
+    let worker_data = machine.home().join("worker-data").display().to_string();
+    let worker = machine.run_in(
+        machine.home(),
+        &[
+            "worker",
+            "--repo-root",
+            &worker_root,
+            "--data-dir",
+            &worker_data,
+        ],
+    );
+    assert_eq!(
+        worker.code, 0,
+        "`worker` publishes even a tree with nothing to index: {}",
+        worker.stderr
+    );
+    assert!(
+        worker.stdout.is_empty(),
+        "`worker` writes nothing to stdout"
+    );
+    assert!(
+        Path::new(&worker_data).join("graph.db").is_file(),
+        "the run published a graph: {}",
+        worker.stderr
+    );
+
+    // The two whose module is a later task refuse by name: one line, the task that lands it, and no
+    // invented protocol on stdout.
+    for (verb, task) in [("telemetry", "TASK-054"), ("daemon", "TASK-056")] {
         let run = machine.run_in(machine.home(), &[verb]);
         assert_eq!(run.code, 1, "`{verb}` refuses");
         assert!(run.stdout.is_empty(), "`{verb}` writes nothing to stdout");

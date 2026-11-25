@@ -227,17 +227,50 @@ fn line_without_name(argv: &[String], rest: &[String], named: bool) -> Vec<Strin
 /// The six verbs, each reached by its own name.
 ///
 /// `repo` is the machine registry and one tree's settings, a verb with no graph to load; `index` is
-/// the gate plus the run; `mcp` is the stdio session. The other three have no module in this phase,
-/// and each says which task lands it rather than pretending to answer.
+/// the gate plus the run; `mcp` is the stdio session; `worker` is the run itself, the process
+/// `index` spawns. `telemetry` and `daemon` have no module in this phase, and each says which task
+/// lands it rather than pretending to answer.
 fn run_verb(run: &mut Invocation<'_>, verb: Verb, verb_argv: &[String]) -> i32 {
     match verb {
         Verb::Repo => run_repo_cli(verb_argv, run.env, &run.cwd, run.stdout, run.stderr),
         Verb::Index => run_index(run, verb_argv),
         Verb::Mcp => run_mcp(run, verb_argv),
-        Verb::Worker => not_yet(run.stderr, "the index worker", "TASK-046"),
+        Verb::Worker => run_worker_verb(run, verb_argv),
         Verb::Telemetry => not_yet(run.stderr, "the telemetry verb", "TASK-054"),
         Verb::Daemon => not_yet(run.stderr, "the daemon verb", "TASK-056"),
     }
+}
+
+/// The `worker` verb: the index run in this process, which is what `index` spawns as a child.
+///
+/// No gate and no question: this process is started for a tree another process already confirmed,
+/// and a prompt here would wait on a stdin nobody is holding. The exit code is the run's own —
+/// `0` published, `1` failed, `2` nothing to do, `75` another indexer holds the lock — and nothing
+/// is written to stdout, because the caller either renders its own answer or is a session whose
+/// stdout carries a protocol.
+fn run_worker_verb(run: &mut Invocation<'_>, verb_argv: &[String]) -> i32 {
+    let invocation = match parse_verb(Verb::Worker, verb_argv) {
+        Ok(invocation) => invocation,
+        Err(error) => return usage_refusal(run.stderr, &error),
+    };
+    let config = match load(run, verb_argv) {
+        Ok(config) => config,
+        Err(code) => return code,
+    };
+    // `--mode` is a declared enum, so a typo cannot reach here; an absent one is `None`, which the
+    // worker resolves to `full` on a forced run and `fast` otherwise.
+    let mode = match invocation.args.text("mode") {
+        Some("full") => Some(sangkar_index::worker::WorkerMode::Full),
+        Some("fast") => Some(sangkar_index::worker::WorkerMode::Fast),
+        _ => None,
+    };
+    let options = sangkar_index::worker::WorkerOptions {
+        repo_root: config.repo_root,
+        data_dir: config.data_dir,
+        force: invocation.args.switch("force"),
+        mode,
+    };
+    sangkar_index::worker::run_worker(&options).code()
 }
 
 /// The `mcp` verb: the stdio server, or the usage refusal that keeps it off a stream a client would
