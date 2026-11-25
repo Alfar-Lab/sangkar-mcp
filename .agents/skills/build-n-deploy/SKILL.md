@@ -227,12 +227,18 @@ Stop here and give the maintainer exactly these lines, in this order, `$V` expan
 
 ```sh
 npm pack --dry-run                                              # parent: 7 files, 46.8 kB unpacked
-(cd npm/linux-x64-gnu && npm pack --dry-run)                    # platform: 2 files, 31.1 MB unpacked
+(cd npm/linux-x64-gnu && npm pack --dry-run)                    # platform: 2 files, 30.9 MB unpacked
 (cd npm/linux-x64-gnu && npm publish --tag beta --otp=<six digits>)   # 1. the platform package
 npm publish --tag beta --otp=<six digits>                       # 2. the launcher
 ```
 
 For a stable release both tags are `--tag latest`.
+
+**The binary that publishes is the Release's, not a local build's.** Unpack
+`sangkar-mcp-linux-x64-gnu-$V.tgz` over `npm/linux-x64-gnu/` first: `package.sh` on the maintainer's
+machine leaves a `GLIBC_2.39` binary at `npm/linux-x64-gnu/bin/sangkar`, and the workflow's, built on
+`ubuntu-22.04`, reports `GLIBC_2.34` against a 2.35 floor. Unpacking also rewrites that directory's
+`package.json`, which is generated and identical either way.
 
 **The platform package goes first.** The parent is only a launcher: `bin/sangkar.js` resolves
 `sangkar-mcp-linux-x64-gnu/package.json` from the install and exits 70 when that lookup finds nothing.

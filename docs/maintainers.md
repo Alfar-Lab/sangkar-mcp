@@ -21,8 +21,8 @@ a release can be rehearsed.
 Two npm packages, in the order `docs/my-product/TECH-SPEC.md` §15 states.
 
 1. **`sangkar-mcp-linux-x64-gnu`** — the platform package, from `npm/linux-x64-gnu/`. Two files: the
-   stripped 31,056,160-byte binary and a 276-byte `package.json` declaring `os: ["linux"]`,
-   `cpu: ["x64"]` — 31.1 MB unpacked, 6.3 MB packed.
+   30,879,400-byte binary the workflow built on `ubuntu-22.04` and a 276-byte `package.json` declaring
+   `os: ["linux"]`, `cpu: ["x64"]` — 30.9 MB unpacked, 6.2 MB packed.
 2. **`sangkar-mcp`** — the parent, from the repository root. It holds `bin/sangkar.js` (the launcher),
    `README.md`, `LICENSE` and `agent/`: 7 files, 46.8 kB unpacked. It names the platform package in
    `optionalDependencies`, so an install elsewhere skips it and the launcher refuses with one line and
@@ -43,8 +43,14 @@ It reads the version out of `package.json`, checks that `optionalDependencies` p
 at that same version, runs `cargo build --release --locked -p sangkar-cli --target
 x86_64-unknown-linux-gnu` inside `rust/`, installs the binary into `npm/linux-x64-gnu/bin/sangkar`,
 strips it, and rewrites that directory's `package.json` from the root one. Unstripped, the same build is
-34,416,888 bytes in `rust/target/x86_64-unknown-linux-gnu/release/sangkar`; stripped it is 31,056,160.
+34,416,640 bytes in `rust/target/x86_64-unknown-linux-gnu/release/sangkar`; stripped it is 31,056,160.
 `npm/linux-x64-gnu/bin/sangkar` is gitignored: the layout is committed, the binary is built.
+
+**The binary that publishes is the workflow's, not this machine's.** Fetch
+`sangkar-mcp-linux-x64-gnu-<version>.tgz` from the Release and unpack `package/bin/sangkar` over
+`npm/linux-x64-gnu/bin/sangkar` before publishing — `package.sh` on this machine leaves a local build in
+that path, and the two floors differ: a local build reports `GLIBC_2.39`, the workflow's reports
+`GLIBC_2.34` against the 2.35 below.
 
 **The glibc floor is 2.35.** `.github/workflows/release.yml` builds on `ubuntu-22.04`, and the linker
 may not use a symbol version newer than that image's libc. The workflow asserts it: it reads the highest
@@ -56,6 +62,9 @@ is fine to test and must not be published as a release.
 
 Both commands are the maintainer's: `npm publish` needs a one-time password, or a granular token with
 2FA bypass in `~/.npmrc`, and neither is in this repository. CI does not publish.
+
+Unpack the Release's `.tgz` over `npm/linux-x64-gnu/` first: the platform package publishes whatever
+binary sits in that directory, and §The binary above says why that must not be a local build.
 
 ```sh
 cd npm/linux-x64-gnu && npm publish --tag beta --otp=<six digits>
@@ -106,7 +115,7 @@ Package shapes, when a change touches packaging:
 
 ```sh
 npm pack --dry-run                            # parent: 7 files, 46.8 kB unpacked
-cd npm/linux-x64-gnu && npm pack --dry-run    # platform: 2 files, 31.1 MB unpacked
+cd npm/linux-x64-gnu && npm pack --dry-run    # platform: 2 files, 30.9 MB unpacked (31.1 after package.sh)
 ```
 
 Neither command writes a tarball and neither publishes. The Bun toolchain and the TypeScript tree that
