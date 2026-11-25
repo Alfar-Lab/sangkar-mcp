@@ -6,6 +6,13 @@ rust-version.workspace = true
 license.workspace = true
 autobins = false
 
+# The library root exists so an integration test can link the module tree (`tests/store_refresh.rs`
+# cannot link a binary-only crate), and so `src/main.rs` stays a shell rather than a second copy of
+# every module.
+[lib]
+name = "sangkar_cli"
+path = "src/lib.rs"
+
 [[bin]]
 name = "sangkar"
 path = "src/main.rs"
@@ -19,7 +26,15 @@ sangkar-index = { path = "../sangkar-index" }
 sangkar-telemetry = { path = "../sangkar-telemetry" }
 sangkar-daemon = { path = "../sangkar-daemon" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "process", "signal", "sync", "time"] }
-rmcp = "3.11"
+# `transport-io` is what `rmcp::transport::stdio()` is gated behind, and that tuple of handles is the
+# exact transport `rust/spikes/mcp/DECISION.md` measured: `server` alone would leave only the raw
+# async-read/write helpers, which have no reader to block on.
+rmcp = { version = "3.11", features = ["transport-io"] }
+# The renderer's two serialisers plus the trait its signatures name. `serde_json` is the same pin
+# `sangkar-core` already carries, and `preserve_order` is load-bearing: `--json` must reproduce the
+# key order a handler wrote, and the envelope's own `totals` keeps insertion order.
+serde = "1.0"
+serde_json = { version = "1.0", features = ["preserve_order"] }
 serde_toon_format = "0.2"
 
 [lints]

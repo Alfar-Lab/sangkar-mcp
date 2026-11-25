@@ -294,6 +294,22 @@ impl Totals {
         self
     }
 
+    /// Moves `total_relation` to the END of the object, keeping every other key in its order.
+    ///
+    /// Most tools write the relation first, and [`Totals::new`] does that. Two do not:
+    /// `src/tools/impact/handler.ts:289-295` and `expand`'s members/edges/ambiguous totals declare
+    /// their `<list>_total` keys first and `total_relation` last, so the emitted bytes differ from
+    /// the relation-first shape. A caller cannot observe the difference — a JSON object is unordered
+    /// — but the `--json` captures are compared byte for byte, so a tool that needs the other order
+    /// has to say so. Call this LAST, after every other key is in place.
+    #[must_use]
+    pub fn with_relation_last(mut self) -> Self {
+        if let Some(relation) = self.0.shift_remove(TOTAL_RELATION) {
+            self.0.insert(TOTAL_RELATION.to_owned(), relation);
+        }
+        self
+    }
+
     /// One entry of the wire object, for a reader that has to print it.
     #[must_use]
     pub fn get(&self, key: &str) -> Option<&Value> {

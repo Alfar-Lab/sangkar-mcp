@@ -9,6 +9,14 @@ license.workspace = true
 sangkar-core = { path = "../sangkar-core" }
 sangkar-store = { path = "../sangkar-store" }
 sangkar-domain = { path = "../sangkar-domain" }
+# The three a handler needs to answer: `Serialize`/`Deserialize` for the payload `emit` measures,
+# compact JSON with `preserve_order` for the parity-critical key order between `payload` and the
+# `argsHash` canonical form, and SHA-256 for that digest (`RUST-MIGRATION.md` §5 assigns `sha2` to
+# "file digests and per-tool argsHash"). No package enters `Cargo.lock`: all three are pins
+# `sangkar-core` already carries.
+serde = { version = "1.0", features = ["derive"] }
+serde_json = { version = "1.0", features = ["preserve_order"] }
+sha2 = "0.11"
 
 [lints]
 workspace = true
