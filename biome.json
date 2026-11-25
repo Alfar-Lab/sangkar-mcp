@@ -1,7 +1,7 @@
 {
   "$schema": "https://biomejs.dev/schemas/2.6.8/schema.json",
   "files": {
-    "includes": ["src/**", "tests/**", "bin/**", "!src/shared/store/migrations/**"]
+    "includes": ["src/**", "tests/**", "bin/**", "!rust/crates/sangkar-store/migrations/**"]
   },
   "formatter": {
     "enabled": true,

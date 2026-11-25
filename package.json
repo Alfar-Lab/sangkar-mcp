@@ -6,11 +6,10 @@
   "author": "Aldi Fahluzi",
   "type": "module",
   "bin": {
-    "sangkar": "bin/sangkar.ts"
+    "sangkar": "bin/sangkar.js"
   },
   "files": [
     "bin",
-    "src",
     "agent",
     "README.md"
   ],
@@ -18,7 +17,7 @@
     "#shared/*": "./src/shared/*"
   },
   "engines": {
-    "bun": ">=1.4.4"
+    "node": ">=18"
   },
   "keywords": [
     "mcp",
@@ -40,18 +39,6 @@
     "access": "public"
   },
   "scripts": {
-    "mcp": "bun run bin/sangkar.ts",
-    "index": "bun run bin/sangkar.ts index",
-    "status": "bun run bin/sangkar.ts status",
-    "dev": "bun --watch run bin/sangkar.ts",
-    "test": "bun test",
-    "typecheck": "tsc --noEmit",
-    "lint": "biome check src tests bin",
-    "build": "bun build --compile bin/sangkar.ts --asset src/shared/store/migrations --outfile dist/sangkar",
-    "db:generate": "drizzle-kit generate",
-    "db:drift": "drizzle-kit generate --name drift-check && git diff --exit-code src/shared/store/migrations",
-    "db:parity": "bun test tests/schema-parity.test.ts",
-    "acceptance": "bun test tests/acceptance.test.ts",
     "release:beta": "npm publish --tag beta"
   },
   "dependencies": {
@@ -60,6 +47,9 @@
     "drizzle-orm": "0.45.4",
     "tree-sitter-wasms": "0.1.13",
     "web-tree-sitter": "0.27.2"
+  },
+  "optionalDependencies": {
+    "sangkar-mcp-linux-x64-gnu": "0.6.0-beta.1"
   },
   "devDependencies": {
     "typescript": "^5.9",

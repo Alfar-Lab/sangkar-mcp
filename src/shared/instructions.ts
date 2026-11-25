@@ -57,10 +57,14 @@ export function nextToolsFor(tool: string): string[] {
 }
 
 /**
- * The guide, byte for byte the body of `src/prompts/INSTRUCTIONS.md`
- * (tests/instructions.test.ts fails if the two drift). Rule order is deliberate: orient, scope,
- * look up, judge blast radius, then fetch detail — the order an agent needs them in one task.
- * The anti-patterns come last because each one names a call the reader would otherwise make.
+ * The guide, byte for byte the body of `rust/crates/sangkar-core/assets/INSTRUCTIONS.md`, the file
+ * the crate owns since TASK-062 (tests/instructions.test.ts fails if the two drift).
+ * Pre-cutover stopgap — this literal is deleted with the TypeScript tree in TASK-063, and until
+ * then the test compares it against the crate's file rather than against a second copy.
+ *
+ * Rule order is deliberate: orient, scope, look up, judge blast radius, then fetch detail — the
+ * order an agent needs them in one task. The anti-patterns come last because each one names a call
+ * the reader would otherwise make.
  */
 export const INSTRUCTIONS_TEXT = `# Using the graph: five rules, seven tools, every registered repository
 

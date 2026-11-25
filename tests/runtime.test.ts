@@ -47,11 +47,16 @@ function refusalOf(probe: RuntimeProbe): Record<string, unknown> {
 }
 
 describe("runtime: the version floor is one number", () => {
-  test("MIN_BUN matches the floor package.json declares", async () => {
+  test("MIN_BUN is the floor the constants pin, and the manifest now floors the shim", async () => {
+    // The shipped artifact is a native binary since TASK-058, so `engines` describes the launcher
+    // shim (`node >= 18`) and no longer declares the Bun floor: `runtime.ts` is the TypeScript
+    // build's own preflight, and it dies with the rest of that tree in TASK-063. What stays
+    // assertable is that the two numbers the refusal is built from have not drifted.
     const manifest = (await Bun.file(join(APP_ROOT, "package.json")).json()) as {
-      engines?: { bun?: string };
+      engines?: { bun?: string; node?: string };
     };
-    expect(manifest.engines?.bun).toBe(`>=${MIN_BUN}`);
+    expect(manifest.engines?.node).toBe(">=18");
+    expect(manifest.engines?.bun).toBeUndefined();
     expect(MIN_BUN).toBe("1.4.4");
     expect(RUNTIME_EXIT).toBe(70);
   });

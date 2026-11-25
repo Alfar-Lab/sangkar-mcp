@@ -32,7 +32,7 @@ import { runWorker } from "../src/indexer/worker";
  */
 
 const APP_ROOT = resolve(import.meta.dir, "..");
-const MIGRATIONS_DIR = join(APP_ROOT, "src", "shared", "store", "migrations");
+const MIGRATIONS_DIR = join(APP_ROOT, "rust", "crates", "sangkar-store", "migrations");
 
 /** The contract's bound on the compile. A build that cannot finish inside it is not shipped. */
 const COMPILE_TIMEOUT_MS = 180_000;

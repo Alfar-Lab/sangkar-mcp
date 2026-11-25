@@ -9,6 +9,9 @@ code-review-graph/
 node_modules/
 dist/
 
+# The npm platform package's binary: `rust/scripts/package.sh` fills it, the layout is committed
+/npm/*/bin/sangkar
+
 # The graph store; it carries its own .gitignore holding a single `*`
 .sangkar/
 # Pre-rename store, kept only until the first `sangkar index`

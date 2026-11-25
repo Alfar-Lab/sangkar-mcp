@@ -1,0 +1,51 @@
+# Every push and every pull request proves the workspace on the one toolchain the crates pin.
+#
+# `git` needs no install step: the checkout brings it, and several tests run `git status` / `git diff`
+# against temp trees they create. There is exactly one job because the first Rust release publishes
+# exactly one platform (open question 3: Linux x64 first). A macOS job is a second job beside `linux`
+# — with its own `runs-on` and release target — not a matrix of Rust versions, and not a rewrite.
+name: ci
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  linux:
+    name: fmt, clippy, test (1.100.0)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        # The workspace manifest is `rust/Cargo.toml` and the repo root has none, so every cargo
+        # command below is the plain one a contributor runs inside `rust/`.
+        working-directory: rust
+    steps:
+      - uses: actions/checkout@v4
+
+      # `@master` + `toolchain:` rather than a `@1.100.0` ref: dtolnay/rust-toolchain tags a ref per
+      # released compiler, and the release this workspace pins (see `rust/rust-toolchain.toml`) has
+      # no ref yet. The version is named once here and once in that file; they must agree.
+      - name: Toolchain 1.100.0
+        uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.100.0
+          components: rustfmt, clippy
+
+      - name: Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          # The workspace lives in `rust/`, not at the checkout root, so the cache has to be told
+          # which lockfile and target directory it owns.
+          workspaces: rust -> target
+
+      - name: Formatting
+        run: cargo fmt --check --all
+
+      - name: Lints
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --workspace

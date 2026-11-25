@@ -20,8 +20,29 @@ import { join } from "node:path";
 import { AppError } from "#shared/errors";
 import { log } from "#shared/log";
 
+/**
+ * Where the two streams live: `rust/crates/sangkar-store/migrations`, the crate that owns them
+ * since TASK-061. Pre-cutover stopgap — this reader is deleted with the TypeScript runner in
+ * TASK-063, and until then it reads the crate's copy rather than a second one.
+ *
+ * The fallback is the compiled-binary form of the same directory: `--asset` embeds it under its
+ * basename, so inside a packaged executable the stream sits at `import.meta.dir/migrations`.
+ */
+const CRATE_MIGRATIONS_DIR = join(
+  import.meta.dir,
+  "..",
+  "..",
+  "..",
+  "rust",
+  "crates",
+  "sangkar-store",
+  "migrations",
+);
+
 /** The two streams live here: this directory and its `raw/` child. */
-export const MIGRATIONS_DIR = join(import.meta.dir, "migrations");
+export const MIGRATIONS_DIR = existsSync(CRATE_MIGRATIONS_DIR)
+  ? CRATE_MIGRATIONS_DIR
+  : join(import.meta.dir, "migrations");
 
 /** Ledger table. Not modeled in `schema.ts` on purpose: it belongs to the runner, not the graph. */
 export const LEDGER_TABLE = "schema_migration";

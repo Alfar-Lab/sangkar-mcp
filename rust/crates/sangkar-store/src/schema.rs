@@ -4,7 +4,7 @@
 //! [`TABLES`] is the list `tests/migrate.rs` compares against `sqlite_master` after a migration —
 //! the Rust replacement for the table half of `tests/schema-parity.test.ts`. It is a list of
 //! names, not a second copy of the DDL: the DDL stays `drizzle-kit` output and is only ever
-//! embedded from `src/shared/store/migrations/`.
+//! embedded from `rust/crates/sangkar-store/migrations/`.
 
 /// Identity, schema version and runtime state; the only place a schema version lives (§3.1).
 pub const META: &str = "meta";

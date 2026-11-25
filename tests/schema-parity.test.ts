@@ -564,7 +564,15 @@ describe("node_fts: FTS5 external content over node_fts_state", () => {
   });
 
   test("the raw stream is the SQL that ships, hand-written and committed", () => {
-    const rawDir = join(import.meta.dir, "..", "src", "shared", "store", "migrations", "raw");
+    const rawDir = join(
+      import.meta.dir,
+      "..",
+      "rust",
+      "crates",
+      "sangkar-store",
+      "migrations",
+      "raw",
+    );
     expect(readdirSync(rawDir).filter((file) => file.endsWith(".sql"))).toEqual(["0001_fts.sql"]);
     expect(readFileSync(join(rawDir, "0001_fts.sql"), "utf8")).toContain(
       "CREATE VIRTUAL TABLE node_fts USING fts5",

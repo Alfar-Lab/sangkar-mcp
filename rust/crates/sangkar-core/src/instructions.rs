@@ -5,9 +5,9 @@
 //! reproduces rather than prose it may improve. `tests/instructions.test.ts` pins the same guide on
 //! the TypeScript side and `tests/instructions.rs` pins it here; neither copy may drift.
 //!
-//! The guide is embedded by relative path out of the TypeScript tree, the way
+//! The guide is embedded from this crate's own `assets/` directory, the way
 //! `sangkar_store::migrations` embeds the SQL: one deliverable, two implementations, one copy of the
-//! bytes for the whole migration.
+//! bytes. It sat in the TypeScript tree's `src/prompts/` until TASK-062 moved it here unchanged.
 //!
 //! There is no `print_instructions` counterpart to the TypeScript: on this side stdout carries the
 //! protocol and [`crate::log`] owns stderr, so whichever CLI mode answers with the guide writes
@@ -22,14 +22,14 @@ pub const TOOL_NAMES: [&str; 7] = [
     "status", "summary", "trace", "search", "impact", "expand", "index",
 ];
 
-/// The guide, byte for byte `src/prompts/INSTRUCTIONS.md` — the file `tests/instructions.test.ts`
+/// The guide, byte for byte `assets/INSTRUCTIONS.md` — the file `tests/instructions.test.ts`
 /// compares against the TypeScript constant, trailing newline included.
 ///
-/// The path reaches into the TypeScript tree because this is a strangler migration, not a second
-/// copy of the text; phase 5 moves the file to `rust/crates/sangkar-core/assets/INSTRUCTIONS.md`
-/// and only this argument changes. The byte and character counts pinned in `tests/instructions.rs`
-/// are what makes that move provably a no-op.
-pub const INSTRUCTIONS_TEXT: &str = include_str!("../../../../src/prompts/INSTRUCTIONS.md");
+/// This is not a second copy of the text: the file was embedded out of the TypeScript tree while
+/// this was a strangler migration, and TASK-062 moved it here with the bytes untouched, so only
+/// this argument changed. The byte and character counts pinned in `tests/instructions.rs` are what
+/// makes the move provably a no-op.
+pub const INSTRUCTIONS_TEXT: &str = include_str!("../assets/INSTRUCTIONS.md");
 
 /// The tools worth calling after `tool`, for the envelope's `next_tools`.
 ///

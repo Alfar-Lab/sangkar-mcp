@@ -12,7 +12,15 @@ import {
  * imported by the composition root. A silent edit to either is the whole failure mode this file
  * exists to catch, so the doc is compared as text rather than checked for keywords alone.
  */
-const DOC_PATH = join(import.meta.dir, "..", "src", "prompts", "INSTRUCTIONS.md");
+const DOC_PATH = join(
+  import.meta.dir,
+  "..",
+  "rust",
+  "crates",
+  "sangkar-core",
+  "assets",
+  "INSTRUCTIONS.md",
+);
 
 /** A tool is named only where it is written as code; prose mentions are not a reference. */
 function namesTool(text: string, tool: string): boolean {
@@ -111,7 +119,7 @@ describe("instructions: nextToolsFor routes within the surface", () => {
 });
 
 describe("instructions: one deliverable, two copies", () => {
-  test("src/prompts/INSTRUCTIONS.md is the same text as INSTRUCTIONS_TEXT", async () => {
+  test("rust/crates/sangkar-core/assets/INSTRUCTIONS.md is the same text as INSTRUCTIONS_TEXT", async () => {
     const doc = (await Bun.file(DOC_PATH).text()).trimEnd();
     expect(doc).toBe(INSTRUCTIONS_TEXT);
   });
