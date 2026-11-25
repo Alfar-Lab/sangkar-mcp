@@ -1,6 +1,6 @@
 {
   "name": "sangkar-mcp",
-  "version": "0.6.0-beta.1",
+  "version": "0.7.0-beta.1",
   "description": "Read-only MCP server and CLI over one repository's call graph, backed by SQLite.",
   "license": "MIT",
   "author": "Aldi Fahluzi",
@@ -38,6 +38,6 @@
     "release:beta": "npm publish --tag beta"
   },
   "optionalDependencies": {
-    "sangkar-mcp-linux-x64-gnu": "0.6.0-beta.1"
+    "sangkar-mcp-linux-x64-gnu": "0.7.0-beta.1"
   }
 }

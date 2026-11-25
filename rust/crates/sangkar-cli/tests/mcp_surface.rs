@@ -13,7 +13,8 @@
 //!   JSON-RPC `id`, which is the only thing a conforming client may rely on.
 //! - **the recording was taken on a temp data dir**, so the one answer that embeds a path
 //!   (`status` before the first publish) is compared with the recording's path substituted for this
-//!   run's. Everything else is byte-identical.
+//!   run's. Everything else is byte-identical but the handshake's `serverInfo.version`, which is the
+//!   version this binary was built as and so moves with every release.
 //!
 //! The server runs as a real child process with real pipes, because that is the claim: not "the
 //! handler returned this string" but "the process put exactly these bytes on stdout".
@@ -356,8 +357,24 @@ fn the_handshake_reports_this_process_and_the_published_guide() {
     assert_eq!(ours["protocolVersion"], theirs["protocolVersion"]);
     assert_eq!(ours["capabilities"], theirs["capabilities"]);
     assert_eq!(ours["capabilities"]["tools"], Value::Object(Map::new()));
-    assert_eq!(ours["serverInfo"], theirs["serverInfo"]);
+    // Every key of `serverInfo` but `version` is the recording's. The version is this build's and it
+    // moves with every release, so the recording's one is substituted before the comparison: an
+    // extra or missing key still fails, which skipping the field outright would not catch.
+    let mut recorded_info = theirs["serverInfo"]
+        .as_object()
+        .expect("the recording's serverInfo is an object")
+        .clone();
+    recorded_info.insert(
+        "version".to_owned(),
+        Value::String(env!("CARGO_PKG_VERSION").to_owned()),
+    );
+    assert_eq!(ours["serverInfo"], Value::Object(recorded_info));
     assert_eq!(ours["serverInfo"]["name"], "sangkar");
+    assert_eq!(
+        ours["serverInfo"]["version"],
+        env!("CARGO_PKG_VERSION"),
+        "the handshake must report the version this binary was built as"
+    );
     // The guide, byte for byte: the only long string this surface publishes.
     assert_eq!(
         ours["instructions"], theirs["instructions"],
