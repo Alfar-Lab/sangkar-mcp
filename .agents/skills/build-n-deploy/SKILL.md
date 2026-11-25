@@ -226,7 +226,7 @@ which is how to rehearse the build.
 Stop here and give the maintainer exactly these lines, in this order, `$V` expanded:
 
 ```sh
-npm pack --dry-run                                              # parent: 7 files, 46.7 kB unpacked
+npm pack --dry-run                                              # parent: 7 files, 46.8 kB unpacked
 (cd npm/linux-x64-gnu && npm pack --dry-run)                    # platform: 2 files, 31.1 MB unpacked
 (cd npm/linux-x64-gnu && npm publish --tag beta --otp=<six digits>)   # 1. the platform package
 npm publish --tag beta --otp=<six digits>                       # 2. the launcher

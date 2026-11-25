@@ -24,7 +24,7 @@ Two npm packages, in the order `docs/my-product/TECH-SPEC.md` §15 states.
    stripped 31,056,160-byte binary and a 276-byte `package.json` declaring `os: ["linux"]`,
    `cpu: ["x64"]` — 31.1 MB unpacked, 6.3 MB packed.
 2. **`sangkar-mcp`** — the parent, from the repository root. It holds `bin/sangkar.js` (the launcher),
-   `README.md`, `LICENSE` and `agent/`: 7 files, 46.7 kB unpacked. It names the platform package in
+   `README.md`, `LICENSE` and `agent/`: 7 files, 46.8 kB unpacked. It names the platform package in
    `optionalDependencies`, so an install elsewhere skips it and the launcher refuses with one line and
    exit 70 instead of half-working.
 
@@ -79,10 +79,9 @@ Two facts worth knowing before the first run:
 
 State on 2026-11-25, from `npm view sangkar-mcp dist-tags`: `beta` serves `0.6.0-beta.1`, `latest` serves
 `0.1.0-beta.0` (the holding version that claimed the name), and `sangkar-mcp-linux-x64-gnu` is not on
-the registry yet — `npm view sangkar-mcp-linux-x64-gnu` answers 404. Both version strings in the tree are
-still `0.6.0-beta.1`, a number the registry already holds for the parent's TypeScript build. A published
-number is never reused, so the first native release takes the next number under the skill's steps 1–3, in
-`package.json` and in `rust/Cargo.toml` alike.
+the registry yet — `npm view sangkar-mcp-linux-x64-gnu` answers 404. Both version strings in the tree
+read `0.7.0-beta.1`, the number the native release takes: `0.6.0-beta.1` is spent, because the registry
+already holds it for the parent's TypeScript build, and a published number is never reused.
 
 ## Checks
 
@@ -106,7 +105,7 @@ with a reason — it is the only thing that still says the two implementations a
 Package shapes, when a change touches packaging:
 
 ```sh
-npm pack --dry-run                            # parent: 7 files, 46.7 kB unpacked
+npm pack --dry-run                            # parent: 7 files, 46.8 kB unpacked
 cd npm/linux-x64-gnu && npm pack --dry-run    # platform: 2 files, 31.1 MB unpacked
 ```
 

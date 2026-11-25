@@ -35,9 +35,12 @@ Pin `@beta` rather than the bare name: `latest` is a moving target, because npm 
 `0.0.0-stage` holding version that took the tag when the name was first claimed — `npm view sangkar-mcp
 dist-tags` still shows `latest: 0.1.0-beta.0`. `beta` serves `0.6.0-beta.1`, the last build of the
 TypeScript implementation: that is what macOS, Windows and anything older than glibc 2.35 install
-today, and it needs Bun. The native packages — `sangkar-mcp` as the launcher and
-`sangkar-mcp-linux-x64-gnu` as the binary — are not on the registry yet: they need the maintainer's
-OTP, and they go out under a new number because `0.6.0-beta.1` is spent.
+today, and it needs Bun.
+
+The native release is `0.7.0-beta.1` — `sangkar-mcp` as the launcher, `sangkar-mcp-linux-x64-gnu` as
+the binary. Both packages are named in this tag and reach the registry only after the maintainer runs
+the two `npm publish` commands, which need an OTP; until then `@beta` still resolves to the TypeScript
+build, and this tag installs from its GitHub Release asset or from a checkout.
 
 ### From a checkout
 
