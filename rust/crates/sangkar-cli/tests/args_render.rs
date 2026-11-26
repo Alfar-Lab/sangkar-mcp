@@ -1735,7 +1735,7 @@ fn error_and_bootstrapping_exit_exit_failure() {
 fn the_codes_are_the_documented_pair() {
     assert_eq!(EXIT_FAILURE, 1);
     assert_eq!(EXIT_USAGE, 2);
-    // `70` belongs to the npm launcher shim, never to an envelope.
+    // `70` is `EX_SOFTWARE`, reserved for the deleted launcher, never for an envelope.
     for status in ["ok", "ambiguous", "not_found", "error", "bootstrapping"] {
         let code = exit_code_of(&envelope_for(status));
         assert!(

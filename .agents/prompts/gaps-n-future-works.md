@@ -4,11 +4,13 @@ Plan state and the open work. Entry point: [`AGENTS.md`](../../AGENTS.md).
 
 ## Current state and known gaps
 
-One implementation: the nine-crate Rust workspace under `rust/`, packaged as the npm launcher plus one
-platform package. The `rust-migration` plan is in its last phase — `ppm plan_status` is the state, not this
-file. What the tree carries: `cargo test --workspace` (978 passed, 1 ignored, 71 suites),
+One implementation: the nine-crate Rust workspace under `rust/`, shipped as one tarball per release —
+`sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz`, which the root `install.sh` verifies and installs. The
+`rust-migration` plan is in its last phase — `ppm plan_status` is the state, not this file. What the tree
+carries: `cargo test --workspace` (978 passed, 1 ignored, 71 suites),
 `cargo test -p sangkar-cli --test goldens` (57 goldens, 57 identical), `cargo test -p sangkar-boundary`
-(8 tests), `npm pack --dry-run` (7 files).
+(8 tests), and the two packaging checks — `sh -n install.sh` and the local asset-shape build, whose
+`tar -tzf` prints exactly `sangkar`.
 
 Everything below was measured on this tree, not carried over from the TypeScript implementation. The run:
 
@@ -99,17 +101,19 @@ grammar change that reorders anything fails rather than shifting a total.
 
 ## Future works
 
-The four gaps above are the product work. Three items sit outside them:
+The four gaps above are the product work. Two items sit outside them:
 
-1. **Publishing the two packages needs the maintainer.** `rust/scripts/package.sh` lays out
-   `sangkar-mcp-linux-x64-gnu` and the launcher ships it, but neither is on the registry; the publish needs an
-   OTP and a fresh version number, because `0.6.0-beta.1` is spent on the TypeScript release that macOS,
-   Windows and pre-2.35 glibc still install. `.agents/skills/build-n-deploy/SKILL.md` is the procedure.
-2. **No second platform exists.** The launcher's table has one row (`linux:x64`); macOS and Windows get one
-   refusal line naming the published platform and the version to pin. A second platform is a release target,
-   a package directory and one table row — the release image decides the glibc floor, so a different libc is a
-   different package, not a rebuild.
-3. **The capture harness cannot run again.** `scripts/parity/` is TypeScript that imported the deleted tree;
+1. **No second platform exists.** Linux x86_64 with glibc 2.35 or newer is the only build; `install.sh`
+   refuses macOS, Windows, arm64, 32-bit and musl with one line naming what it supports. A second platform
+   is three pieces of packaging — a row in that gate, a release asset, and a job in
+   `.github/workflows/release.yml` — plus two code blockers: `rust/crates/sangkar-core/src/pidlock.rs` and
+   `rust/crates/sangkar-store/src/lock.rs` decide liveness by `/proc/<pid>` existence, so on macOS every
+   live lock reads as stale; and `rust/crates/sangkar-daemon/src/lifecycle.rs` and
+   `rust/crates/sangkar-cli/src/telemetry_cmd.rs` import `tokio::signal::unix` and
+   `std::os::unix::process::CommandExt` unconditionally, so a Windows target does not compile. macOS,
+   Windows and pre-2.35 glibc install the last TypeScript build instead, `sangkar-mcp@0.6.0-beta.1`, which
+   is on the npm registry and unmaintained.
+2. **The capture harness cannot run again.** `scripts/parity/` is TypeScript that imported the deleted tree;
    the committed goldens under `rust/tests/golden/` are the only oracle. A payload that moves on purpose now
    moves its golden in the same commit, and the census test is what keeps the row ids and their order honest.
    Writing the replacement (a Rust capture that reads a fixture and writes a golden) is worth a task the day

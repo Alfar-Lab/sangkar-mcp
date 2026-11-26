@@ -1,14 +1,20 @@
 # Migration: sangkar-mcp to Rust
 
 **Status:** Complete. Phase 5 closed the cutover: one implementation, the Rust workspace under `rust/`,
-packaged as the npm launcher plus one Linux x64 platform package (the registry step is the maintainer's,
-§7).
+released as one tarball on a GitHub Release — the Linux x64 binary and nothing else — and installed by
+the root `install.sh` (§7).
 **Decision date:** 2026-11-24 · **Base commit:** `3592da3` · **Version migrated:** `0.6.0-beta.1`.
 **What moved:** 76 TypeScript files / 25 773 lines in `src/` and `bin/`, 60 test files / 31 338 lines in
 `tests/`, 11 SQLite tables, 12 languages, 7 tools, 2 surfaces.
 **What replaced it:** nine crates under `rust/` — 43 699 lines under their `src` directories (unit tests
 included) and 44 915 under their `tests` directories — 978 tests in 71 suites, and one binary: 34 416 888
 bytes as cargo builds it, 31 056 160 stripped.
+
+**Packaging note (2026-11-26).** npm packaging is retired: `package.json`, `npm/`, `bin/sangkar.js` and
+`rust/scripts/package.sh` are deleted, and nothing is published to a package registry. The release is a
+GitHub Release tarball — `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz` holding one binary, plus
+`SHA256SUMS` — installed by the root `install.sh`. Launcher, platform-package and `npm pack` statements
+below are the record of the era that ended there; they are kept as history, not as live statements.
 
 The executable plan is `.ppm/rust-migration/`, 73 tasks over six phases; `ppm plan_status` is its state,
 not this page. This page is the record of what was built, what each phase's gate observed, and every
@@ -90,7 +96,7 @@ implementation. What follows is the whole contract; anything not listed was free
 6. **Process contract.** Exit codes (`0`, `1`, `2`, and the worker's `0`, `1`, `2`, `75`), stdout carrying
    only the protocol or the rendered answer, and every diagnostic on stderr through one `log` module. No
    Rust path emits `70`: its only producer was the missing-interpreter preflight, which a static binary
-   cannot fail, and `70` appears in `bin/sangkar.js` and nowhere under `rust/` (§12.6).
+   cannot fail, and the launcher that emitted it is deleted, so nothing under `rust/` emits `70` (§12.6).
 7. **Files and locks.** `graph.db`, `.stage.<12 hex>`, `write.lock`, `daemon.pid`, `<home>/sangkar.json`,
    `<dataDir>/config.json`, `<dataDir>/telemetry/<YYYY-MM-DD>.jsonl`, `install_id.json`: same paths, same
    JSON shapes, same staleness rules. The two implementations took turns on one tree and neither had to
@@ -175,8 +181,8 @@ Every pick was checked against the registry on 2026-11-24. The version in the "S
 | Biome + `tsc` | `rustfmt` + `clippy -D warnings` | Same gate position in the loop | — |
 | `bun test` | `cargo test` | Integration tests drive the built binary; unit tests live beside the module | — |
 
-Pinned by `rust/Cargo.lock`, committed: every dependency version in the build comes from it, and
-`rust/scripts/package.sh` passes `--locked`.
+Pinned by `rust/Cargo.lock`, committed: every dependency version in the build comes from it, and the release
+workflow builds with `--locked`.
 
 ## 6. Strangler mechanics
 
@@ -212,15 +218,17 @@ that true; the first six were Phase 0 tasks, because every later phase depended 
    `rust/tests/golden/`; the Rust suite then compares against the file forever. This is what survived
    Phase 5's deletion of TypeScript (§9). The capture harness itself is retired with the tree it imported
    (§12.9).
-7. **One platform at first, and the refusal is a feature.** The npm package declares exactly one platform
-   package (`sangkar-mcp-linux-x64-gnu`). On macOS or Windows the launcher finds nothing and says which
-   platform it wanted, that only Linux x64 is published, and which version to pin to stay on the
-   TypeScript build. Adding a platform later means adding one `optionalDependencies` entry, one
-   `npm/linux-x64-gnu`-shaped directory and one row in the release matrix — never rewriting the launcher.
+7. **One platform at first, and the refusal is a feature.** The npm package declared exactly one platform
+   package (`sangkar-mcp-linux-x64-gnu`). On macOS or Windows the launcher found nothing and said which
+   platform it wanted, that only Linux x64 was published, and which version to pin to stay on the
+   TypeScript build. Adding a platform meant one `optionalDependencies` entry, one
+   `npm/linux-x64-gnu`-shaped directory and one row in the release matrix, never a rewrite of the
+   launcher. That mechanism retired with npm packaging: the refusal is `install.sh`'s platform gate now,
+   and adding a platform is the deferred work `TECH-SPEC.md` §15 lists.
 
 The transition knob that did *not* exist: no `--engine=bun|rust` flag on the shipped binary. The two
 binaries were separate artifacts (`bun run bin/sangkar.ts` versus `cargo run -p sangkar-cli`), and no
-user-facing switch ever landed in the npm package.
+user-facing switch ever shipped.
 
 ## 7. Phases and gates
 
@@ -236,7 +244,7 @@ what is still in the tree as proof.
 | **2 Tools + surfaces** | Seven handlers, seven manifests, `emit()` wiring, the store lifecycle (fingerprint, reopen after publish, `schema_too_new`, bootstrapping→ready), the `repo` verb, the index gate with `--yes`, the MCP server, CLI verbs and renderer | `sangkar <tool>` and `mcp` produce envelopes equal to the captured goldens for all seven tools on all fixtures; tools/list matches the TypeScript schema; a publish is picked up by a running server | `rust/crates/sangkar-cli/tests/goldens.rs` replays every golden and prints 57 compared (57 identical); `rust/crates/sangkar-cli/tests/mcp_surface.rs` matches tools/list field by field and answers a publish made between two calls with the new generation; `rust/crates/sangkar-cli/tests/store_refresh.rs` covers the reopen and `schema_too_new` |
 | **3 Indexer** | `lang`, `discover`, `parse`, `extract`, `resolve`, `persist`, `worker`, `watch` | A repo indexed by Rust produces a `graph.db` the **TypeScript** reader serves, whose node/edge/unresolved census matches the TypeScript index of the same corpus per language; incremental routing publishes the same file set | `rust/crates/sangkar-index/tests/census.rs` reports polyglot 92 keys compared / 0 differ and broken 27 keys compared / 0 differ, with one allowed grammar substitution (§12.1), and it compares the six ordered row sequences, so ids and order must match. The TS-reader half survives as the goldens: the Rust `index` verb now builds the fixture databases and the same 57 comparisons pass |
 | **4 Daemon + telemetry** | Recorder, sink, aggregator, HTML report, report server, daemon lifecycle/reconcile/CLI | `daemon run/start/stop/status` behaves as the TypeScript daemon tests demanded; the report page renders the same sections from the same JSONL | `rust/crates/sangkar-daemon/tests/lifecycle.rs` drives real processes and files, `rust/crates/sangkar-daemon/tests/integration.rs` the composition and the four CLI answers; the telemetry suites pin the record bytes, the fold, the page and the socket (`record_sink.rs`, `recorder.rs`, `report.rs`, `html.rs`, `serve.rs`) |
-| **5 Cutover** | npm platform package + launcher shim (Linux x64 only), release workflow, binary smoke, docs rewrite, TypeScript deletion | `sangkar` from the published tarball on Linux x64 answers the goldens, indexes a repo, runs the daemon, and the TypeScript tree is gone | `rust/crates/sangkar-cli/tests/binary_smoke.rs` runs the binary cargo built as a real child process on a machine carrying only `PATH` (an empty directory) and `HOME`, and it answers, indexes and serves MCP; the parent package packs 7 files / 18.2 kB and the platform package 2 files / 6.3 MB (`npm pack --dry-run`); the TypeScript source, test tree, entry point and five pins are deleted. The *registry* is the one step not exercised: neither package is published, because that needs the maintainer's OTP (`gaps-n-future-works.md`) |
+| **5 Cutover** | npm platform package + launcher shim (Linux x64 only), release workflow, binary smoke, docs rewrite, TypeScript deletion | `sangkar` from the published tarball on Linux x64 answers the goldens, indexes a repo, runs the daemon, and the TypeScript tree is gone | `rust/crates/sangkar-cli/tests/binary_smoke.rs` runs the binary cargo built as a real child process on a machine carrying only `PATH` (an empty directory) and `HOME`, and it answers, indexes and serves MCP — the same binary the release workflow packs into the tarball `install.sh` installs. The packed packages measured 7 files / 18.2 kB and 2 files / 6.3 MB at the time (`npm pack --dry-run`), a measurement no longer reproducible from the tree now that packaging is retired (2026-11-26). The TypeScript source, test tree, entry point and five pins are deleted. The *registry* step was never exercised — no package was ever published — and npm publishing has since been retired (packaging note)
 
 Cut points, if the migration had been paused: after Phase 2 the Rust binary was a *useful* read-only
 server for graphs the TypeScript indexer produced; after Phase 3 it was a complete implementation with a
@@ -255,7 +263,7 @@ Ordered as the plan ordered them, most likely first. The last column is the risk
 | **R4** | Cursor incompatibility | The MAC is over the JSON *text*; key order, integer formatting and base64url padding all matter, and each tool's `argsHash` format already differed | **Did not materialise.** `rust/crates/sangkar-core/tests/cursor_interop.rs` (13 tests) reproduces the six TypeScript-minted tokens in `rust/tests/vectors/cursor_vectors.json` byte for byte and pins the refusals by code and order; the goldens compare `next` byte for byte, which pins the per-tool digest format and the page arithmetic at once |
 | **R5** | SQLite behaviour differs at the edges | FTS5 tokenizer options, `VACUUM INTO` on a read-only source, `journal_mode` while statements are cached, `RETURNING`, integer affinity | **Did not materialise.** `bundled` SQLite is the same engine; the PRAGMAs are read back after the handle opens (`rust/crates/sangkar-store/tests/db_lock.rs`), the publish protocol is driven over real files (`publish.rs`), and the reader goldens compare a Rust read against the answers the TypeScript read gave for the same fixture |
 | **R6** | The `index` tool's worker hand-over is forgotten | Phase 2 shipped a read-only binary that still had to index, and Phase 3 changed who indexes | **Did not materialise.** The `worker_cmd` config knob survives as the way `index` and the daemon name their child, defaulting to the current executable and overridable with `SANGKAR_WORKER_CMD`; `rust/crates/sangkar-tools/tests/index.rs` asserts the command comes from `AppConfig`. The plan's sentence that the knob would "go away at cutover" was wrong, and §6.4 says so |
-| **R7** | Packaging on Linux / old glibc | A binary built on a newer glibc will not run on a 2.35 userland, and a shim that silently installs with no binary is worse than one that refuses | **Handled, with one step open.** The launcher is Node and refuses with one line and exit 70; `.github/workflows/release.yml` builds on `ubuntu-22.04` and fails when the binary's highest `GLIBC_x.y` is above 2.35. A build on this machine reports `GLIBC_2.39` and must not be published. Neither package is on the registry yet: that publish needs the maintainer's OTP |
+| **R7** | Packaging on Linux / old glibc | A binary built on a newer glibc will not run on a 2.35 userland, and a shim that silently installs with no binary is worse than one that refuses | **Handled, then superseded.** The launcher was Node and refused with one line and exit 70; that refusal is `install.sh`'s platform gate now. `.github/workflows/release.yml` builds on `ubuntu-22.04` and fails when the binary's highest `GLIBC_x.y` is above 2.35. A build on this machine reports `GLIBC_2.39` and must not be published. No package was ever on the registry — that publish needed the maintainer's OTP — and npm publishing has since been retired |
 | **R8** | The rewrite drifts into a redesign | 25 k lines of "while I'm here" is the classic failure of a total migration | **Held.** Non-goals stayed constraints; the 57 goldens compare identical, so no payload key, value or order moved; the one new product gap the port introduced (a nested `.gitignore`) was recorded in `gaps-n-future-works.md` rather than fixed mid-port |
 | **R9** | Effort is underestimated | 25 773 lines of source with 31 338 lines of contract tests, 12 grammars, and a daemon; the plan was 73 tasks, not 15 | **Not re-scorable from the tree, and not pretended otherwise.** No phase recorded wall-clock hours; what is measurable is the output, and §10 measures it — 978 tests, 71 suites, 43 699 source lines with unit tests, 44 915 lines of integration tests, one 31 056 160-byte binary |
 
@@ -319,9 +327,7 @@ output, so that is what this section reports, with the command that produced eac
 | tests | 978 passed, 1 ignored, 71 suites | `cargo test --workspace` |
 | goldens | 57 compared, 57 identical, 0 skipped | `cargo test -p sangkar-cli --test goldens -- --nocapture` |
 | census | polyglot 92 keys compared, broken 27, 0 differ, 1 allowed delta | `cargo test -p sangkar-index --test census -- --nocapture` |
-| binary | 34 416 888 bytes; 31 056 160 stripped | `ls -l rust/target/x86_64-unknown-linux-gnu/release/sangkar`, `npm/linux-x64-gnu/bin/sangkar` |
-| parent package | 7 files, 18.2 kB packed, 46.7 kB unpacked | `npm pack --dry-run` |
-| platform package | 2 files, 6.3 MB packed, 31.1 MB unpacked | `npm pack --dry-run` |
+| binary | 34 416 888 bytes; 31 056 160 stripped | `ls -l rust/target/x86_64-unknown-linux-gnu/release/sangkar`, and the `sangkar` member of the release tarball |
 
 The migration was worth doing at the point where the artifact mattered more than feature velocity. That
 argument is now history; the artifact it bought is 31 056 160 bytes with no interpreter in the path, and
@@ -340,8 +346,9 @@ All of it landed, and the three product documents that were expected to need not
 - [`TECH-SPEC.md`](TECH-SPEC.md) §15 was rewritten at Phase 5, when distribution actually changed: the
   measured sizes, one platform, the glibc floor, and the launcher's refusal.
 - [`docs/maintainers.md`](../../docs/maintainers.md) and the project skill
-  [`.agents/skills/build-n-deploy/SKILL.md`](../../.agents/skills/build-n-deploy/SKILL.md) follow the
-  two-package release.
+  [`.agents/skills/build-n-deploy/SKILL.md`](../../.agents/skills/build-n-deploy/SKILL.md) followed the
+  two-package release as it stood in Phase 5; both describe the release tarball and `install.sh` since
+  the packaging note above (2026-11-26).
 - [`TOOLS-SPEC.md`](TOOLS-SPEC.md), [`DATABASE.md`](DATABASE.md) and [`TELEMETRY.md`](TELEMETRY.md) were
   not edited in Phase 5 — `git status` lists no change to them — which is the parity bar holding, not an
   omission.
@@ -388,11 +395,11 @@ missing from this list would be a defect in the document.
    human lines of status, stop, start and run match the TypeScript's. Two facts follow from the
    composition: the daemon records `generation: null` because it does not open `graph.db` itself, and it
    reports dotted log event keys where the TypeScript wrote sentences.
-6. **Exit 70 belongs only to the launcher shim.** Missing or unsupported platform, one stderr line, exit
-   70; no native path emits it, exactly as §3.6 said. One detail the plan did not name: the launcher is
-   Node rather than a shell script, and it uses an async `createRequire` plus `spawn` rather than a static
-   `require` or `spawnSync`, so it forwards signals and keeps working whether or not `"type": "module"`
-   is in `package.json`.
+6. **Exit 70 belonged only to the launcher shim.** Missing or unsupported platform, one stderr line, exit
+   70; no native path emits it, exactly as §3.6 said. One detail the plan did not name: that launcher was
+   Node rather than a shell script, and it used an async `createRequire` plus `spawn` rather than a static
+   `require` or `spawnSync`, so it forwarded signals and kept working whether or not `"type": "module"`
+   was in the root manifest. Both the launcher and the manifest are deleted; nothing emits 70 now.
 7. **The report server is `tiny_http` 0.12.** The plan offered `tiny_http` or `hyper`; the first was taken.
    It serves `GET /`, `HEAD /` and `GET /healthz` matched literally, the way the TypeScript's server did,
    with `HEAD /healthz` a 404 because the contract names the method of every route; and it re-parses
@@ -410,7 +417,8 @@ missing from this list would be a defect in the document.
    from a Rust run does not exist and is future work.
 10. **Measured effort and sizes**, in place of the plan's estimate: §10 carries the table — 978 tests in 71
     suites, 43 699 source lines with unit tests, 44 915 lines of integration tests, a 31 056 160-byte
-    stripped binary, a 7-file / 18.2 kB parent package and a 2-file / 6.3 MB platform package.
+    stripped binary. The two npm package rows left that table with the packaging they measured
+    (2026-11-26).
 11. **The prepared-statement ratio is not asserted.** §9 said the migration would keep a ≥5×
     prepare-vs-`prepare_cached` comparison as an assertion; the tree has no timing test. The cache is
     pinned by its size, its hit accounting and the empty-input cases instead, and the 42.7 µs → 1.7 µs

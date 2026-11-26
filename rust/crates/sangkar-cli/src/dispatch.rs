@@ -46,8 +46,8 @@
 //!
 //! `0` success, `1` a failure (a refusal, a bootstrapping answer, an error envelope), `2` the argv or
 //! the configuration (an unknown verb, a bad flag, a repo-selection or index-gate refusal). There is
-//! no fourth code: the missing-interpreter preflight this binary never had is gone, and what is left
-//! of it is the npm launcher shim's own failure, outside this crate.
+//! no fourth code: `70` is `EX_SOFTWARE`, reserved for the launcher this binary no longer ships with,
+//! and no path here emits it.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

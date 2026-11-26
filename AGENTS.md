@@ -11,9 +11,11 @@ surfaces with identical behaviour: an MCP server (`sangkar mcp`, stdio) and a sh
 X*, *what is going on here*, *what can this change reach*.
 
 It is one native binary: the Cargo workspace under `rust/`, whose `sangkar-cli` crate is the `sangkar` command
-and whose `main.rs` is the entry point. The npm package is a launcher (`bin/sangkar.js`, Node ≥ 18) plus one
-platform package; the server, the indexer, the daemon and the report are that binary, with no interpreter in
-the path.
+and whose `main.rs` is the entry point. It ships as a release tarball — one `sangkar` at the archive root —
+and `install.sh` at the repository root downloads that tarball, verifies its sha256 against the release's
+`SHA256SUMS`, and installs the binary. The server, the indexer, the daemon and the report are that binary,
+with no interpreter in the path. One target exists: Linux x86_64 with glibc 2.35 or newer, and `install.sh`
+refuses every other one in a single line.
 
 A call answers from one repository: `repo` selects among the registered ones, and a call that names
 none falls back to `--repo-root` or the tree autodetected from `cwd` — so no tool takes a `project`
@@ -45,8 +47,8 @@ argument.
   from their own source (`TOOL-SURFACE.md`, `TOOL-USAGE-ANALYSIS.md`, `GRAPH-MODEL.md`,
   `STORAGE-ARCHITECTURE.md`, `INDEXING-PIPELINE.md`) and `tool-outputs/`, the real MCP payloads
   `TOOL-OUTPUTS.md` documents — the surface the seven tools were designed against.
-- `docs/maintainers.md` — for whoever builds the artifact or cuts a release: distribution, the npm
-  traps, the checks. It does not ship in the npm tarball; the procedure itself is the project skill
+- `docs/maintainers.md` — for whoever builds the artifact or cuts a release: distribution, the release
+  assets, the installer, the checks. The procedure itself is the project skill
   `.agents/skills/build-n-deploy/SKILL.md`.
 - `README.md` — for users, in a fixed shape: `## sangkar-mcp`, `## Installation & Requirements`,
   `## Usage` (`### MCP & Skill`, `### CLI`), `## License`. Maintainer material

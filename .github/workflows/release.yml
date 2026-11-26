@@ -1,10 +1,16 @@
-# One tag, one target, two artifacts, and no publish. The runner image decides the glibc floor:
+# One tag, one target, two assets, and no publish. The runner image decides the glibc floor:
 # `ubuntu-22.04` links against glibc 2.35, so the binary runs on 2.35 and newer and nowhere older.
 # That floor is a property of this line and is restated in the release notes, because moving the
 # runner is a change every user's libc has to survive.
 #
-# `workflow_dispatch` builds and uploads the same artifacts without a tag, so a release can be
-# rehearsed (and its tarball published by hand) without creating a GitHub Release.
+# The build happens here rather than in a packaging script: `install.sh` downloads the tarball and
+# verifies it against `SHA256SUMS`, so this file produces both assets itself. The version in their
+# names comes from `rust/Cargo.toml`'s `[workspace.package]`, and a tag that disagrees with it fails
+# before a single crate is compiled.
+#
+# `workflow_dispatch` builds and uploads the same assets without a tag, so a release can be
+# rehearsed without creating a GitHub Release. It skips the tag/version gate, which only a tag has
+# anything to check.
 name: release
 
 on:
@@ -18,12 +24,10 @@ permissions:
 
 env:
   TARGET: x86_64-unknown-linux-gnu
-  KEY: linux-x64-gnu
-  PACKAGE: sangkar-mcp-linux-x64-gnu
   GLIBC_FLOOR: "2.35"
 
 jobs:
-  linux-x64-gnu:
+  linux-x64:
     name: linux x64 (glibc 2.35)
     runs-on: ubuntu-22.04
     permissions:
@@ -31,7 +35,7 @@ jobs:
       contents: write
     steps:
       # Shallow on purpose: the notes are written below with `generate_release_notes: false` and
-      # nothing here walks history — the version comes from `package.json`, not `git describe`.
+      # nothing here walks history — the version comes from `rust/Cargo.toml`, not `git describe`.
       - uses: actions/checkout@v4
 
       - name: Toolchain 1.100.0 with the release target
@@ -45,23 +49,48 @@ jobs:
         with:
           workspaces: rust -> target
 
-      - name: Read the version npm will publish
+      - name: Read the version from Cargo.toml
         id: version
         run: |
-          echo "version=$(node -e 'process.stdout.write(require("./package.json").version)')" >> "$GITHUB_OUTPUT"
+          set -euo pipefail
+          # `[workspace.package]` is the one place the version lives; every member inherits it and
+          # `rust/Cargo.lock` mirrors it. Read with awk so learning it costs no Node runtime.
+          version="$(awk '/^\[workspace\.package\]/{f=1; next} /^\[/{f=0} f && /^version *=/{gsub(/"/,"",$3); print $3; exit}' rust/Cargo.toml)"
+          [ -n "$version" ] || { echo "no version in [workspace.package] of rust/Cargo.toml" >&2; exit 1; }
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
-      - name: Build the platform package
-        # `package.sh` is the whole build: it runs
-        # `cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu`, installs
-        # the binary into `npm/<KEY>/bin/sangkar`, strips it, and writes that directory's
-        # `package.json` from the root one (refusing if `optionalDependencies` disagrees). Burning
-        # another `cargo build` here would produce the same binary twice.
-        run: bash rust/scripts/package.sh
+      # A tag is a promise about which version it carries. The assets below are named from
+      # `rust/Cargo.toml`, so a tag that disagrees would publish a Release advertising one version
+      # and shipping another. Only a tag is checked: a dispatch run has no version to agree with.
+      - name: Check the tag against the Cargo version
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          expected="v$VERSION"
+          if [ "$expected" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match Cargo version $VERSION (expected $expected)" >&2
+            exit 1
+          fi
+          echo "tag $GITHUB_REF_NAME matches $VERSION"
+
+      - name: Build the release binary
+        # `--locked`: a stale `rust/Cargo.lock` fails here instead of being rewritten behind the
+        # release's back. This is the only build of the binary; every asset below reuses its output.
+        working-directory: rust
+        run: cargo build --release --locked -p sangkar-cli --target "$TARGET"
+
+      - name: Strip the binary
+        # `strip` mutates `rust/target/$TARGET/release/sangkar` in place, and that path is cargo's
+        # shared build output: a `cargo test` later in this job would relink against a stripped
+        # binary. Nothing runs tests here today; adding one means stripping a copy instead.
+        run: strip "rust/target/$TARGET/release/sangkar"
 
       - name: Check the binary and the floor it needs
         run: |
           set -euo pipefail
-          binary="npm/$KEY/bin/sangkar"
+          binary="rust/target/$TARGET/release/sangkar"
           test -x "$binary" || { echo "$binary is missing or not executable" >&2; exit 1; }
 
           magic="$(od -An -tx1 -N4 "$binary" 2>/dev/null | tr -d ' \n' || true)"
@@ -88,33 +117,30 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          # A re-run in a dirty workspace must not fold an old binary into the tarball.
-          rm -rf dist/package
-          mkdir -p dist/package
+          # A re-run in a dirty workspace must not fold an old tarball into the checksums.
+          rm -rf dist
+          mkdir -p dist
 
-          # The npm platform package in the layout `npm pack` produces: one `package/` root holding
-          # `package.json` and `bin/sangkar`, which is the shape the registry takes as already packed.
-          # npm lists only those two files; this tarball also carries their directory entries, which
-          # `npm install` and `tar` both take, and the file paths are identical.
-          cp -a "npm/$KEY/." dist/package/
-          tar -czf "dist/$PACKAGE-$VERSION.tgz" -C dist package
+          # One entry at the archive root, mode 0755 as cargo built it: `tar -xzf` then installs the
+          # file `install.sh` expects without walking a directory tree.
+          tar -czf "dist/sangkar-$VERSION-$TARGET.tar.gz" -C "rust/target/$TARGET/release" sangkar
 
-          # The bare binary, for a user who wants the file and not npm.
-          tar -czf "dist/sangkar-$VERSION-$TARGET.tar.gz" -C "npm/$KEY/bin" sangkar
+          # The name here is the file as it sits on disk, with no `dist/` prefix: `install.sh` reads
+          # this file and matches the tarball name byte for byte, and a prefixed line matches nothing.
+          ( cd dist && sha256sum "sangkar-$VERSION-$TARGET.tar.gz" > SHA256SUMS )
 
-          echo "--- $PACKAGE-$VERSION.tgz ---"
-          tar -tzf "dist/$PACKAGE-$VERSION.tgz"
           echo "--- sangkar-$VERSION-$TARGET.tar.gz ---"
-          tar -tzf "dist/sangkar-$VERSION-$TARGET.tar.gz"
-          sha256sum dist/*.tgz dist/*.tar.gz
+          tar -tzvf "dist/sangkar-$VERSION-$TARGET.tar.gz"
+          echo "--- SHA256SUMS ---"
+          cat dist/SHA256SUMS
 
       - name: Upload the artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sangkar-linux-x64-gnu
+          name: sangkar-linux-x64
           path: |
-            dist/*.tgz
-            dist/*.tar.gz
+            dist/sangkar-${{ steps.version.outputs.version }}-${{ env.TARGET }}.tar.gz
+            dist/SHA256SUMS
           if-no-files-found: error
 
       # Only a tag creates a Release. A `workflow_dispatch` run on a branch stops at the artifacts.
@@ -122,12 +148,12 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          # `v0.6.0-beta.1` carries the `-` a pre-release takes; `v0.6.0` does not.
+          # `v0.7.0-beta.1` carries the `-` a pre-release takes; `v0.7.0` does not.
           prerelease: ${{ contains(github.ref_name, '-') }}
           generate_release_notes: false
           files: |
-            dist/*.tgz
-            dist/*.tar.gz
+            dist/sangkar-${{ steps.version.outputs.version }}-${{ env.TARGET }}.tar.gz
+            dist/SHA256SUMS
           body: |
             One binary, one target: `${{ env.TARGET }}`, built on `ubuntu-22.04`.
 
@@ -137,29 +163,20 @@ jobs:
             the runner image decides which libc symbols the linker may use. Older distributions fail
             at load time on a `GLIBC_2.35` symbol version, and no build of this release targets them.
 
-            macOS and Windows are not published yet; `bin/sangkar.js` names the platforms that are.
-
             ## Assets
 
             | File | What it is |
             |---|---|
-            | `sangkar-${{ steps.version.outputs.version }}-${{ env.TARGET }}.tar.gz` | the stripped binary |
-            | `${{ env.PACKAGE }}-${{ steps.version.outputs.version }}.tgz` | the same binary as the npm platform package |
+            | `sangkar-${{ steps.version.outputs.version }}-${{ env.TARGET }}.tar.gz` | the stripped binary, as one `sangkar` at the archive root |
+            | `SHA256SUMS` | the checksum `install.sh` verifies that tarball against |
 
-            ## Publishing is the maintainer's step, not CI's
+            ## Install
 
-            This Release is where CI stops. The two npm packages go out by hand, in this order — the
-            platform package first, the parent second:
+            ```
+            curl -fsSL https://raw.githubusercontent.com/Alfar-Lab/sangkar-mcp/main/install.sh | sh
+            ```
 
-            1. `sangkar-mcp-linux-x64-gnu`, from `./npm/linux-x64-gnu` in this checkout.
-            2. `sangkar-mcp`, from the repository root.
-
-            The platform package goes first because the parent is only a launcher: `bin/sangkar.js`
-            resolves `sangkar-mcp-linux-x64-gnu` with `require.resolve` and exits 70 when that lookup
-            finds nothing. Publishing the parent first would advertise an install that cannot start a
-            server for as long as the platform package is missing.
-
-            The publish needs an OTP that only the maintainer has, which is why it does not run in
-            CI. `--tag beta` while the version carries a pre-release suffix, `--tag latest` once it
-            does not. The commands, the preflight and the README sync live in
-            `.agents/skills/build-n-deploy/SKILL.md` §9.
+            `install.sh` installs to `~/.local/bin`. It refuses every platform but Linux x86_64 with
+            glibc 2.35 or newer, and says what it found instead of installing a binary that cannot
+            start. macOS and Windows are not published: this Release is the only platform the
+            project ships.

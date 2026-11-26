@@ -12,15 +12,12 @@ one.
 ### Requirements
 
 - **Linux x64 with glibc 2.35 or newer** — the floor is Debian 12, Ubuntu 22.04+ and Fedora 36+.
-  `sangkar` is one native binary and `sangkar-mcp-linux-x64-gnu` is the only platform package there
-  is. **macOS and Windows stay on the last TypeScript release until their platform ships:** the
-  launcher refuses with one line naming the platform it wanted, the platform that is published and the
-  version to pin — `sangkar-mcp@0.6.0-beta.1`, the build those platforms still install, which runs on
-  Bun.
-- **Node 18 or newer, for the launcher only.** The npm package is `bin/sangkar.js`: it resolves the
-  platform package, execs the binary, and forwards argv and the exit code. The server, the indexer, the
-  daemon and the report are that binary — no Bun, no JavaScript engine, and no `node_modules` needed to
-  index.
+  `sangkar` is one native binary: no Node, no Bun, no JavaScript engine, no interpreter on `PATH`, and
+  no dependency tree to install before indexing. The server, the indexer, the daemon and the report are
+  that binary.
+- **macOS and Windows have no native build.** Both stay on the last TypeScript release,
+  `sangkar-mcp@0.6.0-beta.1` — still on the registry, unmaintained. The installer refuses every other
+  target — macOS, Windows, arm64, 32-bit and musl — with one line naming the platform it supports.
 - Installing creates no database. The first run writes one settings file, `<home>/config.json` beside
   the registry, and nothing else outside the installation's own home. Reading a graph needs no network,
   no server and no index step: the daemon keeps it fresh, the server only reads.
@@ -28,19 +25,32 @@ one.
 ### Install
 
 ```sh
-npm i -g sangkar-mcp@beta
+curl -fsSL https://raw.githubusercontent.com/Alfar-Lab/sangkar-mcp/main/install.sh | sh
 ```
 
-Pin `@beta` rather than the bare name: `latest` is a moving target, because npm created a
-`0.0.0-stage` holding version that took the tag when the name was first claimed — `npm view sangkar-mcp
-dist-tags` still shows `latest: 0.1.0-beta.0`. `beta` serves `0.6.0-beta.1`, the last build of the
-TypeScript implementation: that is what macOS, Windows and anything older than glibc 2.35 install
-today, and it needs Bun.
+It resolves the newest GitHub Release, downloads `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz`,
+checks that tarball's sha256 against the `SHA256SUMS` published beside it, and only then unpacks the
+single `sangkar` binary into `$HOME/.local/bin`. A mismatch stops it before anything is written. The
+newest release is read from the releases list rather than from `releases/latest`, because `latest`
+skips pre-releases and every release so far is one.
 
-The native release is `0.7.0-beta.1` — `sangkar-mcp` as the launcher, `sangkar-mcp-linux-x64-gnu` as
-the binary. Both packages are named in this tag and reach the registry only after the maintainer runs
-the two `npm publish` commands, which need an OTP; until then `@beta` still resolves to the TypeScript
-build, and this tag installs from its GitHub Release asset or from a checkout.
+| Flag | Effect |
+|---|---|
+| `--version V` | install that release instead of the newest; a leading `v` is stripped, so `--version v0.7.0-beta.2` and `--version 0.7.0-beta.2` name the same release |
+| `--bin-dir DIR` | install somewhere other than `$HOME/.local/bin` |
+| `--dry-run` | print the version, the URL and the destination, then stop |
+| `--uninstall` | remove `$HOME/.local/bin/sangkar`, or `DIR/sangkar` under `--bin-dir` |
+| `-h`, `--help` | usage |
+
+The script supports Linux x86_64 with glibc 2.35 or newer and refuses every other target with one
+line naming what is supported. It prints the `export PATH=` line when `~/.local/bin` is not on `PATH`.
+
+`0.7.0-beta.2` is the version this tag ships: it lives in `rust/Cargo.toml` under
+`[workspace.package]`, and the binary reports it from the crate version. Pin a release through the
+installer's `--version` flag; the CLI itself has six verbs and no flag that prints a version.
+
+**macOS and Windows** install `sangkar-mcp@0.6.0-beta.1` from the registry: the last TypeScript build,
+unmaintained, kept because those platforms have no native one. It needs Bun.
 
 ### From a checkout
 
@@ -50,9 +60,11 @@ cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu
 ./target/x86_64-unknown-linux-gnu/release/sangkar status --repo-root /path/to/repo
 ```
 
-The workspace pins its toolchain in `rust/rust-toolchain.toml`. `bash rust/scripts/package.sh`, run
-from the repository root, does the same build and lays it out as the npm platform package — stripped, in
-`npm/linux-x64-gnu/bin/sangkar`, which is the path the launcher execs.
+The workspace pins its toolchain in `rust/rust-toolchain.toml`, and
+`cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu` inside `rust/` is the
+maintained local-build path. The release workflow runs that same build, strips the result and attaches
+it, so a local binary is for testing and not for publishing: it carries this machine's glibc, not the
+2.35 floor.
 
 ### First index
 
@@ -155,7 +167,7 @@ flag, then environment variable, then this file, then the built-in default.
 
 ### Environment
 
-Three settings that a launcher, not the file, sets — so they outrank it:
+Three settings the process environment decides, so they outrank the file:
 
 | Variable | Default | Meaning |
 |---|---|---|
@@ -163,8 +175,8 @@ Three settings that a launcher, not the file, sets — so they outrank it:
 | `SANGKAR_HOME` | `${XDG_CONFIG_HOME:-$HOME/.config}/sangkar` | the machine-level home, holding `config.json` (the defaults above), `sangkar.json` (the registry), `daemon.pid` and `daemon.log`; an empty value counts as unset |
 | `SANGKAR_TELEMETRY` | the file's `telemetry` | usage records under `<dataDir>/telemetry/`, on by default and local only; the exact value `off` disables them, an empty or any other value enables them, and when off no file and no directory is created |
 
-Maintainer detail — how the artifact is distributed, how a release reaches npm, and the check list to
-run before one — is in [docs/maintainers.md](docs/maintainers.md).
+Maintainer detail — how a release is cut, what its GitHub Release carries, how the root `install.sh`
+installs it, and the check list to run before a tag — is in [docs/maintainers.md](docs/maintainers.md).
 
 ## Usage
 
@@ -244,6 +256,10 @@ writes a `.agents/skills`-style path inside a repository instead):
 ```sh
 ./agent/install.sh --dry-run && ./agent/install.sh
 ```
+
+Two files are named `install.sh` and they install different things: `./install.sh` at the repository
+root installs the `sangkar` binary, `./agent/install.sh` installs this skill. The skill only tells an
+agent which tool to call — the binary still has to be there to answer.
 
 See [agent/README.md](agent/README.md) for the per-harness paths and the server registration each
 client needs before the tools exist at all.

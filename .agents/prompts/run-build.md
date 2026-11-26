@@ -48,13 +48,18 @@ with it. Delete the stale `.codegraph/` directory after the first index (`.gitig
 | `cargo test --manifest-path rust/Cargo.toml -p sangkar-boundary` | the module-rule gate: 8 tests over the nine manifests and every source file |
 | `cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test goldens` | the parity bar: 57 goldens replayed, 57 identical |
 | `cargo check --manifest-path rust/Cargo.toml --workspace --all-targets` | type-check every crate and its tests without linking |
-| `bash rust/scripts/package.sh` | release build with `--locked` for `x86_64-unknown-linux-gnu`, stripped, into the npm platform package |
-| `npm pack --dry-run` | what the npm tarball ships: 7 files (LICENSE, README.md, package.json, bin/sangkar.js, agent/…) |
-| `node bin/sangkar.js --help` | the launcher path end to end: it resolves the platform package and execs its binary |
+| `cargo build --release --locked --manifest-path rust/Cargo.toml -p sangkar-cli --target x86_64-unknown-linux-gnu`, then `strip rust/target/x86_64-unknown-linux-gnu/release/sangkar` | the release build the workflow runs, in the same order: one target, `--locked`, then strip |
+| local asset-shape check: `tar -czf`, `( cd dist && sha256sum … > SHA256SUMS )`, then `tar -tzf` | what the release tarball carries: one member, `sangkar`, at the archive root |
+| `sh -n install.sh` | parse-check the installer the canonical URL serves; CI runs the same check |
 
-`rust/scripts/package.sh` is the only builder of the published artifact. It reads the version from
-`package.json`, refuses a platform package pinned at a different version, builds with `--locked`, and installs
-the binary at the path the launcher execs.
+**The workflow builds the artifact, not a script.** `.github/workflows/release.yml` runs the build above on
+`ubuntu-22.04` for `x86_64-unknown-linux-gnu`, strips the output, asserts ELF, x86-64 and a highest
+`GLIBC_*` symbol version at or below 2.35, and attaches exactly two assets: the tarball
+`sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz` and a `SHA256SUMS` naming it by bare filename. The
+version comes from `rust/Cargo.toml`, and a tag build asserts that `v<that version>` equals the pushed tag
+name. Nothing is published to a package registry: the root `install.sh` fetches the tarball from the
+Release and verifies it against `SHA256SUMS` before writing. The local asset-shape check above is the same
+shape, proved without the runner.
 
 ## Definition of done
 
@@ -63,7 +68,7 @@ cargo fmt --manifest-path rust/Cargo.toml --all --check \
   && cargo clippy --manifest-path rust/Cargo.toml --workspace --all-targets -- -D warnings \
   && cargo test --manifest-path rust/Cargo.toml --workspace \
   && cargo test --manifest-path rust/Cargo.toml -p sangkar-cli --test goldens
-npm pack --dry-run
+sh -n install.sh
 ```
 
 Plus, when behaviour changed: the tool's own test, `docs/my-product/TOOLS-SPEC.md` if a payload moved, the
@@ -72,6 +77,6 @@ under `rust/tests/golden/` are the only oracle now: `scripts/parity/` captured t
 imports the deleted TypeScript tree), so a payload that moves on purpose moves its golden in the same commit
 and the diff is reviewed.
 
-For a release, add `bash rust/scripts/package.sh` and `npm pack --dry-run`; the publish itself needs the
-maintainer — the procedure is `.agents/skills/build-n-deploy/SKILL.md`, and `docs/maintainers.md` holds the
-distribution facts.
+For a release, add the local asset-shape check from the command table and `sh -n install.sh`; the build that
+ships is the workflow's, the procedure is `.agents/skills/build-n-deploy/SKILL.md`, and
+`docs/maintainers.md` holds the distribution facts.

@@ -47,11 +47,12 @@ the repository at startup:
 sangkar mcp --repo-root /path/to/repo
 ```
 
-`--data-dir /path/to/dir` is the optional second flag. When `sangkar` is not on `PATH`, register the
-npm launcher instead: `npx sangkar-mcp mcp --repo-root /path/to/repo` resolves the platform package
-and execs the native binary with the same arguments and exit code. That binary is Linux x64 in this
-release; the launcher is Node.js >= 18 and exits 70 with a one-line refusal on any other platform,
-naming the version to pin for the TypeScript build.
+`--data-dir /path/to/dir` is the optional second flag. When `sangkar` is not on `PATH`, install it
+first: `./install.sh` at the repository root, or
+`curl -fsSL https://raw.githubusercontent.com/Alfar-Lab/sangkar-mcp/main/install.sh | sh`. Either way the
+script downloads the release tarball, checks its sha256 against the `SHA256SUMS` published beside it, and
+puts `sangkar` in `~/.local/bin`. That binary is Linux x64 with glibc 2.35 or newer only; macOS and
+Windows stay on the last TypeScript build, `sangkar-mcp@0.6.0-beta.1`, which is unmaintained.
 
 | Client | Registration |
 |---|---|
@@ -69,6 +70,6 @@ entry — a tool call never takes a project argument.
 
 `SKILL.md` restates what `rust/crates/sangkar-tools/src/<tool>/manifest.rs` declares: argument names,
 defaults, enum values, and the budget ceilings. `rust/crates/sangkar-core/assets/INSTRUCTIONS.md` is
-the in-protocol version of the same advice. Both live in the repository, not in this package. When
+the in-protocol version of the same advice. Both live in the repository. When
 a manifest changes, the skill changes in the same commit, or an agent is told about a tool that no
 longer answers that way.

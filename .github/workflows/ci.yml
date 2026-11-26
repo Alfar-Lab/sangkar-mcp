@@ -25,6 +25,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # The installer is the only installation path and it runs on machines that never see this
+      # checkout, so a syntax error there is caught here first. It sits at the repo root, outside
+      # the `rust` working directory the rest of the job uses.
+      - name: Installer syntax
+        working-directory: .
+        run: sh -n install.sh
+
       # `@master` + `toolchain:` rather than a `@1.100.0` ref: dtolnay/rust-toolchain tags a ref per
       # released compiler, and the release this workspace pins (see `rust/rust-toolchain.toml`) has
       # no ref yet. The version is named once here and once in that file; they must agree.

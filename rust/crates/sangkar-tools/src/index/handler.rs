@@ -288,8 +288,8 @@ fn envelope_of(
             .with_hint(RUN_HINT),
         );
     }
-    // Every other status is a failure. There is no branch for 70: that code belongs to the npm
-    // launcher shim's missing-platform-package refusal (TASK-058), and no Rust path emits it.
+    // Every other status is a failure. There is no branch for 70: that code is `EX_SOFTWARE`,
+    // reserved for the deleted launcher's missing-platform refusal (TASK-058), and no path emits it.
     match report.exit {
         WorkerExit::Code(0) => published(ctx, report, args, snapshot, now),
         WorkerExit::Code(2) => nothing_to_do(report, args, snapshot, elapsed_ms, now),

@@ -6,8 +6,9 @@ make this shape mandatory are in [`rules.md`](rules.md).
 ## Layout
 
 One implementation: the Cargo workspace under `rust/`. `sangkar` is one native binary — the crate
-`rust/crates/sangkar-cli/`, entry point `rust/crates/sangkar-cli/src/main.rs` — and the npm package that
-ships it is `bin/sangkar.js` plus the one platform package laid out in `npm/linux-x64-gnu/`.
+`rust/crates/sangkar-cli/`, entry point `rust/crates/sangkar-cli/src/main.rs` — and what ships it is the
+release tarball `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz`, which `install.sh` at the repository
+root downloads and verifies against the release's `SHA256SUMS`.
 
 The crate DAG, exactly as the gate asserts it: `core ← store ← domain ← tools`; `index` over
 `core`+`store`+`domain`; `telemetry` over `core` only; `daemon` over `core`+`store`+`index`+`telemetry`,
@@ -119,9 +120,8 @@ rust/tests/parity/fixtures/         three checked-in repositories to index: poly
 rust/tests/golden/                  the oracle: 19 envelopes per fixture (57), plus census/ and reader/ dumps
 rust/tests/vectors/                 the cursor vectors the kernel is pinned to and the recorded MCP session
                                     the binary replays end to end
-rust/scripts/package.sh             the release build and the npm platform layout; `--locked`, then strip
-npm/linux-x64-gnu/                  the one platform package: a committed package.json, a bin/ the script fills
-bin/sangkar.js                      the launcher: resolve the platform package, exec it, forward argv and exit
+install.sh                          the installer the canonical URL serves: newest release (pre-releases
+                                    included), sha256 verified, one binary into a `--bin-dir`
 scripts/parity/                     the TypeScript harness that captured the goldens — it cannot run now
 agent/                              the distributable Agent Skills skill + install.sh; restates the manifests,
                                     so a tool's arguments, defaults or budget ceilings move here in the same commit
@@ -137,7 +137,7 @@ docs/                               the record — read before changing behaviou
 ```
 
 **One tree, one gate.** The TypeScript implementation is gone — its source tree, its test tree, its CLI
-entry point, `package.json`'s scripts and the five npm pins — and nothing outside this workspace answers.
+entry point, and the packaging that published it — and nothing outside this workspace answers.
 The schema did not move with it — `rust/crates/sangkar-store/migrations/` holds the drizzle-kit output and
 the hand-written FTS5 file, embedded by `include_str!`, so the two streams and the ledger are the same bytes
 the old implementation applied. The assets moved into the crates they belong to: the migrations into

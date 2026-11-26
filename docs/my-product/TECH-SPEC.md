@@ -4,16 +4,18 @@
 
 Implementation shape for the server described in `DESIGN.md`, `TOOLS-SPEC.md` and `DATABASE.md`.
 Runtime: **one native Rust binary**, built from the nine-crate workspace under `rust/` (toolchain
-1.100.0, edition 2024) and shipped through npm as a platform package plus a Node launcher (§15). No
-Bun and no TypeScript: the server, the indexer, the daemon and the report all run inside that binary.
+1.100.0, edition 2024) and shipped as one GitHub Release asset — a tarball holding that binary —
+installed by `install.sh` (§15). No Bun and no TypeScript: the server, the indexer, the daemon and the
+report all run inside that binary.
 SQLite arrives through `rusqlite` with the engine bundled, so the binary links no system
 `libsqlite3`; `tree-sitter` and the eleven grammar crates are compiled in, so there is no WASM
 grammar payload and indexing needs no `node_modules`. Strict module isolation holds at crate
 granularity — one crate per layer, one directory per tool (§3).
 
 **Status:** implemented. The binary answers the seven tools over stdio and over the CLI, runs the
-indexer, the daemon and the telemetry report, and is the artifact the npm packages carry. §1 records
-the probes the design was decided on; the port and its crate map are `RUST-MIGRATION.md`.
+indexer, the daemon and the telemetry report, and is the artifact the release tarball carries and
+`install.sh` installs. §1 records the probes the design was decided on; the port and its crate map are
+`RUST-MIGRATION.md`.
 
 ---
 
@@ -601,12 +603,16 @@ protect, and the only ones with an external ground truth to compare against.
 ```sh
 # from the repository root
 (cd rust && cargo build --release --locked -p sangkar-cli --target x86_64-unknown-linux-gnu)
-bash rust/scripts/package.sh          # the same build, stripped, laid out as the npm platform package
+strip rust/target/x86_64-unknown-linux-gnu/release/sangkar   # the workflow strips this output in place
 (cd rust && cargo fmt --all --check)
 (cd rust && cargo clippy --workspace --all-targets -- -D warnings)
 (cd rust && cargo test --workspace)   # 978 passed, 0 failed, 1 ignored
 (cd rust && cargo test -p sangkar-cli --test goldens)   # 57 compared (57 identical)
-npm pack --dry-run                    # the parent tarball; the platform one from npm/<key>/
+# the release asset, assembled the way the workflow does it
+mkdir -p dist && tar -czf dist/sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz \
+  -C rust/target/x86_64-unknown-linux-gnu/release sangkar
+tar -tzf dist/sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz   # one entry: `sangkar`, archive root
+sh -n install.sh                      # the installer parses, flags and all
 ```
 
 - `rust/rust-toolchain.toml` pins the toolchain — channel 1.100.0 with `rustfmt` and `clippy`; `rust/Cargo.toml`
@@ -618,7 +624,11 @@ npm pack --dry-run                    # the parent tarball; the platform one fro
   grammar crates live in `sangkar-index` alone. Both are source rules the boundary crate checks.
 - CI: `.github/workflows/ci.yml` runs `cargo fmt --check --all`, `cargo clippy --workspace --all-targets --
   -D warnings` and `cargo test --workspace` — the last includes the golden replay.
-  `.github/workflows/release.yml` runs `package.sh` on `ubuntu-22.04` and asserts the `GLIBC_*` ceiling.
+  `.github/workflows/release.yml` runs that release build on `ubuntu-22.04`, strips the output in place,
+  asserts ELF, x86-64 and a highest `GLIBC_*` version at or below 2.35, then attaches exactly two
+  assets to the Release: the tarball holding the one binary, and `SHA256SUMS`. A tag build also asserts
+  that `v<Cargo.toml version>` equals `$GITHUB_REF_NAME`; `workflow_dispatch` builds and uploads the
+  same pair as workflow artifacts without creating a Release. Nothing goes to a package registry.
 
 ## 14. Performance budgets
 
@@ -635,71 +645,84 @@ From `DATABASE.md` §9, restated as CI gates:
 
 ## 15. Distribution
 
-One native binary, one platform package, one launcher. Every size below was measured on
+One native binary, one release asset, one installer. Every size below was measured on
 `x86_64-unknown-linux-gnu` with toolchain 1.100.0 on 2026-11-25, by the command quoted beside it.
 
 | Piece | Path | Size, measured | Command |
 |---|---|---|---|
 | release binary, as cargo leaves it | `rust/target/x86_64-unknown-linux-gnu/release/sangkar` | 34,416,888 bytes (33M) | `ls -l` |
-| binary as published, stripped | `npm/linux-x64-gnu/bin/sangkar` | 31,056,160 bytes (30M) | `ls -l` |
-| platform package `sangkar-mcp-linux-x64-gnu` | `npm/linux-x64-gnu/` — `package.json` and `bin/sangkar`, nothing else | 6.3 MB packed, 31.1 MB unpacked, 2 files | `npm pack --dry-run` |
-| parent package `sangkar-mcp` | repository root — launcher, `package.json`, `README.md`, `LICENSE`, `agent/` | 18.2 kB packed, 46.7 kB unpacked, 7 files | `npm pack --dry-run` |
+| binary as shipped, stripped | `sangkar` at the archive root of `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz` | 31,056,160 bytes (30M) | `ls -l` |
 
-`strip` is the only difference between the first two rows: it drops 3,360,728 bytes of symbols and
-changes no behaviour. `ldd` on the stripped binary lists `libc`, `libm`, `libgcc_s` and the dynamic
-loader, and nothing of its own — no `libsqlite3`, no tree-sitter library: the SQLite engine and the
-eleven grammar crates are inside the file.
+`.github/workflows/release.yml` strips that cargo build output in place, and `strip` is the only
+difference between the two rows: it drops 3,360,728 bytes of symbols and changes no behaviour. The
+tarball's own compressed size is not measured; gzip framing adds little over the stripped binary.
+`ldd` on the stripped binary lists `libc`, `libm`, `libgcc_s` and the dynamic loader, and nothing of
+its own — no `libsqlite3`, no tree-sitter library: the SQLite engine and the eleven grammar crates are
+inside the file.
 
-**One platform, by design.** `npm/linux-x64-gnu/package.json` declares `os: ["linux"]` and
-`cpu: ["x64"]`, so npm installs it on exactly that pair and skips it everywhere else, which is why the
-parent names it in `optionalDependencies` rather than `dependencies`. `sangkar-mcp-linux-x64-gnu` is
-the only platform package; the launcher's table has one entry.
+**The release carries two assets, and nothing else.** A tag `v<version>` produces
+`sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz`, whose only member is the binary `sangkar` at the
+archive root, and `SHA256SUMS`, whose lines are `<sha256>  <tarball name>` with the bare filename.
+The version in those names is `rust/Cargo.toml`'s `[workspace.package] version`, mirrored by
+`rust/Cargo.lock` in its nine member entries — a lock that disagrees fails the `--locked` build — and
+the binary reports the same value at runtime through `env!("CARGO_PKG_VERSION")`. There is no
+`--version` flag: the version is in the asset name and in what the binary says about itself. A tag
+build also asserts that `v<Cargo.toml version>` equals `$GITHUB_REF_NAME`; `workflow_dispatch` builds
+and uploads the same pair without creating a Release. Nothing is published to any package registry.
+
+**The installer is `install.sh`, and it is the only install path.** Canonical URL
+`https://raw.githubusercontent.com/Alfar-Lab/sangkar-mcp/main/install.sh`. With no argument it reads
+the newest release from `https://api.github.com/repos/Alfar-Lab/sangkar-mcp/releases?per_page=1`,
+pre-releases included, because the newest release is the channel; then it downloads that release's
+tarball and `SHA256SUMS` and verifies the tarball against the sum before it writes anything.
+`--version V` pins another release and strips a leading `v`, `--bin-dir DIR` chooses where the binary
+lands (default `$HOME/.local/bin`), `--dry-run` prints the plan without writing, `--uninstall` removes
+the binary, `-h|--help` prints the usage. It refuses any host that is not Linux x86_64 with glibc 2.35
+or newer.
+
+**npm distribution is retired as of this change.** There is no parent package, no per-platform package
+and no launcher in the tree; the tarball on the Release, installed by `install.sh`, is the whole
+distribution story. The last TypeScript build stays on the npm registry at `sangkar-mcp@0.6.0-beta.1`
+and is unmaintained — readable, installable, and no longer the way anything gets a binary.
 
 **The glibc floor is 2.35, and the release image decides it.** `.github/workflows/release.yml` builds
 on `ubuntu-22.04`, so the linker may not use a symbol version newer than that image's glibc — 2.35,
 which is Debian 12, Ubuntu 22.04+ and Fedora 36+. The workflow enforces the promise instead of assuming
 it: it reads the highest `GLIBC_x.y` symbol version out of the shipped binary and fails the release
-when that is above 2.35. A build on a newer machine inherits that machine's libc — this checkout builds
-`GLIBC_2.39` (`objdump -T npm/linux-x64-gnu/bin/sangkar | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1`),
-so a developer build runs here and on nothing older; only the workflow's build carries the 2.35
-promise.
+when that is above 2.35. A build on a newer machine inherits that machine's libc: this checkout builds
+`GLIBC_2.39`, and the workflow's own idiom is what says so:
 
-**The launcher is Node, not `sh`.** `bin/sangkar.js` is CommonJS, has no dependencies, and does one
-thing: resolve `<platform package>/package.json` from the install, spawn `bin/sangkar` with the caller's
-argv, forward its exit code, and refuse anything else with one stderr line. Node rather than a POSIX
-shell script for three reasons. The lookup has to go through Node's resolver, because that is the only
-thing that knows where npm, pnpm or a global install put the platform package; a shell script would
-have to guess `node_modules` paths. npm installs a `bin` entry as a per-platform shim, and on Windows
-that is a `.cmd`/`.ps1` wrapper only a `.js` or `.exe` target survives — a `sh` script would have to be
-rewritten for the very platform whose refusal it exists to print. And Node is already implied by npm
-itself (`engines: node >= 18` adds nothing a user of npm did not already have), while its stdlib gives
-signal forwarding and exit-code propagation without a dependency. The binary itself uses no Node: the
-launcher is the only JavaScript in the package.
-
-**Refusal is a feature.** With no platform package — macOS, Windows, 32-bit, musl — the launcher prints
-one line and exits 70 (`EX_SOFTWARE`), so a script fails at once instead of at the first tool call. The
-line names the key it wanted, the platform that is published, and the version to pin:
-
-```text
-sangkar: no native binary for "linux:x64"; the only published platform is linux x64 (sangkar-mcp-linux-x64-gnu); pin sangkar-mcp@0.6.0-beta.1 to stay on the TypeScript build
+```sh
+objdump -T rust/target/x86_64-unknown-linux-gnu/release/sangkar | grep -o 'GLIBC_[0-9.]*' | sort -uV | tail -1
 ```
 
-(That sample is what this machine prints when the optional install was skipped; a macOS caller sees its
-own key in the first slot.)
+That developer build runs here and on nothing older; only the workflow's build carries the 2.35
+promise.
 
-**Adding a second platform is three additions and no rewrite:**
+**Linux x86_64 with glibc 2.35 or newer is the whole platform list.** macOS and Windows have no native
+build: nothing is released for them and `install.sh` refuses them by name. The two blockers are known
+and stated as facts rather than as intentions. Liveness is decided by reading `/proc/<pid>` —
+`rust/crates/sangkar-core/src/pidlock.rs` for `daemon.pid`, `rust/crates/sangkar-store/src/lock.rs` for
+`write.lock` — so on macOS a running owner reads as stale and its lock is reclaimed underneath it.
+And `rust/crates/sangkar-daemon/src/lifecycle.rs` and `rust/crates/sangkar-cli/src/telemetry_cmd.rs`
+use `tokio::signal::unix` and `std::os::unix::process::CommandExt` unconditionally, so the workspace
+does not compile for a Windows target at all.
 
-1. one row in the root `package.json`'s `optionalDependencies` — `"sangkar-mcp-<key>": "<version>"`.
-   `rust/scripts/package.sh` refuses to build when that row and `package.json`'s `version` disagree, so
-   the two packages cannot ship different versions;
-2. one `npm/<key>/` directory copied from `npm/linux-x64-gnu/`: its `package.json` names that platform's
-   `os`/`cpu`, and its `bin/sangkar` is left to the build and stays gitignored;
-3. one job in `.github/workflows/release.yml` with that platform's `runs-on` image, `TARGET`, `KEY` and
-   `PACKAGE`. The image sets that platform's libc floor, and the job's `objdump` assertion is what keeps
-   the promise in the release notes honest.
+**Exit code 70 belongs to nothing.** It is `EX_SOFTWARE`, it was reserved for the launcher that is
+now deleted, and no path in this binary emits it. The refusal it used to carry moved into
+`install.sh`, which fails before a binary is written rather than after one fails to start.
 
-The launcher's `PLATFORMS` table takes the matching one-line entry (`"darwin:arm64":
-"sangkar-mcp-darwin-arm64"`); it is a table, not a code path.
+**Adding a platform is deferred work, not a table entry.** Three additions, then the two code
+blockers above:
+
+1. an entry in `install.sh`'s platform gate, which accepts exactly one `os`/`arch`/glibc tuple today;
+2. a release asset for the new target, built by a job carrying that platform's `runs-on` image and
+   `--target`, keeping the asset-name shape `sangkar-<version>-<target>.tar.gz`, with the same ELF and
+   symbol-version assertion that image's floor needs;
+3. that job in `.github/workflows/release.yml`, plus a `SHA256SUMS` line for the new tarball;
+4. the two blockers above, cleared in code: `/proc/<pid>` liveness in `pidlock.rs` and `lock.rs`, and
+   the unconditional `tokio::signal::unix` / `CommandExt` use in `lifecycle.rs` and
+   `telemetry_cmd.rs`.
 
 ## 16. Spikes, in order
 

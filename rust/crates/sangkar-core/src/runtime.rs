@@ -2,9 +2,8 @@
 //! in the picture.
 //!
 //! Ported from `src/shared/runtime.ts`, of which only the facts survive: the Bun version gate retired
-//! with the interpreter, so nothing in this binary produces exit code 70. `EX_SOFTWARE` stays with
-//! the npm launcher shim, which owns the one setup fault that can still happen before this binary
-//! starts — a platform package missing from the install. No Rust path emits 70.
+//! with the interpreter, and the launcher that reserved `EX_SOFTWARE` (`70`) for a missing platform
+//! package is deleted with it. The code stays defined and unemitted: no Rust path emits 70.
 //!
 //! [`runtime_version`] is what fills the telemetry field `bun_version`. That field keeps its name
 //! for record-shape compatibility and carries this runtime's version string; renaming it would

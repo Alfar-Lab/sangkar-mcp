@@ -67,11 +67,12 @@ Other invariants that break the product when violated:
   the files and a newer database refused rather than downgraded. `rust/crates/sangkar-store/src/schema.rs`
   names the tables and the `meta` keys for the tests to compare against `sqlite_master`.
 - **One lockfile, committed.** `rust/Cargo.lock` is the only pin: every dependency version comes from it, and
-  the release build (`rust/scripts/package.sh`) and the README's checkout command both pass `--locked`, so a
-  stale lockfile fails the build instead of being rewritten behind a release's back. A dependency change is a
-  lockfile diff reviewed like code — bump it with `cargo update -p <crate>` in its own commit, never by
-  hand-editing a version. The toolchain is pinned once in `rust/rust-toolchain.toml` (1.100.0 with rustfmt and
-  clippy) and named a second time in `.github/workflows/ci.yml`; the two must agree.
+  the release build (`.github/workflows/release.yml`'s `cargo build --release --locked …`) and the README's
+  checkout command both pass `--locked`, so a stale lockfile fails the build instead of being rewritten
+  behind a release's back. A dependency change is a lockfile diff reviewed like code — bump it with
+  `cargo update -p <crate>` in its own commit, never by hand-editing a version. The toolchain is pinned once
+  in `rust/rust-toolchain.toml` (1.100.0 with rustfmt and clippy) and named a second time in
+  `.github/workflows/ci.yml`; the two must agree.
 
 ## Keeping this guidance true
 
