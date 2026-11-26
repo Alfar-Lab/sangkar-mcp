@@ -646,16 +646,20 @@ From `DATABASE.md` §9, restated as CI gates:
 ## 15. Distribution
 
 One native binary, one release asset, one installer. Every size below was measured on
-`x86_64-unknown-linux-gnu` with toolchain 1.100.0 on 2026-11-25, by the command quoted beside it.
+`x86_64-unknown-linux-gnu` with toolchain 1.100.0, by the command quoted beside it.
 
 | Piece | Path | Size, measured | Command |
 |---|---|---|---|
-| release binary, as cargo leaves it | `rust/target/x86_64-unknown-linux-gnu/release/sangkar` | 34,416,888 bytes (33M) | `ls -l` |
-| binary as shipped, stripped | `sangkar` at the archive root of `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz` | 31,056,160 bytes (30M) | `ls -l` |
+| release binary, as cargo leaves it | `rust/target/x86_64-unknown-linux-gnu/release/sangkar` | 34,416,888 bytes (33M), 2026-11-25 | `ls -l` |
+| that build, stripped locally | the same path after `strip` | 31,056,160 bytes (30M), 2026-11-25 | `strip` then `ls -l` |
+| binary as shipped | `sangkar` at the archive root of `sangkar-<version>-x86_64-unknown-linux-gnu.tar.gz` | 30,879,400 bytes (29M), 2026-11-26 | `stat -c %s` on the extracted file from the `v0.7.0-beta.2` asset |
 
-`.github/workflows/release.yml` strips that cargo build output in place, and `strip` is the only
-difference between the two rows: it drops 3,360,728 bytes of symbols and changes no behaviour. The
-tarball's own compressed size is not measured; gzip framing adds little over the stripped binary.
+`.github/workflows/release.yml` strips its cargo build output in place, and `strip` is the only
+difference between the first two rows: it drops 3,360,728 bytes of symbols and changes no behaviour.
+The third row is the one a user downloads, and it is 176,760 bytes smaller than this machine's strip
+because it is a different build of the same source — the workflow's links against glibc 2.35, this
+machine's against 2.39, so their symbol tables differ. Gzip adds little over the binary: the
+`v0.7.0-beta.2` tarball is 6,102,581 bytes.
 `ldd` on the stripped binary lists `libc`, `libm`, `libgcc_s` and the dynamic loader, and nothing of
 its own — no `libsqlite3`, no tree-sitter library: the SQLite engine and the eleven grammar crates are
 inside the file.
